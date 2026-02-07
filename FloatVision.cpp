@@ -84,6 +84,7 @@ bool LoadImageByIndex(size_t index);
 void SetFitToWindow(bool fit);
 void AdjustZoom(float factor, const POINT& screenPoint);
 bool ShowOpenImageDialog(HWND hwnd);
+void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight);
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -230,6 +231,16 @@ LRESULT CALLBACK WndProc(
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
         DestroyMenu(menu);
         return 0;
+    }
+
+    case WM_NCHITTEST:
+    {
+        LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);
+        if (hit == HTCLIENT)
+        {
+            return HTCAPTION;
+        }
+        return hit;
     }
 
     case WM_COMMAND:
@@ -766,6 +777,47 @@ bool ShowOpenImageDialog(HWND hwnd)
     return false;
 }
 
+void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight)
+{
+    if (!hwnd || drawWidth <= 0.0f || drawHeight <= 0.0f)
+    {
+        return;
+    }
+
+    RECT windowRect{};
+    RECT clientRect{};
+    GetWindowRect(hwnd, &windowRect);
+    GetClientRect(hwnd, &clientRect);
+
+    int currentClientWidth = clientRect.right - clientRect.left;
+    int currentClientHeight = clientRect.bottom - clientRect.top;
+    int targetClientWidth = static_cast<int>(std::lround(drawWidth));
+    int targetClientHeight = static_cast<int>(std::lround(drawHeight));
+
+    if (abs(targetClientWidth - currentClientWidth) < 2 && abs(targetClientHeight - currentClientHeight) < 2)
+    {
+        return;
+    }
+
+    int windowWidth = windowRect.right - windowRect.left;
+    int windowHeight = windowRect.bottom - windowRect.top;
+    int frameWidth = windowWidth - currentClientWidth;
+    int frameHeight = windowHeight - currentClientHeight;
+
+    int targetWindowWidth = targetClientWidth + frameWidth;
+    int targetWindowHeight = targetClientHeight + frameHeight;
+
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        0,
+        0,
+        targetWindowWidth,
+        targetWindowHeight,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+    );
+}
+
 // =====================
 // 描画
 // =====================
@@ -794,6 +846,8 @@ void Render(HWND hwnd)
         float drawHeight = g_imageHeight * scale;
         float x = (rtSize.width - drawWidth) * 0.5f;
         float y = (rtSize.height - drawHeight) * 0.5f;
+
+        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
         D2D1_RECT_F dest = D2D1::RectF(
             x,
