@@ -22,6 +22,7 @@ ID2D1Factory* g_d2dFactory = nullptr;
 ID2D1HwndRenderTarget* g_renderTarget = nullptr;
 ID2D1Bitmap* g_bitmap = nullptr;
 ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
+HWND g_hwnd = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
@@ -86,6 +87,7 @@ void AdjustZoom(float factor, const POINT& screenPoint);
 bool ShowOpenImageDialog(HWND hwnd);
 void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight);
 void UpdateFitZoomFromWindow(HWND hwnd);
+void UpdateWindowToZoomedImage();
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -365,6 +367,7 @@ LRESULT CALLBACK WndProc(
             g_isEdgeDragging = true;
             g_dragStartPoint = pt;
             g_dragStartZoom = g_zoom;
+            UpdateWindowToZoomedImage();
             SetCapture(hwnd);
         }
         return 0;
@@ -378,6 +381,7 @@ LRESULT CALLBACK WndProc(
             float delta = static_cast<float>(pt.y - g_dragStartPoint.y) * 0.005f;
             float zoom = g_dragStartZoom * (1.0f + delta);
             g_zoom = max(g_zoomMin, min(zoom, g_zoomMax));
+            UpdateWindowToZoomedImage();
             InvalidateRect(hwnd, nullptr, TRUE);
         }
         return 0;
@@ -714,6 +718,7 @@ void SetFitToWindow(bool fit)
     if (fit)
     {
         UpdateFitZoomFromWindow(nullptr);
+        UpdateWindowToZoomedImage();
     }
 }
 
@@ -723,6 +728,7 @@ void AdjustZoom(float factor, const POINT& screenPoint)
     float newScale = g_zoom * factor;
     g_zoom = max(g_zoomMin, min(newScale, g_zoomMax));
     g_fitToWindow = false;
+    UpdateWindowToZoomedImage();
 }
 
 bool ShowOpenImageDialog(HWND hwnd)
@@ -804,6 +810,15 @@ void UpdateFitZoomFromWindow(HWND hwnd)
     float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
     float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
     g_zoom = max(g_zoomMin, min(min(scaleX, scaleY), g_zoomMax));
+}
+
+void UpdateWindowToZoomedImage()
+{
+    if (!g_hwnd || g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        return;
+    }
+    UpdateWindowSizeToImage(g_hwnd, g_imageWidth * g_zoom, g_imageHeight * g_zoom);
 }
 
 // =====================
@@ -922,6 +937,7 @@ int WINAPI wWinMain(
         hInstance,
         nullptr
     );
+    g_hwnd = hwnd;
 
     if (!hwnd)
     {
