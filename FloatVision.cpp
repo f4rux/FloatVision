@@ -829,27 +829,24 @@ void Render(HWND hwnd)
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
-        RECT clientRect{};
-        GetClientRect(hwnd, &clientRect);
-        float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
-        float clientHeight = static_cast<float>(clientRect.bottom - clientRect.top);
-        if (g_renderTarget && clientWidth > 0.0f && clientHeight > 0.0f)
+        if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-            if (rtSize.width != clientWidth || rtSize.height != clientHeight)
+            UINT targetWidth = static_cast<UINT>(max(1.0f, std::lround(drawWidth)));
+            UINT targetHeight = static_cast<UINT>(max(1.0f, std::lround(drawHeight)));
+            if (rtSize.width != targetWidth || rtSize.height != targetHeight)
             {
-                g_renderTarget->Resize(D2D1::SizeU(
-                    static_cast<UINT>(clientWidth),
-                    static_cast<UINT>(clientHeight)
-                ));
+                g_renderTarget->Resize(D2D1::SizeU(targetWidth, targetHeight));
             }
         }
+
+        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
             0.0f,
-            clientWidth > 0.0f ? clientWidth : drawWidth,
-            clientHeight > 0.0f ? clientHeight : drawHeight
+            drawWidth,
+            drawHeight
         );
 
         g_renderTarget->DrawBitmap(
