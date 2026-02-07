@@ -85,6 +85,7 @@ void SetFitToWindow(bool fit);
 void AdjustZoom(float factor, const POINT& screenPoint);
 bool ShowOpenImageDialog(HWND hwnd);
 void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight);
+void UpdateFitZoomFromWindow(HWND hwnd);
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -169,6 +170,7 @@ LRESULT CALLBACK WndProc(
         }
         if (g_fitToWindow)
         {
+            UpdateFitZoomFromWindow(hwnd);
             InvalidateRect(hwnd, nullptr, TRUE);
         }
         return 0;
@@ -359,17 +361,7 @@ LRESULT CALLBACK WndProc(
             || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
         if (nearEdge && g_renderTarget && g_imageWidth > 0 && g_imageHeight > 0)
         {
-            D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-            float baseScale = 1.0f;
-            if (g_fitToWindow)
-            {
-                float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
-                float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
-                baseScale = min(scaleX, scaleY);
-            }
-            float currentScale = baseScale * g_zoom;
             g_fitToWindow = false;
-            g_zoom = currentScale;
             g_isEdgeDragging = true;
             g_dragStartPoint = pt;
             g_dragStartZoom = g_zoom;
@@ -721,34 +713,15 @@ void SetFitToWindow(bool fit)
     g_fitToWindow = fit;
     if (fit)
     {
-        g_zoom = 1.0f;
+        UpdateFitZoomFromWindow(nullptr);
     }
 }
 
 void AdjustZoom(float factor, const POINT& screenPoint)
 {
     (void)screenPoint;
-    if (!g_renderTarget)
-    {
-        return;
-    }
-
-    D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-    float baseScale = 1.0f;
-    if (g_fitToWindow && g_imageWidth > 0 && g_imageHeight > 0)
-    {
-        float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
-        float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
-        baseScale = min(scaleX, scaleY);
-    }
-
-    float currentScale = baseScale * g_zoom;
-    float newScale = currentScale * factor;
-    newScale = max(g_zoomMin, min(newScale, g_zoomMax));
-    if (baseScale > 0.0f)
-    {
-        g_zoom = newScale / baseScale;
-    }
+    float newScale = g_zoom * factor;
+    g_zoom = max(g_zoomMin, min(newScale, g_zoomMax));
     g_fitToWindow = false;
 }
 
@@ -818,6 +791,21 @@ void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight)
     );
 }
 
+void UpdateFitZoomFromWindow(HWND hwnd)
+{
+    (void)hwnd;
+    if (!g_renderTarget || g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        g_zoom = 1.0f;
+        return;
+    }
+
+    D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+    float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
+    float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
+    g_zoom = max(g_zoomMin, min(min(scaleX, scaleY), g_zoomMax));
+}
+
 // =====================
 // 描画
 // =====================
@@ -838,10 +826,7 @@ void Render(HWND hwnd)
         g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
 
-        float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
-        float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
-        float baseScale = g_fitToWindow ? min(scaleX, scaleY) : 1.0f;
-        float scale = baseScale * g_zoom;
+        float scale = g_zoom;
         float drawWidth = g_imageWidth * scale;
         float drawHeight = g_imageHeight * scale;
         float x = (rtSize.width - drawWidth) * 0.5f;
