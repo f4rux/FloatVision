@@ -2,6 +2,10 @@
 #include <d2d1.h>
 #include <wincodec.h>
 #include <dwrite.h>
+#include <commdlg.h>
+#include <algorithm>
+#include <string>
+#include <vector>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -22,6 +26,40 @@ IDWriteTextFormat* g_placeholderFormat = nullptr;
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
 
+enum class SortMode
+{
+    NameAsc,
+    NameDesc,
+    ModifiedAsc,
+    ModifiedDesc
+};
+
+struct ImageEntry
+{
+    std::wstring path;
+    std::wstring name;
+    FILETIME writeTime{};
+};
+
+struct ImageListState
+{
+    std::wstring currentPath;
+    std::wstring directory;
+    std::vector<ImageEntry> entries;
+    size_t currentIndex = 0;
+    SortMode sortMode = SortMode::NameAsc;
+};
+
+ImageListState g_imageList;
+
+constexpr UINT ID_MENU_OPEN = 1001;
+constexpr UINT ID_MENU_PREV = 1002;
+constexpr UINT ID_MENU_NEXT = 1003;
+constexpr UINT ID_MENU_SORT_NAME_ASC = 1101;
+constexpr UINT ID_MENU_SORT_NAME_DESC = 1102;
+constexpr UINT ID_MENU_SORT_MODIFIED_ASC = 1103;
+constexpr UINT ID_MENU_SORT_MODIFIED_DESC = 1104;
+
 // =====================
 // 前方宣言
 // =====================
@@ -30,6 +68,185 @@ bool InitDirect2D(HWND hwnd);
 bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
+bool LoadImageAndUpdateList(HWND hwnd, const std::wstring& path);
+
+static std::wstring ToLower(const std::wstring& text)
+{
+    std::wstring lowered = text;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), towlower);
+    return lowered;
+}
+
+static bool HasImageExtension(const std::wstring& filename)
+{
+    const std::wstring lowered = ToLower(filename);
+    const wchar_t* extensions[] = {
+        L".bmp", L".png", L".jpg", L".jpeg", L".gif", L".tif", L".tiff", L".webp"
+    };
+    for (const auto& ext : extensions)
+    {
+        if (lowered.size() >= wcslen(ext) &&
+            lowered.compare(lowered.size() - wcslen(ext), wcslen(ext), ext) == 0)
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
+static std::wstring GetDirectoryFromPath(const std::wstring& path)
+{
+    size_t pos = path.find_last_of(L"\\/");
+    if (pos == std::wstring::npos)
+    {
+        return L"";
+    }
+    return path.substr(0, pos);
+}
+
+static void SortImageEntries()
+{
+    switch (g_imageList.sortMode)
+    {
+    case SortMode::NameAsc:
+        std::sort(g_imageList.entries.begin(), g_imageList.entries.end(),
+            [](const ImageEntry& a, const ImageEntry& b)
+            {
+                return _wcsicmp(a.name.c_str(), b.name.c_str()) < 0;
+            });
+        break;
+    case SortMode::NameDesc:
+        std::sort(g_imageList.entries.begin(), g_imageList.entries.end(),
+            [](const ImageEntry& a, const ImageEntry& b)
+            {
+                return _wcsicmp(a.name.c_str(), b.name.c_str()) > 0;
+            });
+        break;
+    case SortMode::ModifiedAsc:
+        std::sort(g_imageList.entries.begin(), g_imageList.entries.end(),
+            [](const ImageEntry& a, const ImageEntry& b)
+            {
+                return CompareFileTime(&a.writeTime, &b.writeTime) < 0;
+            });
+        break;
+    case SortMode::ModifiedDesc:
+        std::sort(g_imageList.entries.begin(), g_imageList.entries.end(),
+            [](const ImageEntry& a, const ImageEntry& b)
+            {
+                return CompareFileTime(&a.writeTime, &b.writeTime) > 0;
+            });
+        break;
+    }
+}
+
+static void RefreshImageListFromPath(const std::wstring& path)
+{
+    g_imageList.currentPath = path;
+    g_imageList.directory = GetDirectoryFromPath(path);
+    g_imageList.entries.clear();
+
+    if (g_imageList.directory.empty())
+    {
+        g_imageList.currentIndex = 0;
+        return;
+    }
+
+    std::wstring searchPattern = g_imageList.directory + L"\\*";
+    WIN32_FIND_DATAW findData{};
+    HANDLE findHandle = FindFirstFileW(searchPattern.c_str(), &findData);
+    if (findHandle == INVALID_HANDLE_VALUE)
+    {
+        g_imageList.currentIndex = 0;
+        return;
+    }
+
+    do
+    {
+        if (findData.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
+        {
+            continue;
+        }
+        const std::wstring filename = findData.cFileName;
+        if (!HasImageExtension(filename))
+        {
+            continue;
+        }
+        ImageEntry entry;
+        entry.name = filename;
+        entry.path = g_imageList.directory + L"\\" + filename;
+        entry.writeTime = findData.ftLastWriteTime;
+        g_imageList.entries.push_back(entry);
+    } while (FindNextFileW(findHandle, &findData));
+
+    FindClose(findHandle);
+
+    SortImageEntries();
+
+    g_imageList.currentIndex = 0;
+    for (size_t i = 0; i < g_imageList.entries.size(); ++i)
+    {
+        if (_wcsicmp(g_imageList.entries[i].path.c_str(), path.c_str()) == 0)
+        {
+            g_imageList.currentIndex = i;
+            break;
+        }
+    }
+}
+
+static void MoveImageIndex(HWND hwnd, int delta)
+{
+    if (g_imageList.entries.empty())
+    {
+        return;
+    }
+    const int count = static_cast<int>(g_imageList.entries.size());
+    int nextIndex = static_cast<int>(g_imageList.currentIndex) + delta;
+    nextIndex = (nextIndex % count + count) % count;
+    g_imageList.currentIndex = static_cast<size_t>(nextIndex);
+    LoadImageAndUpdateList(hwnd, g_imageList.entries[g_imageList.currentIndex].path);
+}
+
+static void UpdateSortMode(HWND hwnd, SortMode mode)
+{
+    if (g_imageList.entries.empty())
+    {
+        g_imageList.sortMode = mode;
+        return;
+    }
+    g_imageList.sortMode = mode;
+    const std::wstring currentPath = g_imageList.currentPath;
+    SortImageEntries();
+    for (size_t i = 0; i < g_imageList.entries.size(); ++i)
+    {
+        if (_wcsicmp(g_imageList.entries[i].path.c_str(), currentPath.c_str()) == 0)
+        {
+            g_imageList.currentIndex = i;
+            break;
+        }
+    }
+    InvalidateRect(hwnd, nullptr, TRUE);
+}
+
+static void OpenImageFileDialog(HWND hwnd)
+{
+    wchar_t fileName[MAX_PATH] = {};
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFilter = L"Image Files\0*.bmp;*.png;*.jpg;*.jpeg;*.gif;*.tif;*.tiff;*.webp\0All Files\0*.*\0";
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+    if (!g_imageList.directory.empty())
+    {
+        ofn.lpstrInitialDir = g_imageList.directory.c_str();
+    }
+
+    if (GetOpenFileNameW(&ofn))
+    {
+        LoadImageAndUpdateList(hwnd, fileName);
+    }
+}
 
 // =====================
 // ウィンドウプロシージャ
@@ -59,6 +276,81 @@ LRESULT CALLBACK WndProc(
             UINT w = LOWORD(lParam);
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
+        }
+        return 0;
+    }
+
+    case WM_CONTEXTMENU:
+    {
+        POINT pt{
+            GET_X_LPARAM(lParam),
+            GET_Y_LPARAM(lParam)
+        };
+        if (pt.x == -1 && pt.y == -1)
+        {
+            GetCursorPos(&pt);
+        }
+
+        HMENU menu = CreatePopupMenu();
+        if (!menu)
+        {
+            return 0;
+        }
+
+        AppendMenuW(menu, MF_STRING, ID_MENU_OPEN, L"ファイルを開く");
+        AppendMenuW(menu, MF_STRING, ID_MENU_PREV, L"前の画像");
+        AppendMenuW(menu, MF_STRING, ID_MENU_NEXT, L"次の画像");
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, ID_MENU_SORT_NAME_ASC, L"名前 昇順");
+        AppendMenuW(menu, MF_STRING, ID_MENU_SORT_NAME_DESC, L"名前 降順");
+        AppendMenuW(menu, MF_STRING, ID_MENU_SORT_MODIFIED_ASC, L"更新日時 昇順");
+        AppendMenuW(menu, MF_STRING, ID_MENU_SORT_MODIFIED_DESC, L"更新日時 降順");
+
+        const UINT command = TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_RIGHTBUTTON,
+            pt.x,
+            pt.y,
+            0,
+            hwnd,
+            nullptr
+        );
+        DestroyMenu(menu);
+
+        if (command != 0)
+        {
+            SendMessage(hwnd, WM_COMMAND, command, 0);
+        }
+        return 0;
+    }
+
+    case WM_COMMAND:
+    {
+        switch (LOWORD(wParam))
+        {
+        case ID_MENU_OPEN:
+            OpenImageFileDialog(hwnd);
+            break;
+        case ID_MENU_PREV:
+            MoveImageIndex(hwnd, -1);
+            break;
+        case ID_MENU_NEXT:
+            MoveImageIndex(hwnd, 1);
+            break;
+        case ID_MENU_SORT_NAME_ASC:
+            UpdateSortMode(hwnd, SortMode::NameAsc);
+            break;
+        case ID_MENU_SORT_NAME_DESC:
+            UpdateSortMode(hwnd, SortMode::NameDesc);
+            break;
+        case ID_MENU_SORT_MODIFIED_ASC:
+            UpdateSortMode(hwnd, SortMode::ModifiedAsc);
+            break;
+        case ID_MENU_SORT_MODIFIED_DESC:
+            UpdateSortMode(hwnd, SortMode::ModifiedDesc);
+            break;
+        default:
+            break;
         }
         return 0;
     }
@@ -219,6 +511,17 @@ cleanup:
     return SUCCEEDED(hr);
 }
 
+bool LoadImageAndUpdateList(HWND hwnd, const std::wstring& path)
+{
+    if (!LoadImageFromFile(path.c_str()))
+    {
+        return false;
+    }
+    RefreshImageListFromPath(path);
+    InvalidateRect(hwnd, nullptr, TRUE);
+    return true;
+}
+
 // =====================
 // 描画
 // =====================
@@ -344,7 +647,7 @@ int WINAPI wWinMain(
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     if (argv && argc > 1)
     {
-        LoadImageFromFile(argv[1]);
+        LoadImageAndUpdateList(hwnd, argv[1]);
     }
     if (argv)
     {
