@@ -2,6 +2,8 @@
 #include <d2d1.h>
 #include <wincodec.h>
 #include <dwrite.h>
+#include <shellapi.h>
+#include <string>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -60,6 +62,26 @@ LRESULT CALLBACK WndProc(
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
         }
+        return 0;
+    }
+
+    case WM_DROPFILES:
+    {
+        HDROP drop = reinterpret_cast<HDROP>(wParam);
+        UINT fileCount = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        if (fileCount > 0)
+        {
+            // 複数ファイルは先頭のみ読み込む（必要なら後で拡張）
+            UINT pathLength = DragQueryFileW(drop, 0, nullptr, 0);
+            if (pathLength > 0)
+            {
+                std::wstring path(pathLength + 1, L'\0');
+                DragQueryFileW(drop, 0, path.data(), pathLength + 1);
+                LoadImageFromFile(path.c_str());
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+        }
+        DragFinish(drop);
         return 0;
     }
 
@@ -318,6 +340,8 @@ int WINAPI wWinMain(
         MessageBox(nullptr, L"CreateWindowEx failed", L"Error", MB_OK);
         return 0;
     }
+
+    DragAcceptFiles(hwnd, TRUE);
 
     if (!InitWIC())
     {
