@@ -27,11 +27,13 @@ UINT g_imageHeight = 0;
 // =====================
 // 前方宣言
 // =====================
-void Render();
+void Render(HWND hwnd);
 bool InitDirect2D(HWND hwnd);
 bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
+void CleanupResources();
+void DiscardRenderTarget();
 
 // =====================
 // ウィンドウプロシージャ
@@ -49,7 +51,7 @@ LRESULT CALLBACK WndProc(
     {
         PAINTSTRUCT ps;
         BeginPaint(hwnd, &ps);
-        Render();
+        Render(hwnd);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -77,6 +79,7 @@ LRESULT CALLBACK WndProc(
             {
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
+                path.resize(pathLength);
                 LoadImageFromFile(path.c_str());
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
@@ -130,6 +133,53 @@ bool InitDirect2D(HWND hwnd)
     }
 
     return true;
+}
+
+void DiscardRenderTarget()
+{
+    if (g_placeholderBrush)
+    {
+        g_placeholderBrush->Release();
+        g_placeholderBrush = nullptr;
+    }
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_renderTarget)
+    {
+        g_renderTarget->Release();
+        g_renderTarget = nullptr;
+    }
+    g_imageWidth = 0;
+    g_imageHeight = 0;
+}
+
+void CleanupResources()
+{
+    DiscardRenderTarget();
+
+    if (g_placeholderFormat)
+    {
+        g_placeholderFormat->Release();
+        g_placeholderFormat = nullptr;
+    }
+    if (g_dwriteFactory)
+    {
+        g_dwriteFactory->Release();
+        g_dwriteFactory = nullptr;
+    }
+    if (g_wicFactory)
+    {
+        g_wicFactory->Release();
+        g_wicFactory = nullptr;
+    }
+    if (g_d2dFactory)
+    {
+        g_d2dFactory->Release();
+        g_d2dFactory = nullptr;
+    }
 }
 
 // =====================
@@ -244,10 +294,15 @@ cleanup:
 // =====================
 // 描画
 // =====================
-void Render()
+void Render(HWND hwnd)
 {
     if (!g_renderTarget)
-        return;
+    {
+        if (!InitDirect2D(hwnd))
+        {
+            return;
+        }
+    }
 
     g_renderTarget->BeginDraw();
 
@@ -256,14 +311,19 @@ void Render()
         g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
 
-        float x = (rtSize.width - g_imageWidth) * 0.5f;
-        float y = (rtSize.height - g_imageHeight) * 0.5f;
+        float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
+        float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
+        float scale = min(scaleX, scaleY);
+        float drawWidth = g_imageWidth * scale;
+        float drawHeight = g_imageHeight * scale;
+        float x = (rtSize.width - drawWidth) * 0.5f;
+        float y = (rtSize.height - drawHeight) * 0.5f;
 
         D2D1_RECT_F dest = D2D1::RectF(
             x,
             y,
-            x + g_imageWidth,
-            y + g_imageHeight
+            x + drawWidth,
+            y + drawHeight
         );
 
         g_renderTarget->DrawBitmap(
@@ -298,7 +358,12 @@ void Render()
         }
     }
 
-    g_renderTarget->EndDraw();
+    HRESULT hr = g_renderTarget->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET)
+    {
+        DiscardRenderTarget();
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
 }
 
 // =====================
@@ -355,14 +420,14 @@ int WINAPI wWinMain(
         return 0;
     }
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
     if (!InitDirect2D(hwnd))
     {
         MessageBox(hwnd, L"Direct2D init failed", L"Error", MB_OK);
         return 0;
     }
+
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -388,5 +453,7 @@ int WINAPI wWinMain(
         DispatchMessage(&msg);
     }
 
+    CleanupResources();
+    CoUninitialize();
     return 0;
 }
