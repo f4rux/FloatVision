@@ -823,22 +823,19 @@ void Render(HWND hwnd)
 
     if (g_bitmap)
     {
-        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-
         float scale = g_zoom;
         float drawWidth = g_imageWidth * scale;
         float drawHeight = g_imageHeight * scale;
-        float x = (rtSize.width - drawWidth) * 0.5f;
-        float y = (rtSize.height - drawHeight) * 0.5f;
+
+        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
         D2D1_RECT_F dest = D2D1::RectF(
-            x,
-            y,
-            x + drawWidth,
-            y + drawHeight
+            0.0f,
+            0.0f,
+            drawWidth,
+            drawHeight
         );
 
         g_renderTarget->DrawBitmap(
