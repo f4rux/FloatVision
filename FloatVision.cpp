@@ -487,6 +487,8 @@ bool InitDirect2D(HWND hwnd)
         return false;
     }
 
+    g_renderTarget->SetDpi(96.0f, 96.0f);
+
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
         D2D1::ColorF(D2D1::ColorF::White),
         &g_placeholderBrush)))
@@ -708,7 +710,7 @@ bool LoadImageByIndex(size_t index)
     bool result = LoadImageFromFile(g_currentImagePath.c_str());
     if (result)
     {
-        SetFitToWindow(true);
+        UpdateZoomToFitScreen(g_hwnd);
     }
     return result;
 }
