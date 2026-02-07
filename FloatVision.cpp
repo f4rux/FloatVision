@@ -1011,8 +1011,10 @@ void Render(HWND hwnd)
         if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-            UINT targetWidth = static_cast<UINT>(std::max(1.0f, std::lround(drawWidth)));
-            UINT targetHeight = static_cast<UINT>(std::max(1.0f, std::lround(drawHeight)));
+            float roundedWidth = static_cast<float>(std::lround(drawWidth));
+            float roundedHeight = static_cast<float>(std::lround(drawHeight));
+            UINT targetWidth = static_cast<UINT>(std::max(1.0f, roundedWidth));
+            UINT targetHeight = static_cast<UINT>(std::max(1.0f, roundedHeight));
             if (rtSize.width != targetWidth || rtSize.height != targetHeight)
             {
                 g_renderTarget->Resize(D2D1::SizeU(targetWidth, targetHeight));
