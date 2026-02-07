@@ -829,11 +829,27 @@ void Render(HWND hwnd)
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
+        RECT clientRect{};
+        GetClientRect(hwnd, &clientRect);
+        float clientWidth = static_cast<float>(clientRect.right - clientRect.left);
+        float clientHeight = static_cast<float>(clientRect.bottom - clientRect.top);
+        if (g_renderTarget && clientWidth > 0.0f && clientHeight > 0.0f)
+        {
+            D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+            if (rtSize.width != clientWidth || rtSize.height != clientHeight)
+            {
+                g_renderTarget->Resize(D2D1::SizeU(
+                    static_cast<UINT>(clientWidth),
+                    static_cast<UINT>(clientHeight)
+                ));
+            }
+        }
+
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
             0.0f,
-            drawWidth,
-            drawHeight
+            clientWidth > 0.0f ? clientWidth : drawWidth,
+            clientHeight > 0.0f ? clientHeight : drawHeight
         );
 
         g_renderTarget->DrawBitmap(
