@@ -58,13 +58,16 @@ std::filesystem::path g_currentImagePath;
 const float g_zoomMin = 0.05f;
 const float g_zoomMax = 20.0f;
 const float g_edgeDragMargin = 12.0f;
+bool g_alwaysOnTop = false;
+std::wstring g_iniPath;
 
 constexpr int kMenuOpen = 1001;
 constexpr int kMenuNext = 1002;
 constexpr int kMenuPrev = 1003;
-constexpr int kMenuFit = 1004;
 constexpr int kMenuZoomIn = 1005;
 constexpr int kMenuZoomOut = 1006;
+constexpr int kMenuOriginalSize = 1007;
+constexpr int kMenuAlwaysOnTop = 1008;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -89,6 +92,9 @@ void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight);
 void UpdateFitZoomFromWindow(HWND hwnd);
 void UpdateWindowToZoomedImage();
 void UpdateZoomToFitScreen(HWND hwnd);
+void LoadSettings();
+void SaveSettings();
+void ApplyAlwaysOnTop();
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -214,7 +220,9 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuZoomIn, L"Zoom In");
         AppendMenu(menu, MF_STRING, kMenuZoomOut, L"Zoom Out");
-        AppendMenu(menu, MF_STRING, kMenuFit, L"Fit to Window");
+        AppendMenu(menu, MF_STRING, kMenuOriginalSize, L"Original Size");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
@@ -231,6 +239,7 @@ LRESULT CALLBACK WndProc(
         CheckMenuItem(menu, kMenuSortNameDesc, MF_BYCOMMAND | (g_sortMode == SortMode::NameDesc ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menu, kMenuSortTimeAsc, MF_BYCOMMAND | (g_sortMode == SortMode::TimeAsc ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menu, kMenuSortTimeDesc, MF_BYCOMMAND | (g_sortMode == SortMode::TimeDesc ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menu, kMenuAlwaysOnTop, MF_BYCOMMAND | (g_alwaysOnTop ? MF_CHECKED : MF_UNCHECKED));
 
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
@@ -285,9 +294,16 @@ LRESULT CALLBACK WndProc(
             InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
         }
-        case kMenuFit:
-            SetFitToWindow(true);
+        case kMenuOriginalSize:
+            g_fitToWindow = false;
+            g_zoom = 1.0f;
+            UpdateWindowToZoomedImage();
             InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        case kMenuAlwaysOnTop:
+            g_alwaysOnTop = !g_alwaysOnTop;
+            ApplyAlwaysOnTop();
+            SaveSettings();
             return 0;
         case kMenuSortNameAsc:
             g_sortMode = SortMode::NameAsc;
@@ -296,6 +312,7 @@ LRESULT CALLBACK WndProc(
                 RefreshImageList(g_currentImagePath);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
+            SaveSettings();
             return 0;
         case kMenuSortNameDesc:
             g_sortMode = SortMode::NameDesc;
@@ -304,6 +321,7 @@ LRESULT CALLBACK WndProc(
                 RefreshImageList(g_currentImagePath);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
+            SaveSettings();
             return 0;
         case kMenuSortTimeAsc:
             g_sortMode = SortMode::TimeAsc;
@@ -312,6 +330,7 @@ LRESULT CALLBACK WndProc(
                 RefreshImageList(g_currentImagePath);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
+            SaveSettings();
             return 0;
         case kMenuSortTimeDesc:
             g_sortMode = SortMode::TimeDesc;
@@ -320,6 +339,7 @@ LRESULT CALLBACK WndProc(
                 RefreshImageList(g_currentImagePath);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
+            SaveSettings();
             return 0;
         }
         break;
@@ -444,6 +464,7 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_DESTROY:
+        SaveSettings();
         PostQuitMessage(0);
         return 0;
     }
@@ -850,6 +871,58 @@ void UpdateZoomToFitScreen(HWND hwnd)
     UpdateWindowToZoomedImage();
 }
 
+void LoadSettings()
+{
+    if (g_iniPath.empty())
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    GetPrivateProfileStringW(L"Settings", L"SortMode", L"0", buffer, 32, g_iniPath.c_str());
+    int sortValue = _wtoi(buffer);
+    if (sortValue < 0 || sortValue > 3)
+    {
+        sortValue = 0;
+    }
+    g_sortMode = static_cast<SortMode>(sortValue);
+
+    GetPrivateProfileStringW(L"Settings", L"AlwaysOnTop", L"0", buffer, 32, g_iniPath.c_str());
+    g_alwaysOnTop = (_wtoi(buffer) != 0);
+}
+
+void SaveSettings()
+{
+    if (g_iniPath.empty())
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_sortMode));
+    WritePrivateProfileStringW(L"Settings", L"SortMode", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_alwaysOnTop ? 1 : 0);
+    WritePrivateProfileStringW(L"Settings", L"AlwaysOnTop", buffer, g_iniPath.c_str());
+}
+
+void ApplyAlwaysOnTop()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    SetWindowPos(
+        g_hwnd,
+        g_alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+    );
+}
+
 // =====================
 // 描画
 // =====================
@@ -968,6 +1041,16 @@ int WINAPI wWinMain(
         nullptr
     );
     g_hwnd = hwnd;
+    if (g_hwnd)
+    {
+        wchar_t modulePath[MAX_PATH]{};
+        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) > 0)
+        {
+            std::filesystem::path iniPath(modulePath);
+            iniPath.replace_extension(L".ini");
+            g_iniPath = iniPath.wstring();
+        }
+    }
 
     if (!hwnd)
     {
@@ -994,6 +1077,9 @@ int WINAPI wWinMain(
         MessageBox(hwnd, L"Direct2D init failed", L"Error", MB_OK);
         return 0;
     }
+
+    LoadSettings();
+    ApplyAlwaysOnTop();
 
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
