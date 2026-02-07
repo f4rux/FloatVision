@@ -1,3 +1,4 @@
+﻿#define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
 #include <d2d1.h>
@@ -385,7 +386,7 @@ LRESULT CALLBACK WndProc(
             g_isEdgeDragging = true;
             g_dragStartPoint = pt;
             g_dragStartZoom = g_zoom;
-            g_dragStartScale = max(1.0f, std::min(static_cast<float>(rc.right - rc.left), static_cast<float>(rc.bottom - rc.top)));
+            g_dragStartScale = std::max(1.0f, (std::min)(static_cast<float>(rc.right - rc.left), static_cast<float>(rc.bottom - rc.top)));
             UpdateWindowToZoomedImage();
             SetCapture(hwnd);
             return 0;
@@ -401,9 +402,9 @@ LRESULT CALLBACK WndProc(
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             float delta = static_cast<float>(pt.y - g_dragStartPoint.y);
-            float nextScale = max(1.0f, g_dragStartScale + delta);
+            float nextScale = std::max(1.0f, g_dragStartScale + delta);
             float zoom = (g_dragStartScale > 0.0f) ? (g_dragStartZoom * (nextScale / g_dragStartScale)) : g_dragStartZoom;
-            g_zoom = max(g_zoomMin, min(zoom, g_zoomMax));
+            g_zoom = std::max(g_zoomMin, (std::min)(zoom, g_zoomMax));
             UpdateWindowToZoomedImage();
             InvalidateRect(hwnd, nullptr, TRUE);
         }
@@ -762,7 +763,7 @@ void AdjustZoom(float factor, const POINT& screenPoint)
 {
     (void)screenPoint;
     float newScale = g_zoom * factor;
-    g_zoom = max(g_zoomMin, min(newScale, g_zoomMax));
+    g_zoom = std::max(g_zoomMin, (std::min)(newScale, g_zoomMax));
     g_fitToWindow = false;
     UpdateWindowToZoomedImage();
 }
@@ -846,7 +847,7 @@ void UpdateFitZoomFromWindow(HWND hwnd)
     D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
     float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
     float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
-    g_zoom = max(g_zoomMin, min(min(scaleX, scaleY), g_zoomMax));
+    g_zoom = std::max(g_zoomMin, (std::min)((std::min)(scaleX, scaleY), g_zoomMax));
 }
 
 void UpdateWindowToZoomedImage()
@@ -877,8 +878,8 @@ void UpdateZoomToFitScreen(HWND hwnd)
         {
             float scaleX = static_cast<float>(workWidth) / static_cast<float>(g_imageWidth);
             float scaleY = static_cast<float>(workHeight) / static_cast<float>(g_imageHeight);
-            g_zoom = min(1.0f, min(scaleX, scaleY));
-            g_zoom = max(g_zoomMin, min(g_zoom, g_zoomMax));
+            g_zoom = (std::min)(1.0f, (std::min)(scaleX, scaleY));
+            g_zoom = std::max(g_zoomMin, (std::min)(g_zoom, g_zoomMax));
             g_fitToWindow = (g_zoom < 1.0f);
             UpdateWindowToZoomedImage();
             return;
@@ -1010,8 +1011,8 @@ void Render(HWND hwnd)
         if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-            UINT targetWidth = static_cast<UINT>(max(1.0f, std::lround(drawWidth)));
-            UINT targetHeight = static_cast<UINT>(max(1.0f, std::lround(drawHeight)));
+            UINT targetWidth = static_cast<UINT>(std::max(1.0f, std::lround(drawWidth)));
+            UINT targetHeight = static_cast<UINT>(std::max(1.0f, std::lround(drawHeight)));
             if (rtSize.width != targetWidth || rtSize.height != targetHeight)
             {
                 g_renderTarget->Resize(D2D1::SizeU(targetWidth, targetHeight));
