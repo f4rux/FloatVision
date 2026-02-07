@@ -1,8 +1,14 @@
-﻿#include <windows.h>
+#include <windows.h>
+#include <windowsx.h>
 #include <d2d1.h>
 #include <wincodec.h>
 #include <dwrite.h>
 #include <shellapi.h>
+#include <commdlg.h>
+#include <filesystem>
+#include <vector>
+#include <algorithm>
+#include <cmath>
 #include <string>
 
 #pragma comment(lib, "d2d1.lib")
@@ -16,6 +22,7 @@ ID2D1Factory* g_d2dFactory = nullptr;
 ID2D1HwndRenderTarget* g_renderTarget = nullptr;
 ID2D1Bitmap* g_bitmap = nullptr;
 ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
+HWND g_hwnd = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
@@ -23,6 +30,45 @@ IDWriteTextFormat* g_placeholderFormat = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
+
+float g_zoom = 1.0f;
+bool g_fitToWindow = true;
+bool g_isEdgeDragging = false;
+POINT g_dragStartPoint{};
+float g_dragStartZoom = 1.0f;
+
+enum class SortMode
+{
+    NameAsc,
+    NameDesc,
+    TimeAsc,
+    TimeDesc
+};
+
+struct ImageEntry
+{
+    std::filesystem::path path;
+    std::filesystem::file_time_type writeTime;
+};
+
+std::vector<ImageEntry> g_imageList;
+size_t g_currentIndex = 0;
+SortMode g_sortMode = SortMode::NameAsc;
+std::filesystem::path g_currentImagePath;
+const float g_zoomMin = 0.05f;
+const float g_zoomMax = 20.0f;
+const float g_edgeDragMargin = 12.0f;
+
+constexpr int kMenuOpen = 1001;
+constexpr int kMenuNext = 1002;
+constexpr int kMenuPrev = 1003;
+constexpr int kMenuFit = 1004;
+constexpr int kMenuZoomIn = 1005;
+constexpr int kMenuZoomOut = 1006;
+constexpr int kMenuSortNameAsc = 1101;
+constexpr int kMenuSortNameDesc = 1102;
+constexpr int kMenuSortTimeAsc = 1103;
+constexpr int kMenuSortTimeDesc = 1104;
 
 // =====================
 // 前方宣言
@@ -34,6 +80,67 @@ bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
 void CleanupResources();
 void DiscardRenderTarget();
+void RefreshImageList(const std::filesystem::path& imagePath);
+bool LoadImageByIndex(size_t index);
+void SetFitToWindow(bool fit);
+void AdjustZoom(float factor, const POINT& screenPoint);
+bool ShowOpenImageDialog(HWND hwnd);
+void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight);
+void UpdateFitZoomFromWindow(HWND hwnd);
+void UpdateWindowToZoomedImage();
+void UpdateZoomToFitScreen(HWND hwnd);
+
+bool IsImageFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".bmp"
+        || ext == L".gif" || ext == L".tif" || ext == L".tiff" || ext == L".webp";
+}
+
+void SortImageList()
+{
+    auto compareNameAsc = [](const ImageEntry& a, const ImageEntry& b)
+    {
+        return a.path.filename().wstring() < b.path.filename().wstring();
+    };
+    auto compareNameDesc = [&](const ImageEntry& a, const ImageEntry& b)
+    {
+        return compareNameAsc(b, a);
+    };
+    auto compareTimeAsc = [](const ImageEntry& a, const ImageEntry& b)
+    {
+        if (a.writeTime == b.writeTime)
+        {
+            return a.path.filename().wstring() < b.path.filename().wstring();
+        }
+        return a.writeTime < b.writeTime;
+    };
+    auto compareTimeDesc = [&](const ImageEntry& a, const ImageEntry& b)
+    {
+        return compareTimeAsc(b, a);
+    };
+
+    switch (g_sortMode)
+    {
+    case SortMode::NameAsc:
+        std::sort(g_imageList.begin(), g_imageList.end(), compareNameAsc);
+        break;
+    case SortMode::NameDesc:
+        std::sort(g_imageList.begin(), g_imageList.end(), compareNameDesc);
+        break;
+    case SortMode::TimeAsc:
+        std::sort(g_imageList.begin(), g_imageList.end(), compareTimeAsc);
+        break;
+    case SortMode::TimeDesc:
+        std::sort(g_imageList.begin(), g_imageList.end(), compareTimeDesc);
+        break;
+    }
+}
 
 // =====================
 // ウィンドウプロシージャ
@@ -64,6 +171,11 @@ LRESULT CALLBACK WndProc(
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
         }
+        if (g_fitToWindow)
+        {
+            UpdateFitZoomFromWindow(hwnd);
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
         return 0;
     }
 
@@ -80,11 +192,261 @@ LRESULT CALLBACK WndProc(
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
                 path.resize(pathLength);
-                LoadImageFromFile(path.c_str());
-                InvalidateRect(hwnd, nullptr, TRUE);
+                if (LoadImageFromFile(path.c_str()))
+                {
+                    RefreshImageList(path);
+                    UpdateZoomToFitScreen(hwnd);
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
             }
         }
         DragFinish(drop);
+        return 0;
+    }
+
+    case WM_CONTEXTMENU:
+    {
+        HMENU menu = CreatePopupMenu();
+        AppendMenu(menu, MF_STRING, kMenuOpen, L"Open...");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuPrev, L"Previous");
+        AppendMenu(menu, MF_STRING, kMenuNext, L"Next");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuZoomIn, L"Zoom In");
+        AppendMenu(menu, MF_STRING, kMenuZoomOut, L"Zoom Out");
+        AppendMenu(menu, MF_STRING, kMenuFit, L"Fit to Window");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
+        AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
+        AppendMenu(menu, MF_STRING, kMenuSortTimeAsc, L"Sort: Modified (Old-New)");
+        AppendMenu(menu, MF_STRING, kMenuSortTimeDesc, L"Sort: Modified (New-Old)");
+
+        if (g_imageList.size() < 2)
+        {
+            EnableMenuItem(menu, kMenuPrev, MF_BYCOMMAND | MF_GRAYED);
+            EnableMenuItem(menu, kMenuNext, MF_BYCOMMAND | MF_GRAYED);
+        }
+
+        CheckMenuItem(menu, kMenuSortNameAsc, MF_BYCOMMAND | (g_sortMode == SortMode::NameAsc ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menu, kMenuSortNameDesc, MF_BYCOMMAND | (g_sortMode == SortMode::NameDesc ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menu, kMenuSortTimeAsc, MF_BYCOMMAND | (g_sortMode == SortMode::TimeAsc ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menu, kMenuSortTimeDesc, MF_BYCOMMAND | (g_sortMode == SortMode::TimeDesc ? MF_CHECKED : MF_UNCHECKED));
+
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
+        DestroyMenu(menu);
+        return 0;
+    }
+
+    case WM_NCHITTEST:
+    {
+        LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);
+        if (hit == HTCLIENT)
+        {
+            return HTCAPTION;
+        }
+        return hit;
+    }
+
+    case WM_COMMAND:
+    {
+        switch (LOWORD(wParam))
+        {
+        case kMenuOpen:
+            if (ShowOpenImageDialog(hwnd))
+            {
+                UpdateZoomToFitScreen(hwnd);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        case kMenuPrev:
+            if (!g_imageList.empty())
+            {
+                size_t index = (g_currentIndex + g_imageList.size() - 1) % g_imageList.size();
+                if (LoadImageByIndex(index))
+                {
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
+            }
+            return 0;
+        case kMenuNext:
+            if (!g_imageList.empty())
+            {
+                size_t index = (g_currentIndex + 1) % g_imageList.size();
+                if (LoadImageByIndex(index))
+                {
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
+            }
+            return 0;
+        case kMenuZoomIn:
+        {
+            POINT pt{};
+            GetCursorPos(&pt);
+            AdjustZoom(1.1f, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        case kMenuZoomOut:
+        {
+            POINT pt{};
+            GetCursorPos(&pt);
+            AdjustZoom(1.0f / 1.1f, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        case kMenuFit:
+            SetFitToWindow(true);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        case kMenuSortNameAsc:
+            g_sortMode = SortMode::NameAsc;
+            if (!g_currentImagePath.empty())
+            {
+                RefreshImageList(g_currentImagePath);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        case kMenuSortNameDesc:
+            g_sortMode = SortMode::NameDesc;
+            if (!g_currentImagePath.empty())
+            {
+                RefreshImageList(g_currentImagePath);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        case kMenuSortTimeAsc:
+            g_sortMode = SortMode::TimeAsc;
+            if (!g_currentImagePath.empty())
+            {
+                RefreshImageList(g_currentImagePath);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        case kMenuSortTimeDesc:
+            g_sortMode = SortMode::TimeDesc;
+            if (!g_currentImagePath.empty())
+            {
+                RefreshImageList(g_currentImagePath);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        }
+        break;
+    }
+
+    case WM_MOUSEWHEEL:
+    {
+        if (!g_bitmap)
+        {
+            return 0;
+        }
+        int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        float steps = static_cast<float>(delta) / WHEEL_DELTA;
+        float factor = std::pow(1.1f, steps);
+        POINT pt{};
+        GetCursorPos(&pt);
+        AdjustZoom(factor, pt);
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN:
+    {
+        if (!g_bitmap)
+        {
+            return 0;
+        }
+        POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        bool nearEdge = pt.x <= g_edgeDragMargin || pt.y <= g_edgeDragMargin
+            || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
+        if (nearEdge && g_renderTarget && g_imageWidth > 0 && g_imageHeight > 0)
+        {
+            g_fitToWindow = false;
+            g_isEdgeDragging = true;
+            g_dragStartPoint = pt;
+            g_dragStartZoom = g_zoom;
+            UpdateWindowToZoomedImage();
+            SetCapture(hwnd);
+        }
+        return 0;
+    }
+
+    case WM_MOUSEMOVE:
+    {
+        if (g_isEdgeDragging && (wParam & MK_LBUTTON))
+        {
+            POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            float delta = static_cast<float>(pt.y - g_dragStartPoint.y) * 0.005f;
+            float zoom = g_dragStartZoom * (1.0f + delta);
+            g_zoom = max(g_zoomMin, min(zoom, g_zoomMax));
+            UpdateWindowToZoomedImage();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONUP:
+    {
+        if (g_isEdgeDragging)
+        {
+            g_isEdgeDragging = false;
+            ReleaseCapture();
+        }
+        return 0;
+    }
+
+    case WM_KEYDOWN:
+    {
+        if (wParam == VK_RIGHT && !g_imageList.empty())
+        {
+            size_t index = (g_currentIndex + 1) % g_imageList.size();
+            if (LoadImageByIndex(index))
+            {
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        }
+        if (wParam == VK_LEFT && !g_imageList.empty())
+        {
+            size_t index = (g_currentIndex + g_imageList.size() - 1) % g_imageList.size();
+            if (LoadImageByIndex(index))
+            {
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        }
+        if (wParam == VK_ADD || wParam == VK_OEM_PLUS)
+        {
+            POINT pt{};
+            GetCursorPos(&pt);
+            AdjustZoom(1.1f, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        if (wParam == VK_SUBTRACT || wParam == VK_OEM_MINUS)
+        {
+            POINT pt{};
+            GetCursorPos(&pt);
+            AdjustZoom(1.0f / 1.1f, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        if ((GetKeyState(VK_CONTROL) & 0x8000) && wParam == '0')
+        {
+            SetFitToWindow(true);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        if ((GetKeyState(VK_CONTROL) & 0x8000) && wParam == '1')
+        {
+            g_fitToWindow = false;
+            g_zoom = 1.0f;
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
         return 0;
     }
 
@@ -124,6 +486,8 @@ bool InitDirect2D(HWND hwnd)
     {
         return false;
     }
+
+    g_renderTarget->SetDpi(96.0f, 96.0f);
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
         D2D1::ColorF(D2D1::ColorF::White),
@@ -291,6 +655,208 @@ cleanup:
     return SUCCEEDED(hr);
 }
 
+void RefreshImageList(const std::filesystem::path& imagePath)
+{
+    g_imageList.clear();
+    g_currentImagePath = imagePath;
+    g_currentIndex = 0;
+
+    std::filesystem::path dir = imagePath.parent_path();
+    if (dir.empty())
+    {
+        dir = std::filesystem::current_path();
+    }
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+    {
+        if (ec)
+        {
+            break;
+        }
+        if (!entry.is_regular_file(ec))
+        {
+            continue;
+        }
+        std::filesystem::path filePath = entry.path();
+        if (!IsImageFile(filePath))
+        {
+            continue;
+        }
+        std::filesystem::file_time_type time = entry.last_write_time(ec);
+        g_imageList.push_back({ filePath, time });
+    }
+
+    SortImageList();
+
+    for (size_t i = 0; i < g_imageList.size(); ++i)
+    {
+        if (g_imageList[i].path == g_currentImagePath)
+        {
+            g_currentIndex = i;
+            break;
+        }
+    }
+}
+
+bool LoadImageByIndex(size_t index)
+{
+    if (g_imageList.empty() || index >= g_imageList.size())
+    {
+        return false;
+    }
+    g_currentIndex = index;
+    g_currentImagePath = g_imageList[index].path;
+    bool result = LoadImageFromFile(g_currentImagePath.c_str());
+    if (result)
+    {
+        UpdateZoomToFitScreen(g_hwnd);
+    }
+    return result;
+}
+
+void SetFitToWindow(bool fit)
+{
+    g_fitToWindow = fit;
+    if (fit)
+    {
+        UpdateFitZoomFromWindow(nullptr);
+        UpdateWindowToZoomedImage();
+    }
+}
+
+void AdjustZoom(float factor, const POINT& screenPoint)
+{
+    (void)screenPoint;
+    float newScale = g_zoom * factor;
+    g_zoom = max(g_zoomMin, min(newScale, g_zoomMax));
+    g_fitToWindow = false;
+    UpdateWindowToZoomedImage();
+}
+
+bool ShowOpenImageDialog(HWND hwnd)
+{
+    wchar_t filePath[MAX_PATH] = L"";
+    OPENFILENAME ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrFilter = L"Image Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp\0All Files\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+
+    if (!GetOpenFileName(&ofn))
+    {
+        return false;
+    }
+
+    if (LoadImageFromFile(filePath))
+    {
+        RefreshImageList(filePath);
+        UpdateZoomToFitScreen(hwnd);
+        return true;
+    }
+    return false;
+}
+
+void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight)
+{
+    if (!hwnd || drawWidth <= 0.0f || drawHeight <= 0.0f)
+    {
+        return;
+    }
+
+    RECT windowRect{};
+    RECT clientRect{};
+    GetWindowRect(hwnd, &windowRect);
+    GetClientRect(hwnd, &clientRect);
+
+    int currentClientWidth = clientRect.right - clientRect.left;
+    int currentClientHeight = clientRect.bottom - clientRect.top;
+    int targetClientWidth = static_cast<int>(std::lround(drawWidth));
+    int targetClientHeight = static_cast<int>(std::lround(drawHeight));
+
+    if (abs(targetClientWidth - currentClientWidth) < 2 && abs(targetClientHeight - currentClientHeight) < 2)
+    {
+        return;
+    }
+
+    int windowWidth = windowRect.right - windowRect.left;
+    int windowHeight = windowRect.bottom - windowRect.top;
+    int frameWidth = windowWidth - currentClientWidth;
+    int frameHeight = windowHeight - currentClientHeight;
+
+    int targetWindowWidth = targetClientWidth + frameWidth;
+    int targetWindowHeight = targetClientHeight + frameHeight;
+
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        0,
+        0,
+        targetWindowWidth,
+        targetWindowHeight,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+    );
+}
+
+void UpdateFitZoomFromWindow(HWND hwnd)
+{
+    (void)hwnd;
+    if (!g_renderTarget || g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        g_zoom = 1.0f;
+        return;
+    }
+
+    D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+    float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
+    float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
+    g_zoom = max(g_zoomMin, min(min(scaleX, scaleY), g_zoomMax));
+}
+
+void UpdateWindowToZoomedImage()
+{
+    if (!g_hwnd || g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        return;
+    }
+    UpdateWindowSizeToImage(g_hwnd, g_imageWidth * g_zoom, g_imageHeight * g_zoom);
+}
+
+void UpdateZoomToFitScreen(HWND hwnd)
+{
+    if (g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        g_zoom = 1.0f;
+        return;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor && GetMonitorInfo(monitor, &info))
+    {
+        int workWidth = info.rcWork.right - info.rcWork.left;
+        int workHeight = info.rcWork.bottom - info.rcWork.top;
+        if (workWidth > 0 && workHeight > 0)
+        {
+            float scaleX = static_cast<float>(workWidth) / static_cast<float>(g_imageWidth);
+            float scaleY = static_cast<float>(workHeight) / static_cast<float>(g_imageHeight);
+            g_zoom = min(1.0f, min(scaleX, scaleY));
+            g_zoom = max(g_zoomMin, min(g_zoom, g_zoomMax));
+            g_fitToWindow = (g_zoom < 1.0f);
+            UpdateWindowToZoomedImage();
+            return;
+        }
+    }
+
+    g_zoom = 1.0f;
+    g_fitToWindow = false;
+    UpdateWindowToZoomedImage();
+}
+
 // =====================
 // 描画
 // =====================
@@ -308,22 +874,30 @@ void Render(HWND hwnd)
 
     if (g_bitmap)
     {
-        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-
-        float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
-        float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
-        float scale = min(scaleX, scaleY);
+        float scale = g_zoom;
         float drawWidth = g_imageWidth * scale;
         float drawHeight = g_imageHeight * scale;
-        float x = (rtSize.width - drawWidth) * 0.5f;
-        float y = (rtSize.height - drawHeight) * 0.5f;
+
+        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
+
+        if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
+        {
+            D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+            UINT targetWidth = static_cast<UINT>(max(1.0f, std::lround(drawWidth)));
+            UINT targetHeight = static_cast<UINT>(max(1.0f, std::lround(drawHeight)));
+            if (rtSize.width != targetWidth || rtSize.height != targetHeight)
+            {
+                g_renderTarget->Resize(D2D1::SizeU(targetWidth, targetHeight));
+            }
+        }
+
+        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
 
         D2D1_RECT_F dest = D2D1::RectF(
-            x,
-            y,
-            x + drawWidth,
-            y + drawHeight
+            0.0f,
+            0.0f,
+            drawWidth,
+            drawHeight
         );
 
         g_renderTarget->DrawBitmap(
@@ -399,6 +973,7 @@ int WINAPI wWinMain(
         hInstance,
         nullptr
     );
+    g_hwnd = hwnd;
 
     if (!hwnd)
     {
@@ -435,6 +1010,11 @@ int WINAPI wWinMain(
     if (argv && argc > 1)
     {
         loadedImage = LoadImageFromFile(argv[1]);
+        if (loadedImage)
+        {
+            RefreshImageList(argv[1]);
+            UpdateZoomToFitScreen(hwnd);
+        }
     }
     if (argv)
     {
