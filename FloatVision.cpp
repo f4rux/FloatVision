@@ -829,6 +829,8 @@ void Render(HWND hwnd)
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
+        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
+
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
             0.0f,
