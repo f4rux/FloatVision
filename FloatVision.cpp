@@ -342,13 +342,18 @@ int WINAPI wWinMain(
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    bool loadedImage = false;
     if (argv && argc > 1)
     {
-        LoadImageFromFile(argv[1]);
+        loadedImage = LoadImageFromFile(argv[1]);
     }
     if (argv)
     {
         LocalFree(argv);
+    }
+    if (!loadedImage)
+    {
+        // 仮画像表示（g_bitmap が未設定のため Render でプレースホルダ表示）
     }
     InvalidateRect(hwnd, nullptr, TRUE);
 
