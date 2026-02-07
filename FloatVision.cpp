@@ -829,8 +829,6 @@ void Render(HWND hwnd)
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
-        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
-
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
             0.0f,
@@ -951,6 +949,7 @@ int WINAPI wWinMain(
         {
             RefreshImageList(argv[1]);
             SetFitToWindow(true);
+            UpdateWindowSizeToImage(hwnd, g_imageWidth * g_zoom, g_imageHeight * g_zoom);
         }
     }
     if (argv)
