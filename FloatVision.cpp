@@ -1,9 +1,11 @@
 ﻿#include <windows.h>
 #include <d2d1.h>
 #include <wincodec.h>
+#include <dwrite.h>
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "dwrite.lib")
 
 // =====================
 // グローバル変数
@@ -11,8 +13,11 @@
 ID2D1Factory* g_d2dFactory = nullptr;
 ID2D1HwndRenderTarget* g_renderTarget = nullptr;
 ID2D1Bitmap* g_bitmap = nullptr;
+ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
+IDWriteFactory* g_dwriteFactory = nullptr;
+IDWriteTextFormat* g_placeholderFormat = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -23,6 +28,7 @@ UINT g_imageHeight = 0;
 void Render();
 bool InitDirect2D(HWND hwnd);
 bool InitWIC();
+bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
 
 // =====================
@@ -94,6 +100,13 @@ bool InitDirect2D(HWND hwnd)
         return false;
     }
 
+    if (FAILED(g_renderTarget->CreateSolidColorBrush(
+        D2D1::ColorF(D2D1::ColorF::White),
+        &g_placeholderBrush)))
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -112,6 +125,42 @@ bool InitWIC()
 }
 
 // =====================
+// DirectWrite 初期化
+// =====================
+bool InitDirectWrite()
+{
+    HRESULT hr = DWriteCreateFactory(
+        DWRITE_FACTORY_TYPE_SHARED,
+        __uuidof(IDWriteFactory),
+        reinterpret_cast<IUnknown**>(&g_dwriteFactory)
+    );
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = g_dwriteFactory->CreateTextFormat(
+        L"Segoe UI",
+        nullptr,
+        DWRITE_FONT_WEIGHT_REGULAR,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        24.0f,
+        L"ja-jp",
+        &g_placeholderFormat
+    );
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    g_placeholderFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+    g_placeholderFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+
+    return true;
+}
+
+// =====================
 // 画像ロード
 // =====================
 bool LoadImageFromFile(const wchar_t* path)
@@ -119,6 +168,14 @@ bool LoadImageFromFile(const wchar_t* path)
     IWICBitmapDecoder* decoder = nullptr;
     IWICBitmapFrameDecode* frame = nullptr;
     IWICFormatConverter* converter = nullptr;
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    g_imageWidth = 0;
+    g_imageHeight = 0;
 
     HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
         path,
@@ -148,12 +205,6 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
-    if (g_bitmap)
-    {
-        g_bitmap->Release();
-        g_bitmap = nullptr;
-    }
-
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
         converter,
         nullptr,
@@ -178,10 +229,9 @@ void Render()
 
     g_renderTarget->BeginDraw();
 
-    g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-
     if (g_bitmap)
     {
+        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
 
         float x = (rtSize.width - g_imageWidth) * 0.5f;
@@ -200,6 +250,30 @@ void Render()
             1.0f,
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR
         );
+    }
+    else
+    {
+        g_renderTarget->Clear(D2D1::ColorF(0.12f, 0.12f, 0.12f));
+
+        const wchar_t* placeholderText = L"Drop image here";
+        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+        D2D1_RECT_F textRect = D2D1::RectF(
+            0.0f,
+            0.0f,
+            rtSize.width,
+            rtSize.height
+        );
+
+        if (g_placeholderBrush && g_placeholderFormat)
+        {
+            g_renderTarget->DrawTextW(
+                placeholderText,
+                static_cast<UINT32>(wcslen(placeholderText)),
+                g_placeholderFormat,
+                textRect,
+                g_placeholderBrush
+            );
+        }
     }
 
     g_renderTarget->EndDraw();
@@ -251,6 +325,12 @@ int WINAPI wWinMain(
         return 0;
     }
 
+    if (!InitDirectWrite())
+    {
+        MessageBox(nullptr, L"DirectWrite init failed", L"Error", MB_OK);
+        return 0;
+    }
+
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
 
@@ -260,8 +340,16 @@ int WINAPI wWinMain(
         return 0;
     }
 
-    // exe と同じフォルダに test.png を置く
-    LoadImageFromFile(L"test.png");
+    int argc = 0;
+    wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv && argc > 1)
+    {
+        LoadImageFromFile(argv[1]);
+    }
+    if (argv)
+    {
+        LocalFree(argv);
+    }
     InvalidateRect(hwnd, nullptr, TRUE);
 
     MSG msg{};
