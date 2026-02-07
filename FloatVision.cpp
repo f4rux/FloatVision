@@ -1,4 +1,5 @@
 ﻿#include <windows.h>
+#include <windowsx.h>
 #include <d2d1.h>
 #include <wincodec.h>
 #include <dwrite.h>
@@ -21,6 +22,10 @@ IDWriteTextFormat* g_placeholderFormat = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
+float g_scale = 1.0f;
+D2D1_POINT_2F g_offset = D2D1::Point2F(0.0f, 0.0f);
+bool g_isDragging = false;
+POINT g_lastMousePos = {};
 
 // =====================
 // 前方宣言
@@ -59,6 +64,77 @@ LRESULT CALLBACK WndProc(
             UINT w = LOWORD(lParam);
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
+        }
+        return 0;
+    }
+
+    case WM_MOUSEWHEEL:
+    {
+        if (!g_bitmap || !g_renderTarget)
+        {
+            return 0;
+        }
+
+        const int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+        if (delta == 0)
+        {
+            return 0;
+        }
+
+        const float zoomFactor = (delta > 0) ? 1.1f : 0.9f;
+        const float newScale = g_scale * zoomFactor;
+
+        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+        float oldWidth = g_imageWidth * g_scale;
+        float oldHeight = g_imageHeight * g_scale;
+        float oldBaseX = (rtSize.width - oldWidth) * 0.5f;
+        float oldBaseY = (rtSize.height - oldHeight) * 0.5f;
+        float oldLeft = oldBaseX + g_offset.x;
+        float oldTop = oldBaseY + g_offset.y;
+
+        POINT mouse = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        float imageX = (mouse.x - oldLeft) / g_scale;
+        float imageY = (mouse.y - oldTop) / g_scale;
+
+        g_scale = newScale;
+
+        float newWidth = g_imageWidth * g_scale;
+        float newHeight = g_imageHeight * g_scale;
+        float newBaseX = (rtSize.width - newWidth) * 0.5f;
+        float newBaseY = (rtSize.height - newHeight) * 0.5f;
+
+        g_offset.x = mouse.x - newBaseX - imageX * g_scale;
+        g_offset.y = mouse.y - newBaseY - imageY * g_scale;
+
+        InvalidateRect(hwnd, nullptr, TRUE);
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN:
+    {
+        g_isDragging = true;
+        g_lastMousePos.x = GET_X_LPARAM(lParam);
+        g_lastMousePos.y = GET_Y_LPARAM(lParam);
+        SetCapture(hwnd);
+        return 0;
+    }
+
+    case WM_LBUTTONUP:
+    {
+        g_isDragging = false;
+        ReleaseCapture();
+        return 0;
+    }
+
+    case WM_MOUSEMOVE:
+    {
+        if (g_isDragging)
+        {
+            POINT mouse = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            g_offset.x += static_cast<float>(mouse.x - g_lastMousePos.x);
+            g_offset.y += static_cast<float>(mouse.y - g_lastMousePos.y);
+            g_lastMousePos = mouse;
+            InvalidateRect(hwnd, nullptr, TRUE);
         }
         return 0;
     }
@@ -216,6 +292,12 @@ cleanup:
     if (frame) frame->Release();
     if (converter) converter->Release();
 
+    if (SUCCEEDED(hr))
+    {
+        g_scale = 1.0f;
+        g_offset = D2D1::Point2F(0.0f, 0.0f);
+    }
+
     return SUCCEEDED(hr);
 }
 
@@ -234,14 +316,16 @@ void Render()
         g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
 
-        float x = (rtSize.width - g_imageWidth) * 0.5f;
-        float y = (rtSize.height - g_imageHeight) * 0.5f;
+        float scaledWidth = g_imageWidth * g_scale;
+        float scaledHeight = g_imageHeight * g_scale;
+        float x = (rtSize.width - scaledWidth) * 0.5f + g_offset.x;
+        float y = (rtSize.height - scaledHeight) * 0.5f + g_offset.y;
 
         D2D1_RECT_F dest = D2D1::RectF(
             x,
             y,
-            x + g_imageWidth,
-            y + g_imageHeight
+            x + scaledWidth,
+            y + scaledHeight
         );
 
         g_renderTarget->DrawBitmap(
