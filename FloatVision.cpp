@@ -238,16 +238,6 @@ LRESULT CALLBACK WndProc(
         return 0;
     }
 
-    case WM_NCHITTEST:
-    {
-        LRESULT hit = DefWindowProc(hwnd, msg, wParam, lParam);
-        if (hit == HTCLIENT)
-        {
-            return HTCAPTION;
-        }
-        return hit;
-    }
-
     case WM_COMMAND:
     {
         switch (LOWORD(wParam))
@@ -370,7 +360,10 @@ LRESULT CALLBACK WndProc(
             g_dragStartZoom = g_zoom;
             UpdateWindowToZoomedImage();
             SetCapture(hwnd);
+            return 0;
         }
+        ReleaseCapture();
+        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, lParam);
         return 0;
     }
 
