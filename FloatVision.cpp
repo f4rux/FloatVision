@@ -950,6 +950,7 @@ int WINAPI wWinMain(
     int nCmdShow
 )
 {
+    SetProcessDPIAware();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
 
     const wchar_t CLASS_NAME[] = L"FloatVisionWindow";
