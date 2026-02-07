@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <string>
 
 #pragma comment(lib, "d2d1.lib")
@@ -36,6 +37,7 @@ bool g_fitToWindow = true;
 bool g_isEdgeDragging = false;
 POINT g_dragStartPoint{};
 float g_dragStartZoom = 1.0f;
+float g_dragStartScale = 1.0f;
 
 enum class SortMode
 {
@@ -60,6 +62,8 @@ const float g_zoomMax = 20.0f;
 const float g_edgeDragMargin = 12.0f;
 bool g_alwaysOnTop = false;
 std::wstring g_iniPath;
+POINT g_windowPos{ CW_USEDEFAULT, CW_USEDEFAULT };
+bool g_hasSavedWindowPos = false;
 
 constexpr int kMenuOpen = 1001;
 constexpr int kMenuNext = 1002;
@@ -68,6 +72,7 @@ constexpr int kMenuZoomIn = 1005;
 constexpr int kMenuZoomOut = 1006;
 constexpr int kMenuOriginalSize = 1007;
 constexpr int kMenuAlwaysOnTop = 1008;
+constexpr int kMenuExit = 1009;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -95,6 +100,8 @@ void UpdateZoomToFitScreen(HWND hwnd);
 void LoadSettings();
 void SaveSettings();
 void ApplyAlwaysOnTop();
+void LoadWindowPlacement();
+void SaveWindowPlacement();
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -223,6 +230,7 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_STRING, kMenuOriginalSize, L"Original Size");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
+        AppendMenu(menu, MF_STRING, kMenuExit, L"Exit");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
@@ -305,6 +313,9 @@ LRESULT CALLBACK WndProc(
             ApplyAlwaysOnTop();
             SaveSettings();
             return 0;
+        case kMenuExit:
+            DestroyWindow(hwnd);
+            return 0;
         case kMenuSortNameAsc:
             g_sortMode = SortMode::NameAsc;
             if (!g_currentImagePath.empty())
@@ -363,21 +374,18 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONDOWN:
     {
-        if (!g_bitmap)
-        {
-            return 0;
-        }
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         RECT rc{};
         GetClientRect(hwnd, &rc);
         bool nearEdge = pt.x <= g_edgeDragMargin || pt.y <= g_edgeDragMargin
             || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
-        if (nearEdge && g_renderTarget && g_imageWidth > 0 && g_imageHeight > 0)
+        if (g_bitmap && nearEdge && g_renderTarget && g_imageWidth > 0 && g_imageHeight > 0)
         {
             g_fitToWindow = false;
             g_isEdgeDragging = true;
             g_dragStartPoint = pt;
             g_dragStartZoom = g_zoom;
+            g_dragStartScale = max(1.0f, std::min(static_cast<float>(rc.right - rc.left), static_cast<float>(rc.bottom - rc.top)));
             UpdateWindowToZoomedImage();
             SetCapture(hwnd);
             return 0;
@@ -392,11 +400,21 @@ LRESULT CALLBACK WndProc(
         if (g_isEdgeDragging && (wParam & MK_LBUTTON))
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-            float delta = static_cast<float>(pt.y - g_dragStartPoint.y) * 0.005f;
-            float zoom = g_dragStartZoom * (1.0f + delta);
+            float delta = static_cast<float>(pt.y - g_dragStartPoint.y);
+            float nextScale = max(1.0f, g_dragStartScale + delta);
+            float zoom = (g_dragStartScale > 0.0f) ? (g_dragStartZoom * (nextScale / g_dragStartScale)) : g_dragStartZoom;
             g_zoom = max(g_zoomMin, min(zoom, g_zoomMax));
             UpdateWindowToZoomedImage();
             InvalidateRect(hwnd, nullptr, TRUE);
+        }
+        else
+        {
+            POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            RECT rc{};
+            GetClientRect(hwnd, &rc);
+            bool nearEdge = pt.x <= g_edgeDragMargin || pt.y <= g_edgeDragMargin
+                || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
+            SetCursor(LoadCursor(nullptr, nearEdge ? IDC_SIZENWSE : IDC_ARROW));
         }
         return 0;
     }
@@ -464,6 +482,7 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_DESTROY:
+        SaveWindowPlacement();
         SaveSettings();
         PostQuitMessage(0);
         return 0;
@@ -923,6 +942,48 @@ void ApplyAlwaysOnTop()
     );
 }
 
+void LoadWindowPlacement()
+{
+    if (g_iniPath.empty())
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    GetPrivateProfileStringW(L"Window", L"X", L"", buffer, 32, g_iniPath.c_str());
+    if (buffer[0] != L'\0')
+    {
+        g_windowPos.x = _wtoi(buffer);
+        g_hasSavedWindowPos = true;
+    }
+    GetPrivateProfileStringW(L"Window", L"Y", L"", buffer, 32, g_iniPath.c_str());
+    if (buffer[0] != L'\0')
+    {
+        g_windowPos.y = _wtoi(buffer);
+        g_hasSavedWindowPos = true;
+    }
+}
+
+void SaveWindowPlacement()
+{
+    if (!g_hwnd || g_iniPath.empty())
+    {
+        return;
+    }
+
+    RECT rect{};
+    if (!GetWindowRect(g_hwnd, &rect))
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", rect.left);
+    WritePrivateProfileStringW(L"Window", L"X", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", rect.top);
+    WritePrivateProfileStringW(L"Window", L"Y", buffer, g_iniPath.c_str());
+}
+
 // =====================
 // 描画
 // =====================
@@ -1079,7 +1140,20 @@ int WINAPI wWinMain(
     }
 
     LoadSettings();
+    LoadWindowPlacement();
     ApplyAlwaysOnTop();
+    if (g_hasSavedWindowPos)
+    {
+        SetWindowPos(
+            hwnd,
+            nullptr,
+            g_windowPos.x,
+            g_windowPos.y,
+            0,
+            0,
+            SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+        );
+    }
 
     ShowWindow(hwnd, nCmdShow);
     UpdateWindow(hwnd);
