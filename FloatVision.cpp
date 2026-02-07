@@ -88,6 +88,7 @@ bool ShowOpenImageDialog(HWND hwnd);
 void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight);
 void UpdateFitZoomFromWindow(HWND hwnd);
 void UpdateWindowToZoomedImage();
+void UpdateZoomToFitScreen(HWND hwnd);
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -194,7 +195,7 @@ LRESULT CALLBACK WndProc(
                 if (LoadImageFromFile(path.c_str()))
                 {
                     RefreshImageList(path);
-                    SetFitToWindow(true);
+                    UpdateZoomToFitScreen(hwnd);
                     InvalidateRect(hwnd, nullptr, TRUE);
                 }
             }
@@ -254,7 +255,7 @@ LRESULT CALLBACK WndProc(
         case kMenuOpen:
             if (ShowOpenImageDialog(hwnd))
             {
-                SetFitToWindow(true);
+                UpdateZoomToFitScreen(hwnd);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
             return 0;
@@ -751,6 +752,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     if (LoadImageFromFile(filePath))
     {
         RefreshImageList(filePath);
+        UpdateZoomToFitScreen(hwnd);
         return true;
     }
     return false;
@@ -819,6 +821,38 @@ void UpdateWindowToZoomedImage()
         return;
     }
     UpdateWindowSizeToImage(g_hwnd, g_imageWidth * g_zoom, g_imageHeight * g_zoom);
+}
+
+void UpdateZoomToFitScreen(HWND hwnd)
+{
+    if (g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        g_zoom = 1.0f;
+        return;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor && GetMonitorInfo(monitor, &info))
+    {
+        int workWidth = info.rcWork.right - info.rcWork.left;
+        int workHeight = info.rcWork.bottom - info.rcWork.top;
+        if (workWidth > 0 && workHeight > 0)
+        {
+            float scaleX = static_cast<float>(workWidth) / static_cast<float>(g_imageWidth);
+            float scaleY = static_cast<float>(workHeight) / static_cast<float>(g_imageHeight);
+            g_zoom = min(1.0f, min(scaleX, scaleY));
+            g_zoom = max(g_zoomMin, min(g_zoom, g_zoomMax));
+            g_fitToWindow = (g_zoom < 1.0f);
+            UpdateWindowToZoomedImage();
+            return;
+        }
+    }
+
+    g_zoom = 1.0f;
+    g_fitToWindow = false;
+    UpdateWindowToZoomedImage();
 }
 
 // =====================
@@ -977,8 +1011,7 @@ int WINAPI wWinMain(
         if (loadedImage)
         {
             RefreshImageList(argv[1]);
-            SetFitToWindow(true);
-            UpdateWindowSizeToImage(hwnd, g_imageWidth * g_zoom, g_imageHeight * g_zoom);
+            UpdateZoomToFitScreen(hwnd);
         }
     }
     if (argv)
