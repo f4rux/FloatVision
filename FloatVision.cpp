@@ -44,6 +44,8 @@ HWND g_hwnd = nullptr;
 #if FLOATVISION_HAS_WEBVIEW2
 ICoreWebView2Controller* g_webViewController = nullptr;
 ICoreWebView2* g_webView = nullptr;
+EventRegistrationToken g_webViewNavToken{};
+bool g_webViewNavigationHooked = false;
 #endif
 bool g_showingWeb = false;
 std::wstring g_pendingWebHtml;
@@ -657,6 +659,7 @@ LRESULT CALLBACK WndProc(
         }
         g_pendingWebHtml.clear();
         g_webViewReady = false;
+        g_webViewNavigationHooked = false;
 #endif
         SaveWindowPlacement();
         SaveSettings();
@@ -1075,6 +1078,46 @@ namespace
         auto* buffer = static_cast<std::string*>(userdata);
         buffer->append(text, size);
     }
+
+    std::wstring EscapeHtml(const std::wstring& input)
+    {
+        std::wstring output;
+        output.reserve(input.size());
+        for (wchar_t ch : input)
+        {
+            switch (ch)
+            {
+            case L'&':
+                output.append(L"&amp;");
+                break;
+            case L'<':
+                output.append(L"&lt;");
+                break;
+            case L'>':
+                output.append(L"&gt;");
+                break;
+            case L'"':
+                output.append(L"&quot;");
+                break;
+            default:
+                output.push_back(ch);
+                break;
+            }
+        }
+        return output;
+    }
+
+    std::wstring BuildFallbackHtml(const std::wstring& markdown)
+    {
+        std::wstring html;
+        html.append(L"<!doctype html><html><head><meta charset=\"utf-8\"/>");
+        html.append(L"<meta name=\"color-scheme\" content=\"light\"/>");
+        html.append(L"<style>body{font-family:Segoe UI, sans-serif;margin:16px;background:#fff;color:#111;}");
+        html.append(L"pre{white-space:pre-wrap;font-family:Consolas,monospace;}</style></head><body><pre>");
+        html.append(EscapeHtml(markdown));
+        html.append(L"</pre></body></html>");
+        return html;
+    }
 }
 
 std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
@@ -1096,10 +1139,15 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
     std::string html;
     md_html(utf8.data(), utf8.size(), AppendMarkdownHtml, &html, 0, 0);
 
+    if (html.empty())
+    {
+        return BuildFallbackHtml(markdown);
+    }
+
     int wideSize = MultiByteToWideChar(CP_UTF8, 0, html.data(), static_cast<int>(html.size()), nullptr, 0);
     if (wideSize <= 0)
     {
-        return L"";
+        return BuildFallbackHtml(markdown);
     }
     std::wstring wideHtml(wideSize, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, html.data(), static_cast<int>(html.size()), wideHtml.data(), wideSize);
@@ -1148,8 +1196,40 @@ void InitializeWebView(HWND hwnd)
                             g_webViewController->put_Bounds(bounds);
                             g_webViewController->put_IsVisible(TRUE);
                             g_webViewReady = g_webView != nullptr;
+                            if (g_webView && !g_webViewNavigationHooked)
+                            {
+                                g_webView->add_NavigationCompleted(
+                                    Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                        [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
+                                        {
+                                            BOOL success = FALSE;
+                                            if (args)
+                                            {
+                                                args->get_IsSuccess(&success);
+                                            }
+                                            if (success)
+                                            {
+                                                g_webViewReady = true;
+                                            }
+                                            else
+                                            {
+                                                g_showingWeb = false;
+                                                g_hasText = true;
+                                                g_textContent = L"WebView2 failed to render content.";
+                                                g_webViewReady = false;
+                                            }
+                                            if (g_hwnd)
+                                            {
+                                                InvalidateRect(g_hwnd, nullptr, TRUE);
+                                            }
+                                            return S_OK;
+                                        }).Get(),
+                                    &g_webViewNavToken);
+                                g_webViewNavigationHooked = true;
+                            }
                             if (g_webView && !g_pendingWebHtml.empty())
                             {
+                                g_webViewReady = false;
                                 g_webView->NavigateToString(g_pendingWebHtml.c_str());
                                 g_pendingWebHtml.clear();
                                 InvalidateRect(hwnd, nullptr, TRUE);
@@ -1167,9 +1247,13 @@ void NavigateWebContent(const std::wstring& html)
 #if FLOATVISION_HAS_WEBVIEW2
     if (g_webView)
     {
+        g_webViewReady = false;
         g_webView->NavigateToString(html.c_str());
-        g_webViewReady = true;
         g_pendingWebHtml.clear();
+        if (g_hwnd)
+        {
+            InvalidateRect(g_hwnd, nullptr, TRUE);
+        }
     }
     else
     {
