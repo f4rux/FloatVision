@@ -853,7 +853,7 @@ void ShowSettingsDialog(HWND hwnd)
         buffer.push_back(static_cast<BYTE>((value >> 8) & 0xFF));
     };
 
-    auto appendDword = [](std::vector<BYTE>& buffer, DWORD value)
+    auto appendDword = [&](std::vector<BYTE>& buffer, DWORD value)
     {
         appendWord(buffer, static_cast<WORD>(value & 0xFFFF));
         appendWord(buffer, static_cast<WORD>((value >> 16) & 0xFFFF));
