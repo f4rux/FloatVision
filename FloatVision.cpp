@@ -42,6 +42,7 @@ IDWriteTextFormat* g_placeholderFormat = nullptr;
 IDWriteTextFormat* g_textFormat = nullptr;
 IWICBitmapSource* g_wicSource = nullptr;
 Microsoft::WRL::ComPtr<ICoreWebView2Controller> g_webviewController;
+Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
 HWND g_webviewWindow = nullptr;
@@ -1095,6 +1096,10 @@ void HideWebView()
     if (g_webviewController)
     {
         g_webviewController->put_IsVisible(FALSE);
+        if (g_webviewController2)
+        {
+            g_webviewController2->put_IsEnabled(TRUE);
+        }
     }
 }
 
@@ -1233,6 +1238,7 @@ bool EnsureWebView2(HWND hwnd)
                             }
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
+                            g_webviewController.As(&g_webviewController2);
                             g_webviewController->put_IsVisible(TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
@@ -1256,6 +1262,7 @@ void CloseWebView()
         g_webviewController->Close();
     }
     g_webviewController.Reset();
+    g_webviewController2.Reset();
     g_webview.Reset();
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
