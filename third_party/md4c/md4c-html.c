@@ -61,8 +61,9 @@ int md_html(const MD_CHAR* text, MD_SIZE size, MD_OUTPUT_FUNC output, void* user
     }
 
     emit(output, userdata, "<html><head><meta charset=\"utf-8\"/><style>");
-    emit(output, userdata, "body{font-family:Segoe UI, sans-serif;margin:16px;}code,pre{font-family:Consolas,monospace;}");
-    emit(output, userdata, "pre{background:#111;color:#eee;padding:12px;border-radius:6px;}");
+    emit(output, userdata, "body{font-family:Segoe UI, sans-serif;margin:16px;background:#fff;color:#111;}");
+    emit(output, userdata, "code,pre{font-family:Consolas,monospace;}");
+    emit(output, userdata, "pre{background:#f3f3f3;color:#111;padding:12px;border-radius:6px;}");
     emit(output, userdata, "</style></head><body>");
 
     int in_code = 0;
