@@ -161,6 +161,7 @@ void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
+void UpdateWebViewInputTimer();
 void UpdateWebViewInputState();
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
