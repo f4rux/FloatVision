@@ -155,6 +155,7 @@ void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
+void UpdateWebViewInputState();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -1091,6 +1092,7 @@ void HideWebView()
     if (g_webviewController)
     {
         g_webviewController->put_IsVisible(FALSE);
+        g_webviewController->put_IsEnabled(TRUE);
     }
 }
 
@@ -1105,6 +1107,14 @@ void UpdateWebViewBounds()
     g_webviewController->put_Bounds(bounds);
 }
 
+void UpdateWebViewInputState()
+{
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsEnabled(g_hasHtml ? FALSE : TRUE);
+    }
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -1115,6 +1125,7 @@ bool EnsureWebView2(HWND hwnd)
     if (g_webviewController && g_webview)
     {
         g_webviewController->put_IsVisible(TRUE);
+        UpdateWebViewInputState();
         UpdateWebViewBounds();
         if (!g_pendingHtmlContent.empty())
         {
@@ -1168,6 +1179,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController->put_IsVisible(TRUE);
+                            UpdateWebViewInputState();
                             UpdateWebViewBounds();
                             if (g_webview && !g_pendingHtmlContent.empty())
                             {
