@@ -82,6 +82,52 @@ constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
 constexpr int kMenuSortTimeDesc = 1104;
 
+float g_zoom = 1.0f;
+bool g_fitToWindow = true;
+bool g_isEdgeDragging = false;
+POINT g_dragStartPoint{};
+float g_dragStartZoom = 1.0f;
+float g_dragStartScale = 1.0f;
+
+enum class SortMode
+{
+    NameAsc,
+    NameDesc,
+    TimeAsc,
+    TimeDesc
+};
+
+struct ImageEntry
+{
+    std::filesystem::path path;
+    std::filesystem::file_time_type writeTime;
+};
+
+std::vector<ImageEntry> g_imageList;
+size_t g_currentIndex = 0;
+SortMode g_sortMode = SortMode::NameAsc;
+std::filesystem::path g_currentImagePath;
+const float g_zoomMin = 0.05f;
+const float g_zoomMax = 20.0f;
+const float g_edgeDragMargin = 12.0f;
+bool g_alwaysOnTop = false;
+std::wstring g_iniPath;
+POINT g_windowPos{ CW_USEDEFAULT, CW_USEDEFAULT };
+bool g_hasSavedWindowPos = false;
+
+constexpr int kMenuOpen = 1001;
+constexpr int kMenuNext = 1002;
+constexpr int kMenuPrev = 1003;
+constexpr int kMenuZoomIn = 1005;
+constexpr int kMenuZoomOut = 1006;
+constexpr int kMenuOriginalSize = 1007;
+constexpr int kMenuAlwaysOnTop = 1008;
+constexpr int kMenuExit = 1009;
+constexpr int kMenuSortNameAsc = 1101;
+constexpr int kMenuSortNameDesc = 1102;
+constexpr int kMenuSortTimeAsc = 1103;
+constexpr int kMenuSortTimeDesc = 1104;
+
 // =====================
 // 前方宣言
 // =====================
@@ -539,6 +585,16 @@ void DiscardRenderTarget()
     {
         g_placeholderBrush->Release();
         g_placeholderBrush = nullptr;
+    }
+    if (g_checkerBrushA)
+    {
+        g_checkerBrushA->Release();
+        g_checkerBrushA = nullptr;
+    }
+    if (g_checkerBrushB)
+    {
+        g_checkerBrushB->Release();
+        g_checkerBrushB = nullptr;
     }
     if (g_bitmap)
     {
