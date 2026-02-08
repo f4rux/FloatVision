@@ -13,8 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
-#include "md4c.h"
-#include "md4c-html.h"
+#include <wrl.h>
 #if __has_include(<WebView2.h>)
 #include <WebView2.h>
 #define FLOATVISION_HAS_WEBVIEW2 1
@@ -1155,7 +1154,7 @@ void InitializeWebView(HWND hwnd)
         return;
     }
     CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
-        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+        Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT
             {
                 if (FAILED(hr))
@@ -1163,7 +1162,7 @@ void InitializeWebView(HWND hwnd)
                     return hr;
                 }
                 return env->CreateCoreWebView2Controller(hwnd,
-                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                    Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [hwnd](HRESULT hr2, ICoreWebView2Controller* controller) -> HRESULT
                         {
                             if (FAILED(hr2))
