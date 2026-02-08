@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <wrl.h>
+#include <WebView2.h>
 #include "resource.h"
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -37,6 +39,9 @@ IDWriteFactory* g_dwriteFactory = nullptr;
 IDWriteTextFormat* g_placeholderFormat = nullptr;
 IDWriteTextFormat* g_textFormat = nullptr;
 IWICBitmapSource* g_wicSource = nullptr;
+Microsoft::WRL::ComPtr<ICoreWebView2Controller> g_webviewController;
+Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
+HMODULE g_webviewLoader = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -59,6 +64,8 @@ COLORREF g_textColor = RGB(240, 240, 240);
 COLORREF g_textBackground = RGB(20, 20, 20);
 bool g_textWrap = true;
 float g_textScroll = 0.0f;
+bool g_hasHtml = false;
+std::wstring g_pendingHtmlContent;
 
 enum class TransparencyMode
 {
@@ -145,6 +152,11 @@ void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
+bool LoadHtmlFromFile(const wchar_t* path);
+bool EnsureWebView2(HWND hwnd);
+void UpdateWebViewBounds();
+void HideWebView();
+void CloseWebView();
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -168,6 +180,17 @@ bool IsTextFile(const std::filesystem::path& path)
     std::wstring ext = path.extension().wstring();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
     return ext == L".txt";
+}
+
+bool IsHtmlFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".html" || ext == L".htm";
 }
 
 void SortImageList()
@@ -233,6 +256,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_SIZE:
     {
+        if (g_webviewController)
+        {
+            UpdateWebViewBounds();
+        }
         if (g_renderTarget)
         {
             UINT w = LOWORD(lParam);
@@ -260,7 +287,14 @@ LRESULT CALLBACK WndProc(
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
                 path.resize(pathLength);
-                if (IsTextFile(path))
+                if (IsHtmlFile(path))
+                {
+                    if (LoadHtmlFromFile(path.c_str()))
+                    {
+                        InvalidateRect(hwnd, nullptr, TRUE);
+                    }
+                }
+                else if (IsTextFile(path))
                 {
                     if (LoadTextFromFile(path.c_str()))
                     {
@@ -327,7 +361,10 @@ LRESULT CALLBACK WndProc(
         case kMenuOpen:
             if (ShowOpenImageDialog(hwnd))
             {
-                UpdateZoomToFitScreen(hwnd);
+                if (g_bitmap && !g_hasHtml)
+                {
+                    UpdateZoomToFitScreen(hwnd);
+                }
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
             return 0;
@@ -412,6 +449,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_MOUSEWHEEL:
     {
+        if (g_hasHtml)
+        {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         if (!g_bitmap && !g_hasText)
         {
             return 0;
@@ -451,6 +492,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONDOWN:
     {
+        if (g_hasHtml)
+        {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         RECT rc{};
         GetClientRect(hwnd, &rc);
@@ -479,6 +524,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_MOUSEMOVE:
     {
+        if (g_hasHtml)
+        {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         if (g_isEdgeDragging && (wParam & MK_LBUTTON))
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -515,6 +564,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONUP:
     {
+        if (g_hasHtml)
+        {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         if (g_isEdgeDragging)
         {
             g_isEdgeDragging = false;
@@ -525,6 +578,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_KEYDOWN:
     {
+        if (g_hasHtml)
+        {
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
         if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
         {
             float delta = (wParam == VK_UP) ? -40.0f : 40.0f;
@@ -585,6 +642,7 @@ LRESULT CALLBACK WndProc(
 
     case WM_DESTROY:
     {
+        CloseWebView();
         SaveWindowPlacement();
         SaveSettings();
         PostQuitMessage(0);
@@ -705,6 +763,7 @@ void DiscardRenderTarget()
 void CleanupResources()
 {
     DiscardRenderTarget();
+    CloseWebView();
 
     if (g_placeholderFormat)
     {
@@ -810,6 +869,9 @@ bool LoadImageFromFile(const wchar_t* path)
     g_imageHasAlpha = false;
     g_hasText = false;
     g_textContent.clear();
+    g_hasHtml = false;
+    g_pendingHtmlContent.clear();
+    HideWebView();
 
     HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
         path,
@@ -903,10 +965,70 @@ bool LoadTextFromFile(const wchar_t* path)
     g_imageWidth = 0;
     g_imageHeight = 0;
     g_imageHasAlpha = false;
+    g_hasHtml = false;
+    g_pendingHtmlContent.clear();
     g_hasText = true;
     g_textContent = std::move(text);
     g_textScroll = 0.0f;
+    HideWebView();
     ApplyTransparencyMode();
+    return true;
+}
+
+bool LoadHtmlFromFile(const wchar_t* path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
+        && static_cast<unsigned char>(bytes[1]) == 0xBB
+        && static_cast<unsigned char>(bytes[2]) == 0xBF)
+    {
+        bytes.erase(0, 3);
+    }
+
+    int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    if (needed <= 0)
+    {
+        return false;
+    }
+
+    std::wstring html(needed, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), html.data(), needed);
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSource)
+    {
+        g_wicSource->Release();
+        g_wicSource = nullptr;
+    }
+    g_imageWidth = 0;
+    g_imageHeight = 0;
+    g_imageHasAlpha = false;
+    g_hasText = false;
+    g_textContent.clear();
+    g_textScroll = 0.0f;
+    g_fitToWindow = false;
+    g_zoom = 1.0f;
+    g_hasHtml = true;
+    g_pendingHtmlContent = std::move(html);
+    ApplyTransparencyMode();
+
+    if (!EnsureWebView2(g_hwnd))
+    {
+        g_hasHtml = false;
+        g_pendingHtmlContent.clear();
+        return false;
+    }
+
     return true;
 }
 
@@ -952,6 +1074,116 @@ void ApplyTransparencyMode()
         UpdateLayeredStyle(false);
     }
     UpdateCustomColorBrush();
+}
+
+void HideWebView()
+{
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
+}
+
+void UpdateWebViewBounds()
+{
+    if (!g_webviewController || !g_hwnd)
+    {
+        return;
+    }
+    RECT bounds{};
+    GetClientRect(g_hwnd, &bounds);
+    g_webviewController->put_Bounds(bounds);
+}
+
+bool EnsureWebView2(HWND hwnd)
+{
+    if (!hwnd)
+    {
+        return false;
+    }
+
+    if (g_webviewController && g_webview)
+    {
+        g_webviewController->put_IsVisible(TRUE);
+        UpdateWebViewBounds();
+        if (!g_pendingHtmlContent.empty())
+        {
+            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+            g_pendingHtmlContent.clear();
+        }
+        return true;
+    }
+
+    if (!g_webviewLoader)
+    {
+        g_webviewLoader = LoadLibraryW(L"WebView2Loader.dll");
+        if (!g_webviewLoader)
+        {
+            MessageBoxW(hwnd, L"WebView2Loader.dll not found.", L"WebView2", MB_OK | MB_ICONERROR);
+            return false;
+        }
+    }
+
+    using CreateWebView2EnvironmentWithOptionsFn = HRESULT(WINAPI*)(
+        PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions*,
+        ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*);
+    auto createEnv = reinterpret_cast<CreateWebView2EnvironmentWithOptionsFn>(
+        GetProcAddress(g_webviewLoader, "CreateCoreWebView2EnvironmentWithOptions"));
+    if (!createEnv)
+    {
+        MessageBoxW(hwnd, L"CreateCoreWebView2EnvironmentWithOptions not available.", L"WebView2", MB_OK | MB_ICONERROR);
+        return false;
+    }
+
+    HRESULT hr = createEnv(
+        nullptr,
+        nullptr,
+        nullptr,
+        Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT
+            {
+                if (FAILED(result) || !env)
+                {
+                    return result;
+                }
+                return env->CreateCoreWebView2Controller(
+                    hwnd,
+                    Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT
+                        {
+                            if (FAILED(result) || !controller)
+                            {
+                                return result;
+                            }
+                            g_webviewController = controller;
+                            g_webviewController->get_CoreWebView2(&g_webview);
+                            g_webviewController->put_IsVisible(TRUE);
+                            UpdateWebViewBounds();
+                            if (g_webview && !g_pendingHtmlContent.empty())
+                            {
+                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                                g_pendingHtmlContent.clear();
+                            }
+                            return S_OK;
+                        }).Get());
+            }).Get());
+
+    return SUCCEEDED(hr);
+}
+
+void CloseWebView()
+{
+    if (g_webviewController)
+    {
+        g_webviewController->Close();
+    }
+    g_webviewController.Reset();
+    g_webview.Reset();
+    if (g_webviewLoader)
+    {
+        FreeLibrary(g_webviewLoader);
+        g_webviewLoader = nullptr;
+    }
 }
 
 void UpdateCustomColorBrush()
@@ -1397,7 +1629,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Image/Text/HTML Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.html;*.htm\0All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
@@ -1406,6 +1638,13 @@ bool ShowOpenImageDialog(HWND hwnd)
         return false;
     }
 
+    if (IsHtmlFile(filePath))
+    {
+        if (LoadHtmlFromFile(filePath))
+        {
+            return true;
+        }
+    }
     if (IsTextFile(filePath))
     {
         if (LoadTextFromFile(filePath))
@@ -1760,6 +1999,12 @@ bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight)
 // =====================
 void Render(HWND hwnd)
 {
+    if (g_hasHtml)
+    {
+        UpdateWebViewBounds();
+        return;
+    }
+
     if (!g_renderTarget)
     {
         if (!InitDirect2D(hwnd))
@@ -2003,7 +2248,11 @@ int WINAPI wWinMain(
     bool loadedImage = false;
     if (argv && argc > 1)
     {
-        if (IsTextFile(argv[1]))
+        if (IsHtmlFile(argv[1]))
+        {
+            loadedImage = LoadHtmlFromFile(argv[1]);
+        }
+        else if (IsTextFile(argv[1]))
         {
             loadedImage = LoadTextFromFile(argv[1]);
         }
