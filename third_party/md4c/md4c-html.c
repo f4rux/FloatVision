@@ -68,7 +68,7 @@ int md_html(const MD_CHAR* text, MD_SIZE size, MD_OUTPUT_FUNC output, void* user
     int in_code = 0;
     int in_list = 0;
     size_t pos = 0;
-    while (pos <= size)
+    while (pos < size)
     {
         size_t line_start = pos;
         while (pos < size && text[pos] != '\n' && text[pos] != '\r')
