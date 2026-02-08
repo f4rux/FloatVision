@@ -13,6 +13,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <wrl.h>
+#include "md4c.h"
+#include "md4c-html.h"
+#include <WebView2.h>
 #include "resource.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -33,6 +37,18 @@ ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
 ID2D1SolidColorBrush* g_customColorBrush = nullptr;
 ID2D1SolidColorBrush* g_textBrush = nullptr;
 HWND g_hwnd = nullptr;
+ICoreWebView2Controller* g_webViewController = nullptr;
+ICoreWebView2* g_webView = nullptr;
+EventRegistrationToken g_webViewNavToken{};
+bool g_webViewNavigationHooked = false;
+bool g_showingWeb = false;
+std::wstring g_pendingWebHtml;
+bool g_webViewReady = false;
+DWORD g_webViewStartTick = 0;
+std::wstring g_webViewFallbackText;
+
+constexpr UINT_PTR kWebViewTimeoutId = 42;
+constexpr DWORD kWebViewTimeoutMs = 3000;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
@@ -55,11 +71,13 @@ float g_dragStartHeight = 0.0f;
 
 bool g_hasText = false;
 std::wstring g_textContent;
+bool g_textIsMarkdown = false;
 std::wstring g_textFontName = L"Consolas";
 float g_textFontSize = 18.0f;
 COLORREF g_textColor = RGB(240, 240, 240);
 COLORREF g_textBackground = RGB(20, 20, 20);
 bool g_textWrap = true;
+float g_textScroll = 0.0f;
 
 enum class TransparencyMode
 {
@@ -119,6 +137,8 @@ bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
 bool LoadTextFromFile(const wchar_t* path);
+std::wstring ConvertMarkdownToHtml(const std::wstring& markdown);
+bool LoadHtmlFromFile(const wchar_t* path);
 void NavigateImage(int delta);
 void CleanupResources();
 void DiscardRenderTarget();
@@ -145,6 +165,10 @@ void ShowSettingsDialog(HWND hwnd);
 void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
+void ScrollTextBy(float delta);
+void InitializeWebView(HWND hwnd);
+void NavigateWebContent(const std::wstring& html);
+std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -167,7 +191,29 @@ bool IsTextFile(const std::filesystem::path& path)
     }
     std::wstring ext = path.extension().wstring();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
-    return ext == L".txt";
+    return ext == L".txt" || ext == L".md";
+}
+
+bool IsMarkdownFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".md";
+}
+
+bool IsHtmlFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".html" || ext == L".htm";
 }
 
 void SortImageList()
@@ -239,6 +285,12 @@ LRESULT CALLBACK WndProc(
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
         }
+        if (g_webViewController)
+        {
+            RECT bounds{};
+            GetClientRect(hwnd, &bounds);
+            g_webViewController->put_Bounds(bounds);
+        }
         if (g_fitToWindow)
         {
             UpdateFitZoomFromWindow(hwnd);
@@ -260,7 +312,14 @@ LRESULT CALLBACK WndProc(
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
                 path.resize(pathLength);
-                if (IsTextFile(path))
+                if (IsHtmlFile(path))
+                {
+                    if (LoadHtmlFromFile(path.c_str()))
+                    {
+                        InvalidateRect(hwnd, nullptr, TRUE);
+                    }
+                }
+                else if (IsTextFile(path))
                 {
                     if (LoadTextFromFile(path.c_str()))
                     {
@@ -418,13 +477,14 @@ LRESULT CALLBACK WndProc(
         }
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
         float steps = static_cast<float>(delta) / WHEEL_DELTA;
-        float factor = std::pow(1.1f, steps);
         if (g_hasText)
         {
-            ResizeWindowByFactor(hwnd, factor);
+            ScrollTextBy(-steps * 40.0f);
+            InvalidateRect(hwnd, nullptr, TRUE);
         }
         else
         {
+            float factor = std::pow(1.1f, steps);
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(factor, pt);
@@ -455,7 +515,7 @@ LRESULT CALLBACK WndProc(
         GetClientRect(hwnd, &rc);
         bool nearEdge = pt.x <= g_edgeDragMargin || pt.y <= g_edgeDragMargin
             || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
-        if (nearEdge && (g_bitmap || g_hasText))
+        if (nearEdge && (g_bitmap || g_hasText || g_showingWeb))
         {
             g_fitToWindow = false;
             g_isEdgeDragging = true;
@@ -464,7 +524,10 @@ LRESULT CALLBACK WndProc(
             g_dragStartScale = std::max(1.0f, (std::min)(static_cast<float>(rc.right - rc.left), static_cast<float>(rc.bottom - rc.top)));
             g_dragStartWidth = static_cast<float>(rc.right - rc.left);
             g_dragStartHeight = static_cast<float>(rc.bottom - rc.top);
-            UpdateWindowToZoomedImage();
+            if (g_bitmap)
+            {
+                UpdateWindowToZoomedImage();
+            }
             SetCapture(hwnd);
             return 0;
         }
@@ -478,18 +541,19 @@ LRESULT CALLBACK WndProc(
         if (g_isEdgeDragging && (wParam & MK_LBUTTON))
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-            float delta = static_cast<float>(pt.y - g_dragStartPoint.y);
-            if (g_hasText)
+            float deltaX = static_cast<float>(pt.x - g_dragStartPoint.x);
+            float deltaY = static_cast<float>(pt.y - g_dragStartPoint.y);
+            if (g_hasText || g_showingWeb)
             {
-                float nextWidth = std::max(200.0f, g_dragStartWidth + delta);
-                float nextHeight = std::max(200.0f, g_dragStartHeight + delta);
+                float nextWidth = std::max(200.0f, g_dragStartWidth + deltaX);
+                float nextHeight = std::max(200.0f, g_dragStartHeight + deltaY);
                 SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(nextWidth), static_cast<int>(nextHeight),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
             else
             {
-                float nextScale = std::max(1.0f, g_dragStartScale + delta);
+                float nextScale = std::max(1.0f, g_dragStartScale + deltaY);
                 float zoom = (g_dragStartScale > 0.0f) ? (g_dragStartZoom * (nextScale / g_dragStartScale)) : g_dragStartZoom;
                 g_zoom = std::max(g_zoomMin, (std::min)(zoom, g_zoomMax));
                 UpdateWindowToZoomedImage();
@@ -520,6 +584,13 @@ LRESULT CALLBACK WndProc(
 
     case WM_KEYDOWN:
     {
+        if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
+        {
+            float delta = (wParam == VK_UP) ? -40.0f : 40.0f;
+            ScrollTextBy(delta);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
         if (wParam == VK_RIGHT && !g_imageList.empty())
         {
             NavigateImage(1);
@@ -528,6 +599,15 @@ LRESULT CALLBACK WndProc(
         if (wParam == VK_LEFT && !g_imageList.empty())
         {
             NavigateImage(-1);
+            return 0;
+        }
+        if ((wParam == VK_UP || wParam == VK_DOWN) && g_bitmap)
+        {
+            float factor = (wParam == VK_UP) ? 1.1f : (1.0f / 1.1f);
+            POINT pt{};
+            GetCursorPos(&pt);
+            AdjustZoom(factor, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
         }
         if (wParam == VK_ADD || wParam == VK_OEM_PLUS)
@@ -563,10 +643,63 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_DESTROY:
+    {
+        if (g_webView)
+        {
+            g_webView->Release();
+            g_webView = nullptr;
+        }
+        if (g_webViewController)
+        {
+            g_webViewController->Release();
+            g_webViewController = nullptr;
+        }
+        g_pendingWebHtml.clear();
+        g_webViewFallbackText.clear();
+        g_webViewReady = false;
+        g_webViewNavigationHooked = false;
         SaveWindowPlacement();
         SaveSettings();
         PostQuitMessage(0);
         return 0;
+    }
+
+    case WM_TIMER:
+    {
+        if (wParam == kWebViewTimeoutId)
+        {
+            if (g_showingWeb && !g_webViewReady)
+            {
+                DWORD elapsed = GetTickCount() - g_webViewStartTick;
+                if (elapsed >= kWebViewTimeoutMs)
+                {
+                    if (g_webViewFallbackText.empty())
+                    {
+                        g_webViewStartTick = GetTickCount();
+                        return 0;
+                    }
+
+                    g_showingWeb = false;
+                    g_hasText = true;
+                    if (g_textIsMarkdown)
+                    {
+                        g_textContent = ConvertMarkdownToDisplayText(g_webViewFallbackText);
+                    }
+                    else
+                    {
+                        g_textContent = g_webViewFallbackText;
+                    }
+                    KillTimer(hwnd, kWebViewTimeoutId);
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
+            }
+            return 0;
+        }
+        break;
+    }
+
+    default:
+        break;
     }
 
     return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -604,7 +737,7 @@ bool InitDirect2D(HWND hwnd)
     g_renderTarget->SetDpi(96.0f, 96.0f);
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
-        D2D1::ColorF(D2D1::ColorF::White),
+        D2D1::ColorF(D2D1::ColorF::Black),
         &g_placeholderBrush)))
     {
         return false;
@@ -878,8 +1011,59 @@ bool LoadTextFromFile(const wchar_t* path)
     g_imageHeight = 0;
     g_imageHasAlpha = false;
     g_hasText = true;
+    g_showingWeb = false;
+    g_textIsMarkdown = IsMarkdownFile(path);
     g_textContent = std::move(text);
+    g_textScroll = 0.0f;
+    if (g_textIsMarkdown)
+    {
+        std::wstring html = ConvertMarkdownToHtml(g_textContent);
+        g_webViewFallbackText = g_textContent;
+        InitializeWebView(g_hwnd);
+        NavigateWebContent(html);
+        g_showingWeb = true;
+        g_hasText = false;
+        g_textContent.clear();
+        g_webViewStartTick = GetTickCount();
+        SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
+        return true;
+    }
     ApplyTransparencyMode();
+    return true;
+}
+
+bool LoadHtmlFromFile(const wchar_t* path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
+        && static_cast<unsigned char>(bytes[1]) == 0xBB
+        && static_cast<unsigned char>(bytes[2]) == 0xBF)
+    {
+        bytes.erase(0, 3);
+    }
+    int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    if (needed <= 0)
+    {
+        return false;
+    }
+    std::wstring html(needed, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), html.data(), needed);
+
+    g_showingWeb = false;
+    InitializeWebView(g_hwnd);
+    NavigateWebContent(html);
+    g_showingWeb = true;
+    g_hasText = false;
+    g_textContent.clear();
+    g_textIsMarkdown = false;
+    g_webViewFallbackText.clear();
+    g_webViewStartTick = GetTickCount();
+    SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
     return true;
 }
 
@@ -912,6 +1096,260 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     if (componentInfo) componentInfo->Release();
 
     return hasAlpha;
+}
+
+namespace
+{
+    void AppendMarkdownHtml(const MD_CHAR* text, MD_SIZE size, void* userdata)
+    {
+        if (!userdata || !text || size == 0)
+        {
+            return;
+        }
+        auto* buffer = static_cast<std::string*>(userdata);
+        buffer->append(text, size);
+    }
+
+    std::wstring EscapeHtml(const std::wstring& input)
+    {
+        std::wstring output;
+        output.reserve(input.size());
+        for (wchar_t ch : input)
+        {
+            switch (ch)
+            {
+            case L'&':
+                output.append(L"&amp;");
+                break;
+            case L'<':
+                output.append(L"&lt;");
+                break;
+            case L'>':
+                output.append(L"&gt;");
+                break;
+            case L'"':
+                output.append(L"&quot;");
+                break;
+            default:
+                output.push_back(ch);
+                break;
+            }
+        }
+        return output;
+    }
+
+    std::wstring BuildFallbackHtml(const std::wstring& markdown)
+    {
+        std::wstring html;
+        html.append(L"<!doctype html><html><head><meta charset=\"utf-8\"/>");
+        html.append(L"<meta name=\"color-scheme\" content=\"light\"/>");
+        html.append(L"<style>body{font-family:Segoe UI, sans-serif;margin:16px;background:#fff;color:#111;}");
+        html.append(L"pre{white-space:pre-wrap;font-family:Consolas,monospace;}</style></head><body><pre>");
+        html.append(EscapeHtml(markdown));
+        html.append(L"</pre></body></html>");
+        return html;
+    }
+}
+
+std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
+{
+    if (markdown.empty())
+    {
+        return L"";
+    }
+
+    int utf8Size = WideCharToMultiByte(CP_UTF8, 0, markdown.data(), static_cast<int>(markdown.size()), nullptr, 0, nullptr, nullptr);
+    if (utf8Size <= 0)
+    {
+        return L"";
+    }
+
+    std::string utf8(utf8Size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, markdown.data(), static_cast<int>(markdown.size()), utf8.data(), utf8Size, nullptr, nullptr);
+
+    std::string html;
+    md_html(utf8.data(), static_cast<MD_SIZE>(utf8.size()), AppendMarkdownHtml, &html, 0, 0);
+
+    if (html.empty())
+    {
+        return BuildFallbackHtml(markdown);
+    }
+
+    int wideSize = MultiByteToWideChar(CP_UTF8, 0, html.data(), static_cast<int>(html.size()), nullptr, 0);
+    if (wideSize <= 0)
+    {
+        return BuildFallbackHtml(markdown);
+    }
+    std::wstring wideHtml(wideSize, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, html.data(), static_cast<int>(html.size()), wideHtml.data(), wideSize);
+    return wideHtml;
+}
+
+void InitializeWebView(HWND hwnd)
+{
+    if (!hwnd || g_webViewController)
+    {
+        return;
+    }
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
+        Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [hwnd](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT
+            {
+                if (FAILED(hr))
+                {
+                    g_showingWeb = false;
+                    g_hasText = true;
+                    g_textContent = L"WebView2 initialization failed.";
+                    g_pendingWebHtml.clear();
+                    g_webViewReady = false;
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                    return hr;
+                }
+                return env->CreateCoreWebView2Controller(hwnd,
+                    Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [hwnd](HRESULT hr2, ICoreWebView2Controller* controller) -> HRESULT
+                        {
+                            if (FAILED(hr2))
+                            {
+                                g_showingWeb = false;
+                                g_hasText = true;
+                                g_textContent = L"WebView2 initialization failed.";
+                                g_pendingWebHtml.clear();
+                                g_webViewReady = false;
+                                InvalidateRect(hwnd, nullptr, TRUE);
+                                return hr2;
+                            }
+                            g_webViewController = controller;
+                            g_webViewController->get_CoreWebView2(&g_webView);
+                            RECT bounds{};
+                            GetClientRect(hwnd, &bounds);
+                            g_webViewController->put_Bounds(bounds);
+                            g_webViewController->put_IsVisible(TRUE);
+                            g_webViewReady = g_webView != nullptr;
+                            if (g_webView && !g_webViewNavigationHooked)
+                            {
+                                g_webView->add_NavigationCompleted(
+                                    Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                        [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
+                                        {
+                                            BOOL success = FALSE;
+                                            if (args)
+                                            {
+                                                args->get_IsSuccess(&success);
+                                            }
+                                            if (success)
+                                            {
+                                                g_webViewReady = true;
+                                                if (g_hwnd)
+                                                {
+                                                    KillTimer(g_hwnd, kWebViewTimeoutId);
+                                                }
+                                            }
+                                            else
+                                            {
+                                                g_showingWeb = false;
+                                                g_hasText = true;
+                                                g_textContent = L"WebView2 failed to render content.";
+                                                g_webViewReady = false;
+                                                if (g_hwnd)
+                                                {
+                                                    KillTimer(g_hwnd, kWebViewTimeoutId);
+                                                }
+                                            }
+                                            if (g_hwnd)
+                                            {
+                                                InvalidateRect(g_hwnd, nullptr, TRUE);
+                                            }
+                                            return S_OK;
+                                        }).Get(),
+                                    &g_webViewNavToken);
+                                g_webViewNavigationHooked = true;
+                            }
+                            if (g_webView && !g_pendingWebHtml.empty())
+                            {
+                                g_webViewReady = false;
+                                g_webView->NavigateToString(g_pendingWebHtml.c_str());
+                                g_pendingWebHtml.clear();
+                                InvalidateRect(hwnd, nullptr, TRUE);
+                            }
+                            return S_OK;
+                        }).Get());
+            }).Get());
+}
+
+void NavigateWebContent(const std::wstring& html)
+{
+    if (g_webView)
+    {
+        g_webViewReady = false;
+        g_webView->NavigateToString(html.c_str());
+        g_pendingWebHtml.clear();
+        if (g_hwnd)
+        {
+            InvalidateRect(g_hwnd, nullptr, TRUE);
+        }
+    }
+    else
+    {
+        g_pendingWebHtml = html;
+        g_webViewReady = false;
+        g_webViewStartTick = GetTickCount();
+        if (g_hwnd)
+        {
+            SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
+        }
+    }
+}
+
+std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
+{
+    std::wstring output;
+    output.reserve(markdown.size());
+    bool inCodeBlock = false;
+    size_t pos = 0;
+    while (pos <= markdown.size())
+    {
+        size_t lineEnd = markdown.find(L'\n', pos);
+        if (lineEnd == std::wstring::npos)
+        {
+            lineEnd = markdown.size();
+        }
+        std::wstring line = markdown.substr(pos, lineEnd - pos);
+        if (line.rfind(L"```", 0) == 0)
+        {
+            inCodeBlock = !inCodeBlock;
+            output.append(inCodeBlock ? L"\n[code]\n" : L"\n[/code]\n");
+        }
+        else if (line.rfind(L"#", 0) == 0 && !inCodeBlock)
+        {
+            size_t level = 0;
+            while (level < line.size() && line[level] == L'#')
+            {
+                ++level;
+            }
+            while (level < line.size() && line[level] == L' ')
+            {
+                ++level;
+            }
+            std::wstring header = line.substr(level);
+            output.append(L"\n");
+            output.append(header);
+            output.append(L"\n");
+            output.append(std::wstring(header.size(), L'='));
+            output.append(L"\n");
+        }
+        else
+        {
+            output.append(line);
+            output.append(L"\n");
+        }
+        if (lineEnd == markdown.size())
+        {
+            break;
+        }
+        pos = lineEnd + 1;
+    }
+    return output;
 }
 
 void ApplyTransparencyMode()
@@ -1003,6 +1441,41 @@ void ResizeWindowByFactor(HWND hwnd, float factor)
     SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(width), static_cast<int>(height),
         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     InvalidateRect(hwnd, nullptr, TRUE);
+}
+
+void ScrollTextBy(float delta)
+{
+    if (!g_renderTarget || !g_textFormat)
+    {
+        return;
+    }
+
+    D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+    if (rtSize.width <= 0.0f || rtSize.height <= 0.0f)
+    {
+        return;
+    }
+
+    IDWriteTextLayout* layout = nullptr;
+    g_dwriteFactory->CreateTextLayout(
+        g_textContent.c_str(),
+        static_cast<UINT32>(g_textContent.size()),
+        g_textFormat,
+        rtSize.width - 16.0f,
+        10000.0f,
+        &layout
+    );
+    if (!layout)
+    {
+        return;
+    }
+
+    DWRITE_TEXT_METRICS metrics{};
+    layout->GetMetrics(&metrics);
+    layout->Release();
+
+    float maxScroll = std::max(0.0f, metrics.height + 16.0f - rtSize.height);
+    g_textScroll = std::max(0.0f, std::min(g_textScroll + delta, maxScroll));
 }
 
 void ShowSettingsDialog(HWND hwnd)
@@ -1335,7 +1808,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.md;*.html;*.htm\0All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
@@ -1344,6 +1817,13 @@ bool ShowOpenImageDialog(HWND hwnd)
         return false;
     }
 
+    if (IsHtmlFile(filePath))
+    {
+        if (LoadHtmlFromFile(filePath))
+        {
+            return true;
+        }
+    }
     if (IsTextFile(filePath))
     {
         if (LoadTextFromFile(filePath))
@@ -1708,7 +2188,23 @@ void Render(HWND hwnd)
 
     g_renderTarget->BeginDraw();
 
-    if (g_hasText)
+    if (g_showingWeb)
+    {
+        D2D1_COLOR_F bgColor = D2D1::ColorF(D2D1::ColorF::White);
+        g_renderTarget->Clear(bgColor);
+        if (!g_webViewReady && g_placeholderFormat && g_placeholderBrush)
+        {
+            std::wstring message = L"Loading Markdown...";
+            g_renderTarget->DrawTextW(
+                message.c_str(),
+                static_cast<UINT32>(message.size()),
+                g_placeholderFormat,
+                D2D1::RectF(20.0f, 20.0f, 1000.0f, 200.0f),
+                g_placeholderBrush
+            );
+        }
+    }
+    else if (g_hasText)
     {
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
         if (g_renderTarget && rtSize.width > 0.0f && rtSize.height > 0.0f)
@@ -1721,14 +2217,24 @@ void Render(HWND hwnd)
             g_renderTarget->Clear(bgColor);
             if (g_textFormat && g_textBrush)
             {
-                D2D1_RECT_F textRect = D2D1::RectF(8.0f, 8.0f, rtSize.width - 8.0f, rtSize.height - 8.0f);
-                g_renderTarget->DrawTextW(
+                IDWriteTextLayout* layout = nullptr;
+                g_dwriteFactory->CreateTextLayout(
                     g_textContent.c_str(),
                     static_cast<UINT32>(g_textContent.size()),
                     g_textFormat,
-                    textRect,
-                    g_textBrush
+                    rtSize.width - 16.0f,
+                    10000.0f,
+                    &layout
                 );
+                if (layout)
+                {
+                    g_renderTarget->DrawTextLayout(
+                        D2D1::Point2F(8.0f, 8.0f - g_textScroll),
+                        layout,
+                        g_textBrush
+                    );
+                    layout->Release();
+                }
             }
         }
     }
@@ -1931,7 +2437,11 @@ int WINAPI wWinMain(
     bool loadedImage = false;
     if (argv && argc > 1)
     {
-        if (IsTextFile(argv[1]))
+        if (IsHtmlFile(argv[1]))
+        {
+            loadedImage = LoadHtmlFromFile(argv[1]);
+        }
+        else if (IsTextFile(argv[1]))
         {
             loadedImage = LoadTextFromFile(argv[1]);
         }

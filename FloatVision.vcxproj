@@ -105,6 +105,8 @@
       <PreprocessorDefinitions>_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(ProjectDir)third_party\md4c
+</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -134,6 +136,9 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FloatVision.cpp" />
+    <ClCompile Include="third_party\md4c\entity.c" />
+    <ClCompile Include="third_party\md4c\md4c-html.c" />
+    <ClCompile Include="third_party\md4c\md4c.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="FloatVision.rc" />
@@ -142,7 +147,11 @@
     <Image Include="res\FloatVision.ico" />
     <Image Include="res\small.ico" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="packages.config" />
+  </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
+    <Import Project="packages\Microsoft.Web.WebView2.1.0.3719.77\build\native\Microsoft.Web.WebView2.targets" Condition="Exists('packages\Microsoft.Web.WebView2.1.0.3719.77\build\native\Microsoft.Web.WebView2.targets')" />
   </ImportGroup>
 </Project>
