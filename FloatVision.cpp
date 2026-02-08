@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <WebView2.h>
 #include "resource.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -33,6 +34,9 @@ ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
 ID2D1SolidColorBrush* g_customColorBrush = nullptr;
 ID2D1SolidColorBrush* g_textBrush = nullptr;
 HWND g_hwnd = nullptr;
+ICoreWebView2Controller* g_webViewController = nullptr;
+ICoreWebView2* g_webView = nullptr;
+bool g_showingWeb = false;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
@@ -121,7 +125,8 @@ bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
 bool LoadTextFromFile(const wchar_t* path);
-std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown);
+std::wstring ConvertMarkdownToHtml(const std::wstring& markdown);
+bool LoadHtmlFromFile(const wchar_t* path);
 void NavigateImage(int delta);
 void CleanupResources();
 void DiscardRenderTarget();
@@ -149,6 +154,8 @@ void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
+void InitializeWebView(HWND hwnd);
+void NavigateWebContent(const std::wstring& html);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -183,6 +190,17 @@ bool IsMarkdownFile(const std::filesystem::path& path)
     std::wstring ext = path.extension().wstring();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
     return ext == L".md";
+}
+
+bool IsHtmlFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".html" || ext == L".htm";
 }
 
 void SortImageList()
@@ -254,6 +272,12 @@ LRESULT CALLBACK WndProc(
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
         }
+        if (g_webViewController)
+        {
+            RECT bounds{};
+            GetClientRect(hwnd, &bounds);
+            g_webViewController->put_Bounds(bounds);
+        }
         if (g_fitToWindow)
         {
             UpdateFitZoomFromWindow(hwnd);
@@ -275,7 +299,14 @@ LRESULT CALLBACK WndProc(
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
                 path.resize(pathLength);
-                if (IsTextFile(path))
+                if (IsHtmlFile(path))
+                {
+                    if (LoadHtmlFromFile(path.c_str()))
+                    {
+                        InvalidateRect(hwnd, nullptr, TRUE);
+                    }
+                }
+                else if (IsTextFile(path))
                 {
                     if (LoadTextFromFile(path.c_str()))
                     {
@@ -596,6 +627,16 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_DESTROY:
+        if (g_webView)
+        {
+            g_webView->Release();
+            g_webView = nullptr;
+        }
+        if (g_webViewController)
+        {
+            g_webViewController->Release();
+            g_webViewController = nullptr;
+        }
         SaveWindowPlacement();
         SaveSettings();
         PostQuitMessage(0);
@@ -911,14 +952,52 @@ bool LoadTextFromFile(const wchar_t* path)
     g_imageHeight = 0;
     g_imageHasAlpha = false;
     g_hasText = true;
+    g_showingWeb = false;
     g_textIsMarkdown = IsMarkdownFile(path);
     g_textContent = std::move(text);
     g_textScroll = 0.0f;
     if (g_textIsMarkdown)
     {
-        g_textContent = ConvertMarkdownToDisplayText(g_textContent);
+        std::wstring html = ConvertMarkdownToHtml(g_textContent);
+        InitializeWebView(g_hwnd);
+        NavigateWebContent(html);
+        g_showingWeb = true;
+        g_hasText = false;
+        g_textContent.clear();
+        return true;
     }
     ApplyTransparencyMode();
+    return true;
+}
+
+bool LoadHtmlFromFile(const wchar_t* path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
+        && static_cast<unsigned char>(bytes[1]) == 0xBB
+        && static_cast<unsigned char>(bytes[2]) == 0xBF)
+    {
+        bytes.erase(0, 3);
+    }
+    int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    if (needed <= 0)
+    {
+        return false;
+    }
+    std::wstring html(needed, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), html.data(), needed);
+
+    g_showingWeb = false;
+    InitializeWebView(g_hwnd);
+    NavigateWebContent(html);
+    g_showingWeb = true;
+    g_hasText = false;
+    g_textContent.clear();
     return true;
 }
 
@@ -953,10 +1032,13 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     return hasAlpha;
 }
 
-std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
+std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
 {
-    std::wstring output;
-    output.reserve(markdown.size() * 2);
+    std::wstring html;
+    html.reserve(markdown.size() * 2);
+    html.append(L"<!doctype html><html><head><meta charset=\"utf-8\">");
+    html.append(L"<style>body{font-family:Segoe UI, sans-serif; margin:16px;} pre{background:#f0f0f0;padding:8px;}</style>");
+    html.append(L"</head><body>\n");
     bool inCodeBlock = false;
     bool inList = false;
     size_t pos = 0;
@@ -971,13 +1053,13 @@ std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
         if (line.rfind(L"```", 0) == 0)
         {
             inCodeBlock = !inCodeBlock;
-            output.append(inCodeBlock ? L"\n[code]\n" : L"\n[/code]\n");
+            html.append(inCodeBlock ? L"<pre><code>" : L"</code></pre>");
+            html.append(L"\n");
         }
         else if (inCodeBlock)
         {
-            output.append(L"  ");
-            output.append(line);
-            output.append(L"\n");
+            html.append(line);
+            html.append(L"\n");
         }
         else if (line.rfind(L"#", 0) == 0)
         {
@@ -990,39 +1072,40 @@ std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
             {
                 ++level;
             }
-            std::wstring header = line.substr(level);
-            output.append(L"\n");
-            output.append(header);
-            output.append(L"\n");
-            output.append(std::wstring(header.size(), L'='));
-            output.append(L"\n");
+            html.append(L"<h1>");
+            html.append(line.substr(level));
+            html.append(L"</h1>\n");
         }
         else if (line.rfind(L"- ", 0) == 0 || line.rfind(L"* ", 0) == 0)
         {
             if (!inList)
             {
+                html.append(L"<ul>\n");
                 inList = true;
             }
-            output.append(L"• ");
-            output.append(line.substr(2));
-            output.append(L"\n");
+            html.append(L"<li>");
+            html.append(line.substr(2));
+            html.append(L"</li>\n");
         }
         else if (line.empty())
         {
             if (inList)
             {
+                html.append(L"</ul>\n");
                 inList = false;
             }
-            output.append(L"\n");
+            html.append(L"\n");
         }
         else
         {
             if (inList)
             {
+                html.append(L"</ul>\n");
                 inList = false;
             }
-            output.append(line);
-            output.append(L"\n");
+            html.append(L"<p>");
+            html.append(line);
+            html.append(L"</p>\n");
         }
 
         if (lineEnd == markdown.size())
@@ -1031,7 +1114,52 @@ std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
         }
         pos = lineEnd + 1;
     }
-    return output;
+    if (inList)
+    {
+        html.append(L"</ul>\n");
+    }
+    html.append(L"</body></html>");
+    return html;
+}
+
+void InitializeWebView(HWND hwnd)
+{
+    if (!hwnd || g_webViewController)
+    {
+        return;
+    }
+    CreateCoreWebView2EnvironmentWithOptions(nullptr, nullptr, nullptr,
+        Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
+            [hwnd](HRESULT hr, ICoreWebView2Environment* env) -> HRESULT
+            {
+                if (FAILED(hr))
+                {
+                    return hr;
+                }
+                return env->CreateCoreWebView2Controller(hwnd,
+                    Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
+                        [hwnd](HRESULT hr2, ICoreWebView2Controller* controller) -> HRESULT
+                        {
+                            if (FAILED(hr2))
+                            {
+                                return hr2;
+                            }
+                            g_webViewController = controller;
+                            g_webViewController->get_CoreWebView2(&g_webView);
+                            RECT bounds{};
+                            GetClientRect(hwnd, &bounds);
+                            g_webViewController->put_Bounds(bounds);
+                            return S_OK;
+                        }).Get());
+            }).Get());
+}
+
+void NavigateWebContent(const std::wstring& html)
+{
+    if (g_webView)
+    {
+        g_webView->NavigateToString(html.c_str());
+    }
 }
 
 void ApplyTransparencyMode()
@@ -1490,7 +1618,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.md\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.md;*.html;*.htm\0All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
@@ -1499,6 +1627,13 @@ bool ShowOpenImageDialog(HWND hwnd)
         return false;
     }
 
+    if (IsHtmlFile(filePath))
+    {
+        if (LoadHtmlFromFile(filePath))
+        {
+            return true;
+        }
+    }
     if (IsTextFile(filePath))
     {
         if (LoadTextFromFile(filePath))
@@ -1863,7 +1998,11 @@ void Render(HWND hwnd)
 
     g_renderTarget->BeginDraw();
 
-    if (g_hasText)
+    if (g_showingWeb)
+    {
+        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+    }
+    else if (g_hasText)
     {
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
         if (g_renderTarget && rtSize.width > 0.0f && rtSize.height > 0.0f)
@@ -2096,7 +2235,11 @@ int WINAPI wWinMain(
     bool loadedImage = false;
     if (argv && argc > 1)
     {
-        if (IsTextFile(argv[1]))
+        if (IsHtmlFile(argv[1]))
+        {
+            loadedImage = LoadHtmlFromFile(argv[1]);
+        }
+        else if (IsTextFile(argv[1]))
         {
             loadedImage = LoadTextFromFile(argv[1]);
         }
