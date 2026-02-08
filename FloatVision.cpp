@@ -14,6 +14,7 @@
 #include <fstream>
 #include <string>
 #include <wrl.h>
+#include "third_party/md4c/md4c-html.h"
 #if __has_include(<WebView2.h>)
 #include <WebView2.h>
 #define FLOATVISION_HAS_WEBVIEW2 1
@@ -1056,94 +1057,46 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     return hasAlpha;
 }
 
+namespace
+{
+    void AppendMarkdownHtml(const MD_CHAR* text, MD_SIZE size, void* userdata)
+    {
+        if (!userdata || !text || size == 0)
+        {
+            return;
+        }
+        auto* buffer = static_cast<std::string*>(userdata);
+        buffer->append(text, size);
+    }
+}
+
 std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
 {
-    std::wstring html;
-    html.reserve(markdown.size() * 2);
-    html.append(L"<!doctype html><html><head><meta charset=\"utf-8\">");
-    html.append(L"<style>body{font-family:Segoe UI, sans-serif; margin:16px;} pre{background:#f0f0f0;padding:8px;}</style>");
-    html.append(L"</head><body>\n");
-    bool inCodeBlock = false;
-    bool inList = false;
-    size_t pos = 0;
-    while (pos <= markdown.size())
+    if (markdown.empty())
     {
-        size_t lineEnd = markdown.find(L'\n', pos);
-        if (lineEnd == std::wstring::npos)
-        {
-            lineEnd = markdown.size();
-        }
-        std::wstring line = markdown.substr(pos, lineEnd - pos);
-        if (line.rfind(L"```", 0) == 0)
-        {
-            inCodeBlock = !inCodeBlock;
-            html.append(inCodeBlock ? L"<pre><code>" : L"</code></pre>");
-            html.append(L"\n");
-        }
-        else if (inCodeBlock)
-        {
-            html.append(line);
-            html.append(L"\n");
-        }
-        else if (line.rfind(L"#", 0) == 0)
-        {
-            size_t level = 0;
-            while (level < line.size() && line[level] == L'#')
-            {
-                ++level;
-            }
-            while (level < line.size() && line[level] == L' ')
-            {
-                ++level;
-            }
-            html.append(L"<h1>");
-            html.append(line.substr(level));
-            html.append(L"</h1>\n");
-        }
-        else if (line.rfind(L"- ", 0) == 0 || line.rfind(L"* ", 0) == 0)
-        {
-            if (!inList)
-            {
-                html.append(L"<ul>\n");
-                inList = true;
-            }
-            html.append(L"<li>");
-            html.append(line.substr(2));
-            html.append(L"</li>\n");
-        }
-        else if (line.empty())
-        {
-            if (inList)
-            {
-                html.append(L"</ul>\n");
-                inList = false;
-            }
-            html.append(L"\n");
-        }
-        else
-        {
-            if (inList)
-            {
-                html.append(L"</ul>\n");
-                inList = false;
-            }
-            html.append(L"<p>");
-            html.append(line);
-            html.append(L"</p>\n");
-        }
+        return L"";
+    }
 
-        if (lineEnd == markdown.size())
-        {
-            break;
-        }
-        pos = lineEnd + 1;
-    }
-    if (inList)
+    int utf8Size = WideCharToMultiByte(CP_UTF8, 0, markdown.data(), static_cast<int>(markdown.size()), nullptr, 0, nullptr, nullptr);
+    if (utf8Size <= 0)
     {
-        html.append(L"</ul>\n");
+        return L"";
     }
-    html.append(L"</body></html>");
-    return html;
+
+    std::string utf8(utf8Size, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, markdown.data(), static_cast<int>(markdown.size()), utf8.data(), utf8Size, nullptr, nullptr);
+
+    std::string html;
+    md_html(utf8.data(), utf8.size(), AppendMarkdownHtml, &html, 0, 0);
+
+    int wideSize = MultiByteToWideChar(CP_UTF8, 0, html.data(), static_cast<int>(html.size()), nullptr, 0);
+    if (wideSize <= 0)
+    {
+        return L"";
+    }
+    std::wstring wideHtml(wideSize, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, html.data(), static_cast<int>(html.size()), wideHtml.data(), wideSize);
+    return wideHtml;
 }
 
 void InitializeWebView(HWND hwnd)
