@@ -149,6 +149,7 @@ void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
+void OpenMarkdownInBrowser(const std::wstring& html);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -916,7 +917,9 @@ bool LoadTextFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     if (g_textIsMarkdown)
     {
-        g_textContent = ConvertMarkdownToHtml(g_textContent);
+        std::wstring html = ConvertMarkdownToHtml(g_textContent);
+        OpenMarkdownInBrowser(html);
+        g_textContent = L"Markdown opened in your default browser.";
     }
     ApplyTransparencyMode();
     return true;
@@ -957,6 +960,9 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
 {
     std::wstring html;
     html.reserve(markdown.size() * 2);
+    html.append(L"<!doctype html><html><head><meta charset=\"utf-8\">");
+    html.append(L"<style>body{font-family:Segoe UI, sans-serif; margin:16px;} pre{background:#f0f0f0;padding:8px;}</style>");
+    html.append(L"</head><body>\n");
     bool inCodeBlock = false;
     bool inList = false;
     size_t pos = 0;
@@ -1036,7 +1042,44 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
     {
         html.append(L"</ul>\n");
     }
+    html.append(L"</body></html>");
     return html;
+}
+
+void OpenMarkdownInBrowser(const std::wstring& html)
+{
+    wchar_t tempPath[MAX_PATH]{};
+    if (GetTempPathW(MAX_PATH, tempPath) == 0)
+    {
+        return;
+    }
+    wchar_t tempFile[MAX_PATH]{};
+    if (GetTempFileNameW(tempPath, L"FVT", 0, tempFile) == 0)
+    {
+        return;
+    }
+
+    std::filesystem::path htmlPath = tempFile;
+    htmlPath.replace_extension(L".html");
+
+    int needed = WideCharToMultiByte(CP_UTF8, 0, html.c_str(), static_cast<int>(html.size()), nullptr, 0, nullptr, nullptr);
+    if (needed <= 0)
+    {
+        return;
+    }
+    std::string utf8(needed, '\0');
+    WideCharToMultiByte(CP_UTF8, 0, html.c_str(), static_cast<int>(html.size()), utf8.data(), needed, nullptr, nullptr);
+
+    std::ofstream out(htmlPath, std::ios::binary);
+    if (!out)
+    {
+        return;
+    }
+    out.write("\xEF\xBB\xBF", 3);
+    out.write(utf8.data(), utf8.size());
+    out.close();
+
+    ShellExecuteW(nullptr, L"open", htmlPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
 }
 
 void ApplyTransparencyMode()
