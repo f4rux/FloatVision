@@ -39,10 +39,10 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="FloatVision.ico">
+    <Image Include="res\FloatVision.ico">
       <Filter>リソース ファイル</Filter>
     </Image>
-    <Image Include="small.ico">
+    <Image Include="res\small.ico">
       <Filter>リソース ファイル</Filter>
     </Image>
   </ItemGroup>
