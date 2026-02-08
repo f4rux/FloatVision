@@ -45,11 +45,5 @@
     <Image Include="res\small.ico">
       <Filter>リソース ファイル</Filter>
     </Image>
-    <Image Include="FloatVision.ico">
-      <Filter>リソース ファイル</Filter>
-    </Image>
-    <Image Include="small.ico">
-      <Filter>リソース ファイル</Filter>
-    </Image>
   </ItemGroup>
 </Project>
