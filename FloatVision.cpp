@@ -673,19 +673,21 @@ LRESULT CALLBACK WndProc(
                 DWORD elapsed = GetTickCount() - g_webViewStartTick;
                 if (elapsed >= kWebViewTimeoutMs)
                 {
+                    if (g_webViewFallbackText.empty())
+                    {
+                        g_webViewStartTick = GetTickCount();
+                        return 0;
+                    }
+
                     g_showingWeb = false;
                     g_hasText = true;
-                    if (g_textIsMarkdown && !g_webViewFallbackText.empty())
+                    if (g_textIsMarkdown)
                     {
                         g_textContent = ConvertMarkdownToDisplayText(g_webViewFallbackText);
                     }
-                    else if (!g_webViewFallbackText.empty())
-                    {
-                        g_textContent = g_webViewFallbackText;
-                    }
                     else
                     {
-                        g_textContent = L"WebView2 initialization timed out.";
+                        g_textContent = g_webViewFallbackText;
                     }
                     KillTimer(hwnd, kWebViewTimeoutId);
                     InvalidateRect(hwnd, nullptr, TRUE);
