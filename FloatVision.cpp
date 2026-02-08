@@ -61,6 +61,7 @@ float g_textFontSize = 18.0f;
 COLORREF g_textColor = RGB(240, 240, 240);
 COLORREF g_textBackground = RGB(20, 20, 20);
 bool g_textWrap = true;
+float g_textScroll = 0.0f;
 
 enum class TransparencyMode
 {
@@ -120,6 +121,7 @@ bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
 bool LoadTextFromFile(const wchar_t* path);
+std::wstring ConvertMarkdownToHtml(const std::wstring& markdown);
 void NavigateImage(int delta);
 void CleanupResources();
 void DiscardRenderTarget();
@@ -146,6 +148,7 @@ void ShowSettingsDialog(HWND hwnd);
 void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
+void ScrollTextBy(float delta);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -430,13 +433,14 @@ LRESULT CALLBACK WndProc(
         }
         int delta = GET_WHEEL_DELTA_WPARAM(wParam);
         float steps = static_cast<float>(delta) / WHEEL_DELTA;
-        float factor = std::pow(1.1f, steps);
         if (g_hasText)
         {
-            ResizeWindowByFactor(hwnd, factor);
+            ScrollTextBy(-steps * 40.0f);
+            InvalidateRect(hwnd, nullptr, TRUE);
         }
         else
         {
+            float factor = std::pow(1.1f, steps);
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(factor, pt);
@@ -533,6 +537,13 @@ LRESULT CALLBACK WndProc(
 
     case WM_KEYDOWN:
     {
+        if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
+        {
+            float delta = (wParam == VK_UP) ? -40.0f : 40.0f;
+            ScrollTextBy(delta);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
         if (wParam == VK_RIGHT && !g_imageList.empty())
         {
             NavigateImage(1);
@@ -541,6 +552,15 @@ LRESULT CALLBACK WndProc(
         if (wParam == VK_LEFT && !g_imageList.empty())
         {
             NavigateImage(-1);
+            return 0;
+        }
+        if ((wParam == VK_UP || wParam == VK_DOWN) && g_bitmap)
+        {
+            float factor = (wParam == VK_UP) ? 1.1f : (1.0f / 1.1f);
+            POINT pt{};
+            GetCursorPos(&pt);
+            AdjustZoom(factor, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
         }
         if (wParam == VK_ADD || wParam == VK_OEM_PLUS)
@@ -893,52 +913,10 @@ bool LoadTextFromFile(const wchar_t* path)
     g_hasText = true;
     g_textIsMarkdown = IsMarkdownFile(path);
     g_textContent = std::move(text);
+    g_textScroll = 0.0f;
     if (g_textIsMarkdown)
     {
-        std::wstring rendered;
-        rendered.reserve(g_textContent.size());
-        bool inCodeBlock = false;
-        for (size_t i = 0; i < g_textContent.size();)
-        {
-            if (g_textContent.compare(i, 3, L"```") == 0)
-            {
-                inCodeBlock = !inCodeBlock;
-                i += 3;
-                continue;
-            }
-            wchar_t ch = g_textContent[i];
-            if (!inCodeBlock && ch == L'#')
-            {
-                while (i < g_textContent.size() && g_textContent[i] == L'#')
-                {
-                    ++i;
-                }
-                if (i < g_textContent.size() && g_textContent[i] == L' ')
-                {
-                    ++i;
-                }
-                rendered.append(L"\n");
-                continue;
-            }
-            if (!inCodeBlock && (ch == L'*' || ch == L'_' || ch == L'`'))
-            {
-                ++i;
-                continue;
-            }
-            if (!inCodeBlock && ch == L'>' && (i == 0 || g_textContent[i - 1] == L'\n'))
-            {
-                ++i;
-                if (i < g_textContent.size() && g_textContent[i] == L' ')
-                {
-                    ++i;
-                }
-                rendered.append(L"> ");
-                continue;
-            }
-            rendered.push_back(ch);
-            ++i;
-        }
-        g_textContent = std::move(rendered);
+        g_textContent = ConvertMarkdownToHtml(g_textContent);
     }
     ApplyTransparencyMode();
     return true;
@@ -973,6 +951,92 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     if (componentInfo) componentInfo->Release();
 
     return hasAlpha;
+}
+
+std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
+{
+    std::wstring html;
+    html.reserve(markdown.size() * 2);
+    bool inCodeBlock = false;
+    bool inList = false;
+    size_t pos = 0;
+    while (pos <= markdown.size())
+    {
+        size_t lineEnd = markdown.find(L'\n', pos);
+        if (lineEnd == std::wstring::npos)
+        {
+            lineEnd = markdown.size();
+        }
+        std::wstring line = markdown.substr(pos, lineEnd - pos);
+        if (line.rfind(L"```", 0) == 0)
+        {
+            inCodeBlock = !inCodeBlock;
+            html.append(inCodeBlock ? L"<pre><code>" : L"</code></pre>");
+            html.append(L"\n");
+        }
+        else if (inCodeBlock)
+        {
+            html.append(line);
+            html.append(L"\n");
+        }
+        else if (line.rfind(L"#", 0) == 0)
+        {
+            size_t level = 0;
+            while (level < line.size() && line[level] == L'#')
+            {
+                ++level;
+            }
+            while (level < line.size() && line[level] == L' ')
+            {
+                ++level;
+            }
+            html.append(L"<h1>");
+            html.append(line.substr(level));
+            html.append(L"</h1>\n");
+        }
+        else if (line.rfind(L"- ", 0) == 0 || line.rfind(L"* ", 0) == 0)
+        {
+            if (!inList)
+            {
+                html.append(L"<ul>\n");
+                inList = true;
+            }
+            html.append(L"<li>");
+            html.append(line.substr(2));
+            html.append(L"</li>\n");
+        }
+        else if (line.empty())
+        {
+            if (inList)
+            {
+                html.append(L"</ul>\n");
+                inList = false;
+            }
+            html.append(L"\n");
+        }
+        else
+        {
+            if (inList)
+            {
+                html.append(L"</ul>\n");
+                inList = false;
+            }
+            html.append(L"<p>");
+            html.append(line);
+            html.append(L"</p>\n");
+        }
+
+        if (lineEnd == markdown.size())
+        {
+            break;
+        }
+        pos = lineEnd + 1;
+    }
+    if (inList)
+    {
+        html.append(L"</ul>\n");
+    }
+    return html;
 }
 
 void ApplyTransparencyMode()
@@ -1064,6 +1128,41 @@ void ResizeWindowByFactor(HWND hwnd, float factor)
     SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(width), static_cast<int>(height),
         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
     InvalidateRect(hwnd, nullptr, TRUE);
+}
+
+void ScrollTextBy(float delta)
+{
+    if (!g_renderTarget || !g_textFormat)
+    {
+        return;
+    }
+
+    D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+    if (rtSize.width <= 0.0f || rtSize.height <= 0.0f)
+    {
+        return;
+    }
+
+    IDWriteTextLayout* layout = nullptr;
+    g_dwriteFactory->CreateTextLayout(
+        g_textContent.c_str(),
+        static_cast<UINT32>(g_textContent.size()),
+        g_textFormat,
+        rtSize.width - 16.0f,
+        10000.0f,
+        &layout
+    );
+    if (!layout)
+    {
+        return;
+    }
+
+    DWRITE_TEXT_METRICS metrics{};
+    layout->GetMetrics(&metrics);
+    layout->Release();
+
+    float maxScroll = std::max(0.0f, metrics.height + 16.0f - rtSize.height);
+    g_textScroll = std::max(0.0f, std::min(g_textScroll + delta, maxScroll));
 }
 
 void ShowSettingsDialog(HWND hwnd)
@@ -1782,14 +1881,24 @@ void Render(HWND hwnd)
             g_renderTarget->Clear(bgColor);
             if (g_textFormat && g_textBrush)
             {
-                D2D1_RECT_F textRect = D2D1::RectF(8.0f, 8.0f, rtSize.width - 8.0f, rtSize.height - 8.0f);
-                g_renderTarget->DrawTextW(
+                IDWriteTextLayout* layout = nullptr;
+                g_dwriteFactory->CreateTextLayout(
                     g_textContent.c_str(),
                     static_cast<UINT32>(g_textContent.size()),
                     g_textFormat,
-                    textRect,
-                    g_textBrush
+                    rtSize.width - 16.0f,
+                    10000.0f,
+                    &layout
                 );
+                if (layout)
+                {
+                    g_renderTarget->DrawTextLayout(
+                        D2D1::Point2F(8.0f, 8.0f - g_textScroll),
+                        layout,
+                        g_textBrush
+                    );
+                    layout->Release();
+                }
             }
         }
     }
