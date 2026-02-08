@@ -470,6 +470,19 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
+            WORD inputKey = GetHtmlInputVirtualKey();
+            bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+            if (keyDown && g_webviewWindow)
+            {
+                WPARAM adjustedWParam = wParam;
+                if (inputKey == VK_SHIFT)
+                {
+                    WORD keyState = GET_KEYSTATE_WPARAM(wParam);
+                    adjustedWParam = MAKEWPARAM(keyState & ~MK_SHIFT, GET_WHEEL_DELTA_WPARAM(wParam));
+                }
+                SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, adjustedWParam, lParam);
+                return 0;
+            }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         if (!g_bitmap && !g_hasText)
