@@ -46,6 +46,8 @@ ICoreWebView2Controller* g_webViewController = nullptr;
 ICoreWebView2* g_webView = nullptr;
 #endif
 bool g_showingWeb = false;
+std::wstring g_pendingWebHtml;
+bool g_webViewReady = false;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
@@ -523,7 +525,10 @@ LRESULT CALLBACK WndProc(
             g_dragStartScale = std::max(1.0f, (std::min)(static_cast<float>(rc.right - rc.left), static_cast<float>(rc.bottom - rc.top)));
             g_dragStartWidth = static_cast<float>(rc.right - rc.left);
             g_dragStartHeight = static_cast<float>(rc.bottom - rc.top);
-            UpdateWindowToZoomedImage();
+            if (g_bitmap)
+            {
+                UpdateWindowToZoomedImage();
+            }
             SetCapture(hwnd);
             return 0;
         }
@@ -650,6 +655,8 @@ LRESULT CALLBACK WndProc(
             g_webViewController->Release();
             g_webViewController = nullptr;
         }
+        g_pendingWebHtml.clear();
+        g_webViewReady = false;
 #endif
         SaveWindowPlacement();
         SaveSettings();
@@ -692,7 +699,7 @@ bool InitDirect2D(HWND hwnd)
     g_renderTarget->SetDpi(96.0f, 96.0f);
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
-        D2D1::ColorF(D2D1::ColorF::White),
+        D2D1::ColorF(D2D1::ColorF::Black),
         &g_placeholderBrush)))
     {
         return false;
@@ -1127,6 +1134,12 @@ void InitializeWebView(HWND hwnd)
                             RECT bounds{};
                             GetClientRect(hwnd, &bounds);
                             g_webViewController->put_Bounds(bounds);
+                            g_webViewReady = g_webView != nullptr;
+                            if (g_webView && !g_pendingWebHtml.empty())
+                            {
+                                g_webView->NavigateToString(g_pendingWebHtml.c_str());
+                                g_pendingWebHtml.clear();
+                            }
                             return S_OK;
                         }).Get());
             }).Get());
@@ -1141,6 +1154,13 @@ void NavigateWebContent(const std::wstring& html)
     if (g_webView)
     {
         g_webView->NavigateToString(html.c_str());
+        g_webViewReady = true;
+        g_pendingWebHtml.clear();
+    }
+    else
+    {
+        g_pendingWebHtml = html;
+        g_webViewReady = false;
     }
 #else
     (void)html;
@@ -2036,7 +2056,19 @@ void Render(HWND hwnd)
 
     if (g_showingWeb)
     {
-        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+        D2D1_COLOR_F bgColor = D2D1::ColorF(D2D1::ColorF::White);
+        g_renderTarget->Clear(bgColor);
+        if (!g_webViewReady && g_placeholderFormat && g_placeholderBrush)
+        {
+            std::wstring message = L"Loading Markdown...";
+            g_renderTarget->DrawTextW(
+                message.c_str(),
+                static_cast<UINT32>(message.size()),
+                g_placeholderFormat,
+                D2D1::RectF(20.0f, 20.0f, 1000.0f, 200.0f),
+                g_placeholderBrush
+            );
+        }
     }
     else if (g_hasText)
     {
