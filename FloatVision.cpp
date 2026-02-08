@@ -25,16 +25,62 @@ ID2D1Factory* g_d2dFactory = nullptr;
 ID2D1HwndRenderTarget* g_renderTarget = nullptr;
 ID2D1Bitmap* g_bitmap = nullptr;
 ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
-ID2D1SolidColorBrush* g_checkerBrushA = nullptr;
-ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
 HWND g_hwnd = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
 IDWriteTextFormat* g_placeholderFormat = nullptr;
+IWICBitmapSource* g_wicSource = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
+bool g_imageHasAlpha = false;
+
+float g_zoom = 1.0f;
+bool g_fitToWindow = true;
+bool g_isEdgeDragging = false;
+POINT g_dragStartPoint{};
+float g_dragStartZoom = 1.0f;
+float g_dragStartScale = 1.0f;
+
+enum class SortMode
+{
+    NameAsc,
+    NameDesc,
+    TimeAsc,
+    TimeDesc
+};
+
+struct ImageEntry
+{
+    std::filesystem::path path;
+    std::filesystem::file_time_type writeTime;
+};
+
+std::vector<ImageEntry> g_imageList;
+size_t g_currentIndex = 0;
+SortMode g_sortMode = SortMode::NameAsc;
+std::filesystem::path g_currentImagePath;
+const float g_zoomMin = 0.05f;
+const float g_zoomMax = 20.0f;
+const float g_edgeDragMargin = 12.0f;
+bool g_alwaysOnTop = false;
+std::wstring g_iniPath;
+POINT g_windowPos{ CW_USEDEFAULT, CW_USEDEFAULT };
+bool g_hasSavedWindowPos = false;
+
+constexpr int kMenuOpen = 1001;
+constexpr int kMenuNext = 1002;
+constexpr int kMenuPrev = 1003;
+constexpr int kMenuZoomIn = 1005;
+constexpr int kMenuZoomOut = 1006;
+constexpr int kMenuOriginalSize = 1007;
+constexpr int kMenuAlwaysOnTop = 1008;
+constexpr int kMenuExit = 1009;
+constexpr int kMenuSortNameAsc = 1101;
+constexpr int kMenuSortNameDesc = 1102;
+constexpr int kMenuSortTimeAsc = 1103;
+constexpr int kMenuSortTimeDesc = 1104;
 
 float g_zoom = 1.0f;
 bool g_fitToWindow = true;
@@ -107,6 +153,8 @@ void SaveSettings();
 void ApplyAlwaysOnTop();
 void LoadWindowPlacement();
 void SaveWindowPlacement();
+void UpdateLayeredStyle(bool enable);
+bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -522,19 +570,6 @@ bool InitDirect2D(HWND hwnd)
     g_renderTarget->SetDpi(96.0f, 96.0f);
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
-        D2D1::ColorF(0.85f, 0.85f, 0.85f),
-        &g_checkerBrushA)))
-    {
-        return false;
-    }
-    if (FAILED(g_renderTarget->CreateSolidColorBrush(
-        D2D1::ColorF(0.7f, 0.7f, 0.7f),
-        &g_checkerBrushB)))
-    {
-        return false;
-    }
-
-    if (FAILED(g_renderTarget->CreateSolidColorBrush(
         D2D1::ColorF(D2D1::ColorF::White),
         &g_placeholderBrush)))
     {
@@ -571,8 +606,14 @@ void DiscardRenderTarget()
         g_renderTarget->Release();
         g_renderTarget = nullptr;
     }
+    if (g_wicSource)
+    {
+        g_wicSource->Release();
+        g_wicSource = nullptr;
+    }
     g_imageWidth = 0;
     g_imageHeight = 0;
+    g_imageHasAlpha = false;
 }
 
 void CleanupResources()
@@ -665,8 +706,14 @@ bool LoadImageFromFile(const wchar_t* path)
         g_bitmap->Release();
         g_bitmap = nullptr;
     }
+    if (g_wicSource)
+    {
+        g_wicSource->Release();
+        g_wicSource = nullptr;
+    }
     g_imageWidth = 0;
     g_imageHeight = 0;
+    g_imageHasAlpha = false;
 
     HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
         path,
@@ -682,6 +729,17 @@ bool LoadImageFromFile(const wchar_t* path)
 
     hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
     if (FAILED(hr)) goto cleanup;
+
+    WICPixelFormatGUID pixelFormat{};
+    hr = frame->GetPixelFormat(&pixelFormat);
+    if (SUCCEEDED(hr))
+    {
+        BOOL hasAlpha = FALSE;
+        if (SUCCEEDED(WICPixelFormatHasAlpha(pixelFormat, &hasAlpha)))
+        {
+            g_imageHasAlpha = (hasAlpha == TRUE);
+        }
+    }
 
     hr = g_wicFactory->CreateFormatConverter(&converter);
     if (FAILED(hr)) goto cleanup;
@@ -701,12 +759,18 @@ bool LoadImageFromFile(const wchar_t* path)
         nullptr,
         &g_bitmap
     );
+    if (SUCCEEDED(hr))
+    {
+        g_wicSource = converter;
+        g_wicSource->AddRef();
+    }
 
 cleanup:
     if (decoder) decoder->Release();
     if (frame) frame->Release();
     if (converter) converter->Release();
 
+    UpdateLayeredStyle(g_imageHasAlpha);
     return SUCCEEDED(hr);
 }
 
@@ -1021,6 +1085,103 @@ void SaveWindowPlacement()
     WritePrivateProfileStringW(L"Window", L"Y", buffer, g_iniPath.c_str());
 }
 
+void UpdateLayeredStyle(bool enable)
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+
+    LONG_PTR exStyle = GetWindowLongPtr(g_hwnd, GWL_EXSTYLE);
+    if (enable)
+    {
+        exStyle |= WS_EX_LAYERED;
+    }
+    else
+    {
+        exStyle &= ~WS_EX_LAYERED;
+    }
+    SetWindowLongPtr(g_hwnd, GWL_EXSTYLE, exStyle);
+}
+
+bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight)
+{
+    if (!g_wicSource || drawWidth <= 0.0f || drawHeight <= 0.0f)
+    {
+        return false;
+    }
+
+    UINT width = static_cast<UINT>(std::max(1.0f, static_cast<float>(std::lround(drawWidth))));
+    UINT height = static_cast<UINT>(std::max(1.0f, static_cast<float>(std::lround(drawHeight))));
+
+    IWICBitmapScaler* scaler = nullptr;
+    HRESULT hr = g_wicFactory->CreateBitmapScaler(&scaler);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = scaler->Initialize(g_wicSource, width, height, WICBitmapInterpolationModeFant);
+    if (FAILED(hr))
+    {
+        scaler->Release();
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(width);
+    bmi.bmiHeader.biHeight = -static_cast<LONG>(height);
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC screenDc = GetDC(nullptr);
+    HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HDC memDc = CreateCompatibleDC(screenDc);
+    HGDIOBJ oldBmp = SelectObject(memDc, dib);
+
+    WICRect rect{ 0, 0, static_cast<INT>(width), static_cast<INT>(height) };
+    UINT stride = width * 4;
+    UINT bufferSize = stride * height;
+    hr = scaler->CopyPixels(&rect, stride, bufferSize, static_cast<BYTE*>(bits));
+
+    POINT ptSrc{ 0, 0 };
+    SIZE sizeWindow{ static_cast<LONG>(width), static_cast<LONG>(height) };
+    RECT wndRect{};
+    GetWindowRect(hwnd, &wndRect);
+    POINT ptDst{ wndRect.left, wndRect.top };
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    bool updated = false;
+    if (SUCCEEDED(hr))
+    {
+        updated = UpdateLayeredWindow(
+            hwnd,
+            screenDc,
+            &ptDst,
+            &sizeWindow,
+            memDc,
+            &ptSrc,
+            0,
+            &blend,
+            ULW_ALPHA
+        ) == TRUE;
+    }
+
+    SelectObject(memDc, oldBmp);
+    DeleteDC(memDc);
+    DeleteObject(dib);
+    ReleaseDC(nullptr, screenDc);
+    scaler->Release();
+
+    return updated;
+}
+
 // =====================
 // 描画
 // =====================
@@ -1044,6 +1205,12 @@ void Render(HWND hwnd)
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
+        if (g_imageHasAlpha)
+        {
+            UpdateLayeredWindowFromWic(hwnd, drawWidth, drawHeight);
+            return;
+        }
+
         if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
@@ -1058,23 +1225,6 @@ void Render(HWND hwnd)
         }
 
         g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-
-        const float cellSize = 16.0f;
-        if (g_checkerBrushA && g_checkerBrushB)
-        {
-            for (float y = 0.0f; y < drawHeight; y += cellSize)
-            {
-                for (float x = 0.0f; x < drawWidth; x += cellSize)
-                {
-                    bool evenCell = (static_cast<int>(x / cellSize) + static_cast<int>(y / cellSize)) % 2 == 0;
-                    ID2D1SolidColorBrush* brush = evenCell ? g_checkerBrushA : g_checkerBrushB;
-                    g_renderTarget->FillRectangle(
-                        D2D1::RectF(x, y, x + cellSize, y + cellSize),
-                        brush
-                    );
-                }
-            }
-        }
 
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
@@ -1236,6 +1386,10 @@ int WINAPI wWinMain(
     if (!loadedImage)
     {
         // 仮画像表示（g_bitmap が未設定のため Render でプレースホルダ表示）
+    }
+    else
+    {
+        UpdateLayeredStyle(g_imageHasAlpha);
     }
     InvalidateRect(hwnd, nullptr, TRUE);
 
