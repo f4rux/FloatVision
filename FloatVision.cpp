@@ -121,7 +121,7 @@ bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
 bool LoadTextFromFile(const wchar_t* path);
-std::wstring ConvertMarkdownToHtml(const std::wstring& markdown);
+std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown);
 void NavigateImage(int delta);
 void CleanupResources();
 void DiscardRenderTarget();
@@ -149,7 +149,6 @@ void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
-void OpenMarkdownInBrowser(const std::wstring& html);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -917,9 +916,7 @@ bool LoadTextFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     if (g_textIsMarkdown)
     {
-        std::wstring html = ConvertMarkdownToHtml(g_textContent);
-        OpenMarkdownInBrowser(html);
-        g_textContent = L"Markdown opened in your default browser.";
+        g_textContent = ConvertMarkdownToDisplayText(g_textContent);
     }
     ApplyTransparencyMode();
     return true;
@@ -956,13 +953,10 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     return hasAlpha;
 }
 
-std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
+std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
 {
-    std::wstring html;
-    html.reserve(markdown.size() * 2);
-    html.append(L"<!doctype html><html><head><meta charset=\"utf-8\">");
-    html.append(L"<style>body{font-family:Segoe UI, sans-serif; margin:16px;} pre{background:#f0f0f0;padding:8px;}</style>");
-    html.append(L"</head><body>\n");
+    std::wstring output;
+    output.reserve(markdown.size() * 2);
     bool inCodeBlock = false;
     bool inList = false;
     size_t pos = 0;
@@ -977,13 +971,13 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
         if (line.rfind(L"```", 0) == 0)
         {
             inCodeBlock = !inCodeBlock;
-            html.append(inCodeBlock ? L"<pre><code>" : L"</code></pre>");
-            html.append(L"\n");
+            output.append(inCodeBlock ? L"\n[code]\n" : L"\n[/code]\n");
         }
         else if (inCodeBlock)
         {
-            html.append(line);
-            html.append(L"\n");
+            output.append(L"  ");
+            output.append(line);
+            output.append(L"\n");
         }
         else if (line.rfind(L"#", 0) == 0)
         {
@@ -996,40 +990,39 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
             {
                 ++level;
             }
-            html.append(L"<h1>");
-            html.append(line.substr(level));
-            html.append(L"</h1>\n");
+            std::wstring header = line.substr(level);
+            output.append(L"\n");
+            output.append(header);
+            output.append(L"\n");
+            output.append(std::wstring(header.size(), L'='));
+            output.append(L"\n");
         }
         else if (line.rfind(L"- ", 0) == 0 || line.rfind(L"* ", 0) == 0)
         {
             if (!inList)
             {
-                html.append(L"<ul>\n");
                 inList = true;
             }
-            html.append(L"<li>");
-            html.append(line.substr(2));
-            html.append(L"</li>\n");
+            output.append(L"• ");
+            output.append(line.substr(2));
+            output.append(L"\n");
         }
         else if (line.empty())
         {
             if (inList)
             {
-                html.append(L"</ul>\n");
                 inList = false;
             }
-            html.append(L"\n");
+            output.append(L"\n");
         }
         else
         {
             if (inList)
             {
-                html.append(L"</ul>\n");
                 inList = false;
             }
-            html.append(L"<p>");
-            html.append(line);
-            html.append(L"</p>\n");
+            output.append(line);
+            output.append(L"\n");
         }
 
         if (lineEnd == markdown.size())
@@ -1038,48 +1031,7 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
         }
         pos = lineEnd + 1;
     }
-    if (inList)
-    {
-        html.append(L"</ul>\n");
-    }
-    html.append(L"</body></html>");
-    return html;
-}
-
-void OpenMarkdownInBrowser(const std::wstring& html)
-{
-    wchar_t tempPath[MAX_PATH]{};
-    if (GetTempPathW(MAX_PATH, tempPath) == 0)
-    {
-        return;
-    }
-    wchar_t tempFile[MAX_PATH]{};
-    if (GetTempFileNameW(tempPath, L"FVT", 0, tempFile) == 0)
-    {
-        return;
-    }
-
-    std::filesystem::path htmlPath = tempFile;
-    htmlPath.replace_extension(L".html");
-
-    int needed = WideCharToMultiByte(CP_UTF8, 0, html.c_str(), static_cast<int>(html.size()), nullptr, 0, nullptr, nullptr);
-    if (needed <= 0)
-    {
-        return;
-    }
-    std::string utf8(needed, '\0');
-    WideCharToMultiByte(CP_UTF8, 0, html.c_str(), static_cast<int>(html.size()), utf8.data(), needed, nullptr, nullptr);
-
-    std::ofstream out(htmlPath, std::ios::binary);
-    if (!out)
-    {
-        return;
-    }
-    out.write("\xEF\xBB\xBF", 3);
-    out.write(utf8.data(), utf8.size());
-    out.close();
-
-    ShellExecuteW(nullptr, L"open", htmlPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    return output;
 }
 
 void ApplyTransparencyMode()
