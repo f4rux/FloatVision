@@ -1096,10 +1096,6 @@ void HideWebView()
     if (g_webviewController)
     {
         g_webviewController->put_IsVisible(FALSE);
-        if (g_webviewController2)
-        {
-            g_webviewController2->put_IsEnabled(TRUE);
-        }
     }
 }
 
