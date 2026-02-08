@@ -972,7 +972,7 @@ bool LoadTextFromFile(const wchar_t* path)
 
 std::wstring InjectHtmlBaseStyles(const std::wstring& html)
 {
-    const std::wstring style = L"<style>html, body { background: #ffffff !important; margin: 0; }</style>";
+    const std::wstring style = L"<style>html, body { background: #ffffff !important; margin: 0; width: 100%; height: 100%; overflow: auto; }</style>";
     std::wstring lowered = html;
     std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::towlower);
     size_t headPos = lowered.find(L"<head");
