@@ -1057,7 +1057,7 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasText = false;
     g_textContent.clear();
     g_textIsMarkdown = false;
-    g_webViewFallbackText = L"HTML viewing requires WebView2.";
+    g_webViewFallbackText = html;
     g_webViewStartTick = GetTickCount();
     SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
     return true;
