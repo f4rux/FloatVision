@@ -14,6 +14,8 @@
 #include <fstream>
 #include <string>
 #include <wrl.h>
+#include "md4c.h"
+#include "md4c-html.h"
 #if __has_include(<WebView2.h>)
 #include <WebView2.h>
 #define FLOATVISION_HAS_WEBVIEW2 1
