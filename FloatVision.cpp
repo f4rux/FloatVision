@@ -25,6 +25,8 @@ ID2D1Factory* g_d2dFactory = nullptr;
 ID2D1HwndRenderTarget* g_renderTarget = nullptr;
 ID2D1Bitmap* g_bitmap = nullptr;
 ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
+ID2D1SolidColorBrush* g_checkerBrushA = nullptr;
+ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
 HWND g_hwnd = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
@@ -88,6 +90,7 @@ bool InitDirect2D(HWND hwnd);
 bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
+void NavigateImage(int delta);
 void CleanupResources();
 void DiscardRenderTarget();
 void RefreshImageList(const std::filesystem::path& imagePath);
@@ -270,24 +273,10 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         case kMenuPrev:
-            if (!g_imageList.empty())
-            {
-                size_t index = (g_currentIndex + g_imageList.size() - 1) % g_imageList.size();
-                if (LoadImageByIndex(index))
-                {
-                    InvalidateRect(hwnd, nullptr, TRUE);
-                }
-            }
+            NavigateImage(-1);
             return 0;
         case kMenuNext:
-            if (!g_imageList.empty())
-            {
-                size_t index = (g_currentIndex + 1) % g_imageList.size();
-                if (LoadImageByIndex(index))
-                {
-                    InvalidateRect(hwnd, nullptr, TRUE);
-                }
-            }
+            NavigateImage(1);
             return 0;
         case kMenuZoomIn:
         {
@@ -375,6 +364,21 @@ LRESULT CALLBACK WndProc(
         return 0;
     }
 
+    case WM_XBUTTONUP:
+    {
+        if (GET_XBUTTON_WPARAM(wParam) == XBUTTON1)
+        {
+            NavigateImage(-1);
+            return 0;
+        }
+        if (GET_XBUTTON_WPARAM(wParam) == XBUTTON2)
+        {
+            NavigateImage(1);
+            return 0;
+        }
+        break;
+    }
+
     case WM_LBUTTONDOWN:
     {
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -436,20 +440,12 @@ LRESULT CALLBACK WndProc(
     {
         if (wParam == VK_RIGHT && !g_imageList.empty())
         {
-            size_t index = (g_currentIndex + 1) % g_imageList.size();
-            if (LoadImageByIndex(index))
-            {
-                InvalidateRect(hwnd, nullptr, TRUE);
-            }
+            NavigateImage(1);
             return 0;
         }
         if (wParam == VK_LEFT && !g_imageList.empty())
         {
-            size_t index = (g_currentIndex + g_imageList.size() - 1) % g_imageList.size();
-            if (LoadImageByIndex(index))
-            {
-                InvalidateRect(hwnd, nullptr, TRUE);
-            }
+            NavigateImage(-1);
             return 0;
         }
         if (wParam == VK_ADD || wParam == VK_OEM_PLUS)
@@ -526,6 +522,19 @@ bool InitDirect2D(HWND hwnd)
     g_renderTarget->SetDpi(96.0f, 96.0f);
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
+        D2D1::ColorF(0.85f, 0.85f, 0.85f),
+        &g_checkerBrushA)))
+    {
+        return false;
+    }
+    if (FAILED(g_renderTarget->CreateSolidColorBrush(
+        D2D1::ColorF(0.7f, 0.7f, 0.7f),
+        &g_checkerBrushB)))
+    {
+        return false;
+    }
+
+    if (FAILED(g_renderTarget->CreateSolidColorBrush(
         D2D1::ColorF(D2D1::ColorF::White),
         &g_placeholderBrush)))
     {
@@ -541,6 +550,16 @@ void DiscardRenderTarget()
     {
         g_placeholderBrush->Release();
         g_placeholderBrush = nullptr;
+    }
+    if (g_checkerBrushA)
+    {
+        g_checkerBrushA->Release();
+        g_checkerBrushA = nullptr;
+    }
+    if (g_checkerBrushB)
+    {
+        g_checkerBrushB->Release();
+        g_checkerBrushB = nullptr;
     }
     if (g_bitmap)
     {
@@ -689,6 +708,21 @@ cleanup:
     if (converter) converter->Release();
 
     return SUCCEEDED(hr);
+}
+
+void NavigateImage(int delta)
+{
+    if (g_imageList.empty())
+    {
+        return;
+    }
+
+    size_t count = g_imageList.size();
+    size_t index = (g_currentIndex + count + (delta % static_cast<int>(count))) % count;
+    if (LoadImageByIndex(index) && g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
 }
 
 void RefreshImageList(const std::filesystem::path& imagePath)
@@ -1024,6 +1058,23 @@ void Render(HWND hwnd)
         }
 
         g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+
+        const float cellSize = 16.0f;
+        if (g_checkerBrushA && g_checkerBrushB)
+        {
+            for (float y = 0.0f; y < drawHeight; y += cellSize)
+            {
+                for (float x = 0.0f; x < drawWidth; x += cellSize)
+                {
+                    bool evenCell = (static_cast<int>(x / cellSize) + static_cast<int>(y / cellSize)) % 2 == 0;
+                    ID2D1SolidColorBrush* brush = evenCell ? g_checkerBrushA : g_checkerBrushB;
+                    g_renderTarget->FillRectangle(
+                        D2D1::RectF(x, y, x + cellSize, y + cellSize),
+                        brush
+                    );
+                }
+            }
+        }
 
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
