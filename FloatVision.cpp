@@ -27,6 +27,9 @@ ID2D1Factory* g_d2dFactory = nullptr;
 ID2D1HwndRenderTarget* g_renderTarget = nullptr;
 ID2D1Bitmap* g_bitmap = nullptr;
 ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
+ID2D1SolidColorBrush* g_checkerBrushA = nullptr;
+ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
+ID2D1SolidColorBrush* g_customColorBrush = nullptr;
 HWND g_hwnd = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
@@ -44,6 +47,13 @@ bool g_isEdgeDragging = false;
 POINT g_dragStartPoint{};
 float g_dragStartZoom = 1.0f;
 float g_dragStartScale = 1.0f;
+
+enum class TransparencyMode
+{
+    Transparent = 0,
+    Checkerboard = 1,
+    SolidColor = 2
+};
 
 enum class SortMode
 {
@@ -70,6 +80,8 @@ bool g_alwaysOnTop = false;
 std::wstring g_iniPath;
 POINT g_windowPos{ CW_USEDEFAULT, CW_USEDEFAULT };
 bool g_hasSavedWindowPos = false;
+TransparencyMode g_transparencyMode = TransparencyMode::Transparent;
+COLORREF g_customColor = RGB(32, 32, 32);
 
 constexpr int kMenuOpen = 1001;
 constexpr int kMenuNext = 1002;
@@ -79,6 +91,7 @@ constexpr int kMenuZoomOut = 1006;
 constexpr int kMenuOriginalSize = 1007;
 constexpr int kMenuAlwaysOnTop = 1008;
 constexpr int kMenuExit = 1009;
+constexpr int kMenuSettings = 1010;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -112,6 +125,9 @@ void SaveWindowPlacement();
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
+void ApplyTransparencyMode();
+void UpdateCustomColorBrush();
+void ShowSettingsDialog(HWND hwnd);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -242,6 +258,8 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuSettings, L"Settings...");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeAsc, L"Sort: Modified (Old-New)");
@@ -310,6 +328,9 @@ LRESULT CALLBACK WndProc(
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
+            return 0;
+        case kMenuSettings:
+            ShowSettingsDialog(hwnd);
             return 0;
         case kMenuExit:
             DestroyWindow(hwnd);
@@ -534,6 +555,21 @@ bool InitDirect2D(HWND hwnd)
         return false;
     }
 
+    UpdateCustomColorBrush();
+
+    if (FAILED(g_renderTarget->CreateSolidColorBrush(
+        D2D1::ColorF(0.85f, 0.85f, 0.85f),
+        &g_checkerBrushA)))
+    {
+        return false;
+    }
+    if (FAILED(g_renderTarget->CreateSolidColorBrush(
+        D2D1::ColorF(0.7f, 0.7f, 0.7f),
+        &g_checkerBrushB)))
+    {
+        return false;
+    }
+
     return true;
 }
 
@@ -543,6 +579,21 @@ void DiscardRenderTarget()
     {
         g_placeholderBrush->Release();
         g_placeholderBrush = nullptr;
+    }
+    if (g_checkerBrushA)
+    {
+        g_checkerBrushA->Release();
+        g_checkerBrushA = nullptr;
+    }
+    if (g_checkerBrushB)
+    {
+        g_checkerBrushB->Release();
+        g_checkerBrushB = nullptr;
+    }
+    if (g_customColorBrush)
+    {
+        g_customColorBrush->Release();
+        g_customColorBrush = nullptr;
     }
     if (g_bitmap)
     {
@@ -714,7 +765,7 @@ cleanup:
     if (frame) frame->Release();
     if (converter) converter->Release();
 
-    UpdateLayeredStyle(g_imageHasAlpha);
+    ApplyTransparencyMode();
     return SUCCEEDED(hr);
 }
 
@@ -749,6 +800,195 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     return hasAlpha;
 }
 
+void ApplyTransparencyMode()
+{
+    if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+    {
+        UpdateLayeredStyle(true);
+    }
+    else
+    {
+        UpdateLayeredStyle(false);
+    }
+    UpdateCustomColorBrush();
+}
+
+void UpdateCustomColorBrush()
+{
+    if (!g_renderTarget)
+    {
+        return;
+    }
+    if (g_customColorBrush)
+    {
+        g_customColorBrush->Release();
+        g_customColorBrush = nullptr;
+    }
+    D2D1_COLOR_F color = D2D1::ColorF(
+        GetRValue(g_customColor) / 255.0f,
+        GetGValue(g_customColor) / 255.0f,
+        GetBValue(g_customColor) / 255.0f
+    );
+    g_renderTarget->CreateSolidColorBrush(color, &g_customColorBrush);
+}
+
+void ShowSettingsDialog(HWND hwnd)
+{
+    const int kIdTransparent = 2001;
+    const int kIdChecker = 2002;
+    const int kIdSolid = 2003;
+    const int kIdColor = 2004;
+
+    auto alignDword = [](std::vector<BYTE>& buffer)
+    {
+        while (buffer.size() % 4 != 0)
+        {
+            buffer.push_back(0);
+        }
+    };
+
+    auto appendWord = [](std::vector<BYTE>& buffer, WORD value)
+    {
+        buffer.push_back(static_cast<BYTE>(value & 0xFF));
+        buffer.push_back(static_cast<BYTE>((value >> 8) & 0xFF));
+    };
+
+    auto appendDword = [](std::vector<BYTE>& buffer, DWORD value)
+    {
+        appendWord(buffer, static_cast<WORD>(value & 0xFFFF));
+        appendWord(buffer, static_cast<WORD>((value >> 16) & 0xFFFF));
+    };
+
+    auto appendString = [&](std::vector<BYTE>& buffer, const wchar_t* text)
+    {
+        while (*text)
+        {
+            appendWord(buffer, static_cast<WORD>(*text));
+            ++text;
+        }
+        appendWord(buffer, 0);
+    };
+
+    auto addControl = [&](std::vector<BYTE>& buffer, DWORD style, short x, short y, short cx, short cy, WORD id, WORD classAtom, const wchar_t* text)
+    {
+        alignDword(buffer);
+        appendDword(buffer, style);
+        appendDword(buffer, 0);
+        appendWord(buffer, static_cast<WORD>(x));
+        appendWord(buffer, static_cast<WORD>(y));
+        appendWord(buffer, static_cast<WORD>(cx));
+        appendWord(buffer, static_cast<WORD>(cy));
+        appendWord(buffer, id);
+        appendWord(buffer, 0xFFFF);
+        appendWord(buffer, classAtom);
+        appendString(buffer, text);
+        appendWord(buffer, 0);
+    };
+
+    std::vector<BYTE> tmpl;
+    tmpl.reserve(512);
+
+    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
+    appendDword(tmpl, dialogStyle);
+    appendDword(tmpl, 0);
+    appendWord(tmpl, 5);
+    appendWord(tmpl, 10);
+    appendWord(tmpl, 10);
+    appendWord(tmpl, 200);
+    appendWord(tmpl, 110);
+    appendWord(tmpl, 0);
+    appendWord(tmpl, 0);
+    appendString(tmpl, L"Settings");
+    appendWord(tmpl, 9);
+    appendString(tmpl, L"Segoe UI");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 10, 12, 160, 12, kIdTransparent, 0x0080, L"Transparent (show desktop)");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 28, 160, 12, kIdChecker, 0x0080, L"Checkerboard");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 44, 160, 12, kIdSolid, 0x0080, L"Solid color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 62, 70, 14, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 110, 80, 40, 14, IDOK, 0x0080, L"OK");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 155, 80, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+
+    struct DialogState
+    {
+        TransparencyMode mode;
+        COLORREF color;
+    } state{ g_transparencyMode, g_customColor };
+
+    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    {
+        auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
+        switch (msg)
+        {
+        case WM_INITDIALOG:
+        {
+            SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
+            dialogState = reinterpret_cast<DialogState*>(lParam);
+            int radioId = (dialogState->mode == TransparencyMode::Transparent) ? 2001
+                : (dialogState->mode == TransparencyMode::Checkerboard) ? 2002 : 2003;
+            CheckRadioButton(dlg, 2001, 2003, radioId);
+            EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+            return TRUE;
+        }
+        case WM_COMMAND:
+        {
+            int id = LOWORD(wParam);
+            if (id == 2001 || id == 2002 || id == 2003)
+            {
+                dialogState->mode = (id == 2001) ? TransparencyMode::Transparent
+                    : (id == 2002) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
+                CheckRadioButton(dlg, 2001, 2003, id);
+                EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+                return TRUE;
+            }
+            if (id == 2004)
+            {
+                CHOOSECOLOR cc{};
+                COLORREF custom[16]{};
+                cc.lStructSize = sizeof(cc);
+                cc.hwndOwner = dlg;
+                cc.rgbResult = dialogState->color;
+                cc.lpCustColors = custom;
+                cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+                if (ChooseColor(&cc))
+                {
+                    dialogState->color = cc.rgbResult;
+                }
+                return TRUE;
+            }
+            if (id == IDOK)
+            {
+                EndDialog(dlg, IDOK);
+                return TRUE;
+            }
+            if (id == IDCANCEL)
+            {
+                EndDialog(dlg, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        }
+        }
+        return FALSE;
+    };
+
+    INT_PTR result = DialogBoxIndirectParam(
+        GetModuleHandle(nullptr),
+        reinterpret_cast<DLGTEMPLATE*>(tmpl.data()),
+        hwnd,
+        dialogProc,
+        reinterpret_cast<LPARAM>(&state)
+    );
+
+    if (result == IDOK)
+    {
+        g_transparencyMode = state.mode;
+        g_customColor = state.color;
+        SaveSettings();
+        ApplyTransparencyMode();
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+}
 void NavigateImage(int delta)
 {
     if (g_imageList.empty())
@@ -984,6 +1224,17 @@ void LoadSettings()
 
     GetPrivateProfileStringW(L"Settings", L"AlwaysOnTop", L"0", buffer, 32, g_iniPath.c_str());
     g_alwaysOnTop = (_wtoi(buffer) != 0);
+
+    GetPrivateProfileStringW(L"Settings", L"TransparencyMode", L"0", buffer, 32, g_iniPath.c_str());
+    int modeValue = _wtoi(buffer);
+    if (modeValue < 0 || modeValue > 2)
+    {
+        modeValue = 0;
+    }
+    g_transparencyMode = static_cast<TransparencyMode>(modeValue);
+
+    GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
+    g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 }
 
 void SaveSettings()
@@ -999,6 +1250,12 @@ void SaveSettings()
 
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_alwaysOnTop ? 1 : 0);
     WritePrivateProfileStringW(L"Settings", L"AlwaysOnTop", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_transparencyMode));
+    WritePrivateProfileStringW(L"Settings", L"TransparencyMode", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
+    WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
@@ -1180,7 +1437,7 @@ void Render(HWND hwnd)
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
-        if (g_imageHasAlpha)
+        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
         {
             UpdateLayeredWindowFromWic(hwnd, drawWidth, drawHeight);
             return;
@@ -1200,6 +1457,27 @@ void Render(HWND hwnd)
         }
 
         g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Checkerboard
+            && g_checkerBrushA && g_checkerBrushB)
+        {
+            const float cellSize = 16.0f;
+            for (float y = 0.0f; y < drawHeight; y += cellSize)
+            {
+                for (float x = 0.0f; x < drawWidth; x += cellSize)
+                {
+                    bool evenCell = (static_cast<int>(x / cellSize) + static_cast<int>(y / cellSize)) % 2 == 0;
+                    ID2D1SolidColorBrush* brush = evenCell ? g_checkerBrushA : g_checkerBrushB;
+                    g_renderTarget->FillRectangle(
+                        D2D1::RectF(x, y, x + cellSize, y + cellSize),
+                        brush
+                    );
+                }
+            }
+        }
+        else if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::SolidColor && g_customColorBrush)
+        {
+            g_renderTarget->Clear(g_customColorBrush->GetColor());
+        }
 
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
@@ -1326,6 +1604,7 @@ int WINAPI wWinMain(
     LoadSettings();
     LoadWindowPlacement();
     ApplyAlwaysOnTop();
+    ApplyTransparencyMode();
     if (g_hasSavedWindowPos)
     {
         SetWindowPos(
