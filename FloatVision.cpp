@@ -8,6 +8,7 @@
 #include <commdlg.h>
 #include <filesystem>
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
@@ -44,6 +45,7 @@ Microsoft::WRL::ComPtr<ICoreWebView2Controller> g_webviewController;
 Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
+HWND g_webviewWindow = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -157,6 +159,7 @@ void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 void UpdateWebViewInputState();
+void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -1111,12 +1114,64 @@ void UpdateWebViewBounds()
     g_webviewController->put_Bounds(bounds);
 }
 
+void UpdateWebViewWindowHandle()
+{
+    if (!g_hwnd)
+    {
+        g_webviewWindow = nullptr;
+        return;
+    }
+
+    HWND found = nullptr;
+    EnumChildWindows(
+        g_hwnd,
+        [](HWND child, LPARAM lParam) -> BOOL
+        {
+            wchar_t className[64] = {};
+            GetClassNameW(child, className, static_cast<int>(std::size(className)));
+            if (wcsncmp(className, L"Chrome_WidgetWin", 16) == 0)
+            {
+                *reinterpret_cast<HWND*>(lParam) = child;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&found));
+
+    if (!found)
+    {
+        found = GetWindow(g_hwnd, GW_CHILD);
+    }
+    g_webviewWindow = found;
+}
+
 void UpdateWebViewInputState()
 {
-    if (g_webviewController2)
+    if (!g_webviewWindow)
     {
-        g_webviewController2->put_IsEnabled(g_hasHtml ? FALSE : TRUE);
+        return;
     }
+
+    LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
+    if (g_hasHtml)
+    {
+        exStyle |= WS_EX_TRANSPARENT;
+        EnableWindow(g_webviewWindow, FALSE);
+    }
+    else
+    {
+        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+        EnableWindow(g_webviewWindow, TRUE);
+    }
+    SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
+    SetWindowPos(
+        g_webviewWindow,
+        nullptr,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
 bool EnsureWebView2(HWND hwnd)
@@ -1129,6 +1184,7 @@ bool EnsureWebView2(HWND hwnd)
     if (g_webviewController && g_webview)
     {
         g_webviewController->put_IsVisible(TRUE);
+        UpdateWebViewWindowHandle();
         UpdateWebViewInputState();
         UpdateWebViewBounds();
         if (!g_pendingHtmlContent.empty())
@@ -1184,6 +1240,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
                             g_webviewController->put_IsVisible(TRUE);
+                            UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
                             UpdateWebViewBounds();
                             if (g_webview && !g_pendingHtmlContent.empty())
@@ -1207,6 +1264,7 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
         FreeLibrary(g_webviewLoader);
