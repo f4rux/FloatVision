@@ -133,14 +133,9 @@
     <ClInclude Include="framework.h" />
     <ClInclude Include="Resource.h" />
     <ClInclude Include="targetver.h" />
-    <ClInclude Include="third_party\\md4c\\entity.h" />
-    <ClInclude Include="third_party\\md4c\\md4c-html.h" />
-    <ClInclude Include="third_party\\md4c\\md4c.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FloatVision.cpp" />
-    <ClCompile Include="third_party\\md4c\\md4c-html.c" />
-    <ClCompile Include="third_party\\md4c\\md4c.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="FloatVision.rc" />
