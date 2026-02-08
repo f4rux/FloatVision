@@ -55,6 +55,7 @@ float g_dragStartHeight = 0.0f;
 
 bool g_hasText = false;
 std::wstring g_textContent;
+bool g_textIsMarkdown = false;
 std::wstring g_textFontName = L"Consolas";
 float g_textFontSize = 18.0f;
 COLORREF g_textColor = RGB(240, 240, 240);
@@ -167,7 +168,18 @@ bool IsTextFile(const std::filesystem::path& path)
     }
     std::wstring ext = path.extension().wstring();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
-    return ext == L".txt";
+    return ext == L".txt" || ext == L".md";
+}
+
+bool IsMarkdownFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".md";
 }
 
 void SortImageList()
@@ -478,18 +490,19 @@ LRESULT CALLBACK WndProc(
         if (g_isEdgeDragging && (wParam & MK_LBUTTON))
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
-            float delta = static_cast<float>(pt.y - g_dragStartPoint.y);
+            float deltaX = static_cast<float>(pt.x - g_dragStartPoint.x);
+            float deltaY = static_cast<float>(pt.y - g_dragStartPoint.y);
             if (g_hasText)
             {
-                float nextWidth = std::max(200.0f, g_dragStartWidth + delta);
-                float nextHeight = std::max(200.0f, g_dragStartHeight + delta);
+                float nextWidth = std::max(200.0f, g_dragStartWidth + deltaX);
+                float nextHeight = std::max(200.0f, g_dragStartHeight + deltaY);
                 SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(nextWidth), static_cast<int>(nextHeight),
                     SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
             else
             {
-                float nextScale = std::max(1.0f, g_dragStartScale + delta);
+                float nextScale = std::max(1.0f, g_dragStartScale + deltaY);
                 float zoom = (g_dragStartScale > 0.0f) ? (g_dragStartZoom * (nextScale / g_dragStartScale)) : g_dragStartZoom;
                 g_zoom = std::max(g_zoomMin, (std::min)(zoom, g_zoomMax));
                 UpdateWindowToZoomedImage();
@@ -878,7 +891,55 @@ bool LoadTextFromFile(const wchar_t* path)
     g_imageHeight = 0;
     g_imageHasAlpha = false;
     g_hasText = true;
+    g_textIsMarkdown = IsMarkdownFile(path);
     g_textContent = std::move(text);
+    if (g_textIsMarkdown)
+    {
+        std::wstring rendered;
+        rendered.reserve(g_textContent.size());
+        bool inCodeBlock = false;
+        for (size_t i = 0; i < g_textContent.size();)
+        {
+            if (g_textContent.compare(i, 3, L"```") == 0)
+            {
+                inCodeBlock = !inCodeBlock;
+                i += 3;
+                continue;
+            }
+            wchar_t ch = g_textContent[i];
+            if (!inCodeBlock && ch == L'#')
+            {
+                while (i < g_textContent.size() && g_textContent[i] == L'#')
+                {
+                    ++i;
+                }
+                if (i < g_textContent.size() && g_textContent[i] == L' ')
+                {
+                    ++i;
+                }
+                rendered.append(L"\n");
+                continue;
+            }
+            if (!inCodeBlock && (ch == L'*' || ch == L'_' || ch == L'`'))
+            {
+                ++i;
+                continue;
+            }
+            if (!inCodeBlock && ch == L'>' && (i == 0 || g_textContent[i - 1] == L'\n'))
+            {
+                ++i;
+                if (i < g_textContent.size() && g_textContent[i] == L' ')
+                {
+                    ++i;
+                }
+                rendered.append(L"> ");
+                continue;
+            }
+            rendered.push_back(ch);
+            ++i;
+        }
+        g_textContent = std::move(rendered);
+    }
     ApplyTransparencyMode();
     return true;
 }
@@ -1335,7 +1396,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.md\0All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
