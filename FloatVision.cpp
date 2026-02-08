@@ -1867,6 +1867,970 @@ int WINAPI wWinMain(
 
     if (!hwnd)
     {
+        return false;
+    }
+
+    IWICComponentInfo* componentInfo = nullptr;
+    IWICPixelFormatInfo2* formatInfo = nullptr;
+    bool hasAlpha = false;
+
+    HRESULT hr = g_wicFactory->CreateComponentInfo(format, &componentInfo);
+    if (SUCCEEDED(hr))
+    {
+        hr = componentInfo->QueryInterface(IID_PPV_ARGS(&formatInfo));
+    }
+    if (SUCCEEDED(hr))
+    {
+        BOOL supportsTransparency = FALSE;
+        if (SUCCEEDED(formatInfo->SupportsTransparency(&supportsTransparency)))
+        {
+            hasAlpha = supportsTransparency == TRUE;
+        }
+    }
+
+    if (formatInfo) formatInfo->Release();
+    if (componentInfo) componentInfo->Release();
+
+    return hasAlpha;
+}
+
+void ApplyTransparencyMode()
+{
+    if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+    {
+        UpdateLayeredStyle(true);
+    }
+    else
+    {
+        UpdateLayeredStyle(false);
+    }
+    UpdateCustomColorBrush();
+}
+
+void UpdateCustomColorBrush()
+{
+    if (!g_renderTarget)
+    {
+        return;
+    }
+    if (g_customColorBrush)
+    {
+        g_customColorBrush->Release();
+        g_customColorBrush = nullptr;
+    }
+    D2D1_COLOR_F color = D2D1::ColorF(
+        GetRValue(g_customColor) / 255.0f,
+        GetGValue(g_customColor) / 255.0f,
+        GetBValue(g_customColor) / 255.0f
+    );
+    g_renderTarget->CreateSolidColorBrush(color, &g_customColorBrush);
+}
+
+void UpdateTextFormat()
+{
+    if (!g_dwriteFactory)
+    {
+        return;
+    }
+    if (g_textFormat)
+    {
+        g_textFormat->Release();
+        g_textFormat = nullptr;
+    }
+    g_dwriteFactory->CreateTextFormat(
+        g_textFontName.c_str(),
+        nullptr,
+        DWRITE_FONT_WEIGHT_REGULAR,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        g_textFontSize,
+        L"ja-jp",
+        &g_textFormat
+    );
+    if (g_textFormat)
+    {
+        g_textFormat->SetWordWrapping(g_textWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
+}
+
+void UpdateTextBrush()
+{
+    if (!g_renderTarget)
+    {
+        return;
+    }
+    if (g_textBrush)
+    {
+        g_textBrush->Release();
+        g_textBrush = nullptr;
+    }
+    D2D1_COLOR_F color = D2D1::ColorF(
+        GetRValue(g_textColor) / 255.0f,
+        GetGValue(g_textColor) / 255.0f,
+        GetBValue(g_textColor) / 255.0f
+    );
+    g_renderTarget->CreateSolidColorBrush(color, &g_textBrush);
+}
+
+void ShowSettingsDialog(HWND hwnd)
+{
+    const int kIdTransparent = 2001;
+    const int kIdChecker = 2002;
+    const int kIdSolid = 2003;
+    const int kIdColor = 2004;
+    const int kIdFont = 2005;
+    const int kIdFontColor = 2006;
+    const int kIdBackColor = 2007;
+    const int kIdWrap = 2008;
+
+    auto alignDword = [](std::vector<BYTE>& buffer)
+    {
+        while (buffer.size() % 4 != 0)
+        {
+            buffer.push_back(0);
+        }
+    };
+
+    auto appendWord = [](std::vector<BYTE>& buffer, WORD value)
+    {
+        buffer.push_back(static_cast<BYTE>(value & 0xFF));
+        buffer.push_back(static_cast<BYTE>((value >> 8) & 0xFF));
+    };
+
+    auto appendDword = [&](std::vector<BYTE>& buffer, DWORD value)
+    {
+        appendWord(buffer, static_cast<WORD>(value & 0xFFFF));
+        appendWord(buffer, static_cast<WORD>((value >> 16) & 0xFFFF));
+    };
+
+    auto appendString = [&](std::vector<BYTE>& buffer, const wchar_t* text)
+    {
+        while (*text)
+        {
+            appendWord(buffer, static_cast<WORD>(*text));
+            ++text;
+        }
+        appendWord(buffer, 0);
+    };
+
+    auto addControl = [&](std::vector<BYTE>& buffer, DWORD style, short x, short y, short cx, short cy, WORD id, WORD classAtom, const wchar_t* text)
+    {
+        alignDword(buffer);
+        appendDword(buffer, style);
+        appendDword(buffer, 0);
+        appendWord(buffer, static_cast<WORD>(x));
+        appendWord(buffer, static_cast<WORD>(y));
+        appendWord(buffer, static_cast<WORD>(cx));
+        appendWord(buffer, static_cast<WORD>(cy));
+        appendWord(buffer, id);
+        appendWord(buffer, 0xFFFF);
+        appendWord(buffer, classAtom);
+        appendString(buffer, text);
+        appendWord(buffer, 0);
+    };
+
+    std::vector<BYTE> tmpl;
+    tmpl.reserve(512);
+
+    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
+    appendDword(tmpl, dialogStyle);
+    appendDword(tmpl, 0);
+    appendWord(tmpl, 8);
+    appendWord(tmpl, 10);
+    appendWord(tmpl, 10);
+    appendWord(tmpl, 220);
+    appendWord(tmpl, 160);
+    appendWord(tmpl, 0);
+    appendWord(tmpl, 0);
+    appendString(tmpl, L"Settings");
+    appendWord(tmpl, 9);
+    appendString(tmpl, L"Segoe UI");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 10, 12, 200, 12, kIdTransparent, 0x0080, L"Transparent (show desktop)");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 28, 200, 12, kIdChecker, 0x0080, L"Checkerboard");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 44, 200, 12, kIdSolid, 0x0080, L"Solid color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 62, 80, 14, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 84, 80, 14, kIdFont, 0x0080, L"Font...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 84, 80, 14, kIdFontColor, 0x0080, L"Font color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 62, 80, 14, kIdBackColor, 0x0080, L"Background");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 10, 106, 160, 12, kIdWrap, 0x0080, L"Wrap text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 126, 40, 14, IDOK, 0x0080, L"OK");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 126, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+
+    struct DialogState
+    {
+        TransparencyMode mode;
+        COLORREF color;
+        std::wstring fontName;
+        float fontSize;
+        COLORREF fontColor;
+        COLORREF backgroundColor;
+        bool wrap;
+    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap };
+
+    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    {
+        auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
+        switch (msg)
+        {
+        case WM_INITDIALOG:
+        {
+            SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
+            dialogState = reinterpret_cast<DialogState*>(lParam);
+            int radioId = (dialogState->mode == TransparencyMode::Transparent) ? 2001
+                : (dialogState->mode == TransparencyMode::Checkerboard) ? 2002 : 2003;
+            CheckRadioButton(dlg, 2001, 2003, radioId);
+            EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+            CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
+            return TRUE;
+        }
+        case WM_COMMAND:
+        {
+            int id = LOWORD(wParam);
+            if (id == 2001 || id == 2002 || id == 2003)
+            {
+                dialogState->mode = (id == 2001) ? TransparencyMode::Transparent
+                    : (id == 2002) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
+                CheckRadioButton(dlg, 2001, 2003, id);
+                EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+                return TRUE;
+            }
+            if (id == 2004 || id == 2006 || id == 2007)
+            {
+                CHOOSECOLOR cc{};
+                COLORREF custom[16]{};
+                cc.lStructSize = sizeof(cc);
+                cc.hwndOwner = dlg;
+                cc.rgbResult = (id == 2004) ? dialogState->color
+                    : (id == 2006) ? dialogState->fontColor : dialogState->backgroundColor;
+                cc.lpCustColors = custom;
+                cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+                if (ChooseColor(&cc))
+                {
+                    if (id == 2004)
+                    {
+                        dialogState->color = cc.rgbResult;
+                    }
+                    else if (id == 2006)
+                    {
+                        dialogState->fontColor = cc.rgbResult;
+                    }
+                    else
+                    {
+                        dialogState->backgroundColor = cc.rgbResult;
+                    }
+                }
+                return TRUE;
+            }
+            if (id == 2005)
+            {
+                LOGFONT lf{};
+                wcsncpy_s(lf.lfFaceName, dialogState->fontName.c_str(), LF_FACESIZE - 1);
+                lf.lfHeight = -static_cast<LONG>(dialogState->fontSize);
+                CHOOSEFONT cf{};
+                cf.lStructSize = sizeof(cf);
+                cf.hwndOwner = dlg;
+                cf.lpLogFont = &lf;
+                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
+                if (ChooseFont(&cf))
+                {
+                    dialogState->fontName = lf.lfFaceName;
+                    dialogState->fontSize = static_cast<float>(std::abs(lf.lfHeight));
+                }
+                return TRUE;
+            }
+            if (id == 2008)
+            {
+                dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
+                return TRUE;
+            }
+            if (id == IDOK)
+            {
+                EndDialog(dlg, IDOK);
+                return TRUE;
+            }
+            if (id == IDCANCEL)
+            {
+                EndDialog(dlg, IDCANCEL);
+                return TRUE;
+            }
+            break;
+        }
+        }
+        return FALSE;
+    };
+
+    INT_PTR result = DialogBoxIndirectParam(
+        GetModuleHandle(nullptr),
+        reinterpret_cast<DLGTEMPLATE*>(tmpl.data()),
+        hwnd,
+        dialogProc,
+        reinterpret_cast<LPARAM>(&state)
+    );
+
+    if (result == IDOK)
+    {
+        g_transparencyMode = state.mode;
+        g_customColor = state.color;
+        g_textFontName = state.fontName;
+        g_textFontSize = state.fontSize;
+        g_textColor = state.fontColor;
+        g_textBackground = state.backgroundColor;
+        g_textWrap = state.wrap;
+        SaveSettings();
+        ApplyTransparencyMode();
+        UpdateTextFormat();
+        UpdateTextBrush();
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+}
+void NavigateImage(int delta)
+{
+    if (g_imageList.empty())
+    {
+        return;
+    }
+
+    size_t count = g_imageList.size();
+    size_t index = (g_currentIndex + count + (delta % static_cast<int>(count))) % count;
+    if (LoadImageByIndex(index) && g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+}
+
+void RefreshImageList(const std::filesystem::path& imagePath)
+{
+    g_imageList.clear();
+    g_currentImagePath = imagePath;
+    g_currentIndex = 0;
+
+    std::filesystem::path dir = imagePath.parent_path();
+    if (dir.empty())
+    {
+        dir = std::filesystem::current_path();
+    }
+
+    std::error_code ec;
+    for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
+    {
+        if (ec)
+        {
+            break;
+        }
+        if (!entry.is_regular_file(ec))
+        {
+            continue;
+        }
+        std::filesystem::path filePath = entry.path();
+        if (!IsImageFile(filePath))
+        {
+            continue;
+        }
+        std::filesystem::file_time_type time = entry.last_write_time(ec);
+        g_imageList.push_back({ filePath, time });
+    }
+
+    SortImageList();
+
+    for (size_t i = 0; i < g_imageList.size(); ++i)
+    {
+        if (g_imageList[i].path == g_currentImagePath)
+        {
+            g_currentIndex = i;
+            break;
+        }
+    }
+}
+
+bool LoadImageByIndex(size_t index)
+{
+    if (g_imageList.empty() || index >= g_imageList.size())
+    {
+        return false;
+    }
+    g_currentIndex = index;
+    g_currentImagePath = g_imageList[index].path;
+    bool result = LoadImageFromFile(g_currentImagePath.c_str());
+    if (result)
+    {
+        UpdateZoomToFitScreen(g_hwnd);
+    }
+    return result;
+}
+
+void SetFitToWindow(bool fit)
+{
+    g_fitToWindow = fit;
+    if (fit)
+    {
+        UpdateFitZoomFromWindow(nullptr);
+        UpdateWindowToZoomedImage();
+    }
+}
+
+void AdjustZoom(float factor, const POINT& screenPoint)
+{
+    (void)screenPoint;
+    float newScale = g_zoom * factor;
+    g_zoom = std::max(g_zoomMin, (std::min)(newScale, g_zoomMax));
+    g_fitToWindow = false;
+    UpdateWindowToZoomedImage();
+}
+
+bool ShowOpenImageDialog(HWND hwnd)
+{
+    wchar_t filePath[MAX_PATH] = L"";
+    OPENFILENAME ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = hwnd;
+    ofn.lpstrFile = filePath;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt\0All Files\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
+
+    if (!GetOpenFileName(&ofn))
+    {
+        return false;
+    }
+
+    if (IsTextFile(filePath))
+    {
+        if (LoadTextFromFile(filePath))
+        {
+            return true;
+        }
+    }
+    if (LoadImageFromFile(filePath))
+    {
+        RefreshImageList(filePath);
+        UpdateZoomToFitScreen(hwnd);
+        return true;
+    }
+    return false;
+}
+
+void UpdateWindowSizeToImage(HWND hwnd, float drawWidth, float drawHeight)
+{
+    if (!hwnd || drawWidth <= 0.0f || drawHeight <= 0.0f)
+    {
+        return;
+    }
+
+    RECT windowRect{};
+    RECT clientRect{};
+    GetWindowRect(hwnd, &windowRect);
+    GetClientRect(hwnd, &clientRect);
+
+    int currentClientWidth = clientRect.right - clientRect.left;
+    int currentClientHeight = clientRect.bottom - clientRect.top;
+    int targetClientWidth = static_cast<int>(std::lround(drawWidth));
+    int targetClientHeight = static_cast<int>(std::lround(drawHeight));
+
+    if (abs(targetClientWidth - currentClientWidth) < 2 && abs(targetClientHeight - currentClientHeight) < 2)
+    {
+        return;
+    }
+
+    int windowWidth = windowRect.right - windowRect.left;
+    int windowHeight = windowRect.bottom - windowRect.top;
+    int frameWidth = windowWidth - currentClientWidth;
+    int frameHeight = windowHeight - currentClientHeight;
+
+    int targetWindowWidth = targetClientWidth + frameWidth;
+    int targetWindowHeight = targetClientHeight + frameHeight;
+
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        0,
+        0,
+        targetWindowWidth,
+        targetWindowHeight,
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+    );
+}
+
+void UpdateFitZoomFromWindow(HWND hwnd)
+{
+    (void)hwnd;
+    if (!g_renderTarget || g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        g_zoom = 1.0f;
+        return;
+    }
+
+    D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+    float scaleX = rtSize.width / static_cast<float>(g_imageWidth);
+    float scaleY = rtSize.height / static_cast<float>(g_imageHeight);
+    g_zoom = std::max(g_zoomMin, (std::min)((std::min)(scaleX, scaleY), g_zoomMax));
+}
+
+void UpdateWindowToZoomedImage()
+{
+    if (!g_hwnd || g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        return;
+    }
+    UpdateWindowSizeToImage(g_hwnd, g_imageWidth * g_zoom, g_imageHeight * g_zoom);
+}
+
+void UpdateZoomToFitScreen(HWND hwnd)
+{
+    if (g_imageWidth == 0 || g_imageHeight == 0)
+    {
+        g_zoom = 1.0f;
+        return;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor && GetMonitorInfo(monitor, &info))
+    {
+        int workWidth = info.rcWork.right - info.rcWork.left;
+        int workHeight = info.rcWork.bottom - info.rcWork.top;
+        if (workWidth > 0 && workHeight > 0)
+        {
+            float scaleX = static_cast<float>(workWidth) / static_cast<float>(g_imageWidth);
+            float scaleY = static_cast<float>(workHeight) / static_cast<float>(g_imageHeight);
+            g_zoom = (std::min)(1.0f, (std::min)(scaleX, scaleY));
+            g_zoom = std::max(g_zoomMin, (std::min)(g_zoom, g_zoomMax));
+            g_fitToWindow = (g_zoom < 1.0f);
+            UpdateWindowToZoomedImage();
+            return;
+        }
+    }
+
+    g_zoom = 1.0f;
+    g_fitToWindow = false;
+    UpdateWindowToZoomedImage();
+}
+
+void LoadSettings()
+{
+    if (g_iniPath.empty())
+    {
+        return;
+    }
+
+    wchar_t buffer[64]{};
+    GetPrivateProfileStringW(L"Settings", L"SortMode", L"0", buffer, 32, g_iniPath.c_str());
+    int sortValue = _wtoi(buffer);
+    if (sortValue < 0 || sortValue > 3)
+    {
+        sortValue = 0;
+    }
+    g_sortMode = static_cast<SortMode>(sortValue);
+
+    GetPrivateProfileStringW(L"Settings", L"AlwaysOnTop", L"0", buffer, 32, g_iniPath.c_str());
+    g_alwaysOnTop = (_wtoi(buffer) != 0);
+
+    GetPrivateProfileStringW(L"Settings", L"TransparencyMode", L"0", buffer, 32, g_iniPath.c_str());
+    int modeValue = _wtoi(buffer);
+    if (modeValue < 0 || modeValue > 2)
+    {
+        modeValue = 0;
+    }
+    g_transparencyMode = static_cast<TransparencyMode>(modeValue);
+
+    GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
+    g_customColor = static_cast<COLORREF>(_wtoi(buffer));
+
+    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, 32, g_iniPath.c_str());
+    if (buffer[0] != L'\0')
+    {
+        g_textFontName = buffer;
+    }
+    GetPrivateProfileStringW(L"Text", L"FontSize", L"18", buffer, 32, g_iniPath.c_str());
+    g_textFontSize = static_cast<float>(_wtof(buffer));
+    if (g_textFontSize < 8.0f)
+    {
+        g_textFontSize = 8.0f;
+    }
+    GetPrivateProfileStringW(L"Text", L"FontColor", L"15790320", buffer, 32, g_iniPath.c_str());
+    g_textColor = static_cast<COLORREF>(_wtoi(buffer));
+    GetPrivateProfileStringW(L"Text", L"BackgroundColor", L"1315860", buffer, 32, g_iniPath.c_str());
+    g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
+    GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
+    g_textWrap = (_wtoi(buffer) != 0);
+}
+
+void SaveSettings()
+{
+    if (g_iniPath.empty())
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_sortMode));
+    WritePrivateProfileStringW(L"Settings", L"SortMode", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_alwaysOnTop ? 1 : 0);
+    WritePrivateProfileStringW(L"Settings", L"AlwaysOnTop", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_transparencyMode));
+    WritePrivateProfileStringW(L"Settings", L"TransparencyMode", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
+    WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
+
+    WritePrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%.2f", g_textFontSize);
+    WritePrivateProfileStringW(L"Text", L"FontSize", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textColor));
+    WritePrivateProfileStringW(L"Text", L"FontColor", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textBackground));
+    WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
+    WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
+}
+
+void ApplyAlwaysOnTop()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    SetWindowPos(
+        g_hwnd,
+        g_alwaysOnTop ? HWND_TOPMOST : HWND_NOTOPMOST,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
+    );
+}
+
+void LoadWindowPlacement()
+{
+    if (g_iniPath.empty())
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    GetPrivateProfileStringW(L"Window", L"X", L"", buffer, 32, g_iniPath.c_str());
+    if (buffer[0] != L'\0')
+    {
+        g_windowPos.x = _wtoi(buffer);
+        g_hasSavedWindowPos = true;
+    }
+    GetPrivateProfileStringW(L"Window", L"Y", L"", buffer, 32, g_iniPath.c_str());
+    if (buffer[0] != L'\0')
+    {
+        g_windowPos.y = _wtoi(buffer);
+        g_hasSavedWindowPos = true;
+    }
+}
+
+void SaveWindowPlacement()
+{
+    if (!g_hwnd || g_iniPath.empty())
+    {
+        return;
+    }
+
+    RECT rect{};
+    if (!GetWindowRect(g_hwnd, &rect))
+    {
+        return;
+    }
+
+    wchar_t buffer[32]{};
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", rect.left);
+    WritePrivateProfileStringW(L"Window", L"X", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", rect.top);
+    WritePrivateProfileStringW(L"Window", L"Y", buffer, g_iniPath.c_str());
+}
+
+void UpdateLayeredStyle(bool enable)
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+
+    LONG_PTR exStyle = GetWindowLongPtr(g_hwnd, GWL_EXSTYLE);
+    if (enable)
+    {
+        exStyle |= WS_EX_LAYERED;
+    }
+    else
+    {
+        exStyle &= ~WS_EX_LAYERED;
+    }
+    SetWindowLongPtr(g_hwnd, GWL_EXSTYLE, exStyle);
+}
+
+bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight)
+{
+    if (!g_wicSource || drawWidth <= 0.0f || drawHeight <= 0.0f)
+    {
+        return false;
+    }
+
+    UINT width = static_cast<UINT>(std::max(1.0f, static_cast<float>(std::lround(drawWidth))));
+    UINT height = static_cast<UINT>(std::max(1.0f, static_cast<float>(std::lround(drawHeight))));
+
+    IWICBitmapScaler* scaler = nullptr;
+    HRESULT hr = g_wicFactory->CreateBitmapScaler(&scaler);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    hr = scaler->Initialize(g_wicSource, width, height, WICBitmapInterpolationModeFant);
+    if (FAILED(hr))
+    {
+        scaler->Release();
+        return false;
+    }
+
+    BITMAPINFO bmi{};
+    bmi.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+    bmi.bmiHeader.biWidth = static_cast<LONG>(width);
+    bmi.bmiHeader.biHeight = -static_cast<LONG>(height);
+    bmi.bmiHeader.biPlanes = 1;
+    bmi.bmiHeader.biBitCount = 32;
+    bmi.bmiHeader.biCompression = BI_RGB;
+
+    void* bits = nullptr;
+    HDC screenDc = GetDC(nullptr);
+    HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
+    HDC memDc = CreateCompatibleDC(screenDc);
+    HGDIOBJ oldBmp = SelectObject(memDc, dib);
+
+    WICRect rect{ 0, 0, static_cast<INT>(width), static_cast<INT>(height) };
+    UINT stride = width * 4;
+    UINT bufferSize = stride * height;
+    hr = scaler->CopyPixels(&rect, stride, bufferSize, static_cast<BYTE*>(bits));
+
+    POINT ptSrc{ 0, 0 };
+    SIZE sizeWindow{ static_cast<LONG>(width), static_cast<LONG>(height) };
+    RECT wndRect{};
+    GetWindowRect(hwnd, &wndRect);
+    POINT ptDst{ wndRect.left, wndRect.top };
+    BLENDFUNCTION blend{};
+    blend.BlendOp = AC_SRC_OVER;
+    blend.SourceConstantAlpha = 255;
+    blend.AlphaFormat = AC_SRC_ALPHA;
+
+    bool updated = false;
+    if (SUCCEEDED(hr))
+    {
+        updated = UpdateLayeredWindow(
+            hwnd,
+            screenDc,
+            &ptDst,
+            &sizeWindow,
+            memDc,
+            &ptSrc,
+            0,
+            &blend,
+            ULW_ALPHA
+        ) == TRUE;
+    }
+
+    SelectObject(memDc, oldBmp);
+    DeleteDC(memDc);
+    DeleteObject(dib);
+    ReleaseDC(nullptr, screenDc);
+    scaler->Release();
+
+    return updated;
+}
+
+// =====================
+// 描画
+// =====================
+void Render(HWND hwnd)
+{
+    if (!g_renderTarget)
+    {
+        if (!InitDirect2D(hwnd))
+        {
+            return;
+        }
+    }
+
+    g_renderTarget->BeginDraw();
+
+    if (g_hasText)
+    {
+        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+        if (g_renderTarget && rtSize.width > 0.0f && rtSize.height > 0.0f)
+        {
+            D2D1_COLOR_F bgColor = D2D1::ColorF(
+                GetRValue(g_textBackground) / 255.0f,
+                GetGValue(g_textBackground) / 255.0f,
+                GetBValue(g_textBackground) / 255.0f
+            );
+            g_renderTarget->Clear(bgColor);
+            if (g_textFormat && g_textBrush)
+            {
+                D2D1_RECT_F textRect = D2D1::RectF(8.0f, 8.0f, rtSize.width - 8.0f, rtSize.height - 8.0f);
+                g_renderTarget->DrawTextW(
+                    g_textContent.c_str(),
+                    static_cast<UINT32>(g_textContent.size()),
+                    g_textFormat,
+                    textRect,
+                    g_textBrush
+                );
+            }
+        }
+    }
+    else if (g_bitmap)
+    {
+        float scale = g_zoom;
+        float drawWidth = g_imageWidth * scale;
+        float drawHeight = g_imageHeight * scale;
+
+        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
+
+        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        {
+            UpdateLayeredWindowFromWic(hwnd, drawWidth, drawHeight);
+            return;
+        }
+
+        if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
+        {
+            D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+            float roundedWidth = static_cast<float>(std::lround(drawWidth));
+            float roundedHeight = static_cast<float>(std::lround(drawHeight));
+            UINT targetWidth = static_cast<UINT>(std::max(1.0f, roundedWidth));
+            UINT targetHeight = static_cast<UINT>(std::max(1.0f, roundedHeight));
+            if (rtSize.width != targetWidth || rtSize.height != targetHeight)
+            {
+                g_renderTarget->Resize(D2D1::SizeU(targetWidth, targetHeight));
+            }
+        }
+
+        g_renderTarget->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Checkerboard
+            && g_checkerBrushA && g_checkerBrushB)
+        {
+            const float cellSize = 16.0f;
+            for (float y = 0.0f; y < drawHeight; y += cellSize)
+            {
+                for (float x = 0.0f; x < drawWidth; x += cellSize)
+                {
+                    bool evenCell = (static_cast<int>(x / cellSize) + static_cast<int>(y / cellSize)) % 2 == 0;
+                    ID2D1SolidColorBrush* brush = evenCell ? g_checkerBrushA : g_checkerBrushB;
+                    g_renderTarget->FillRectangle(
+                        D2D1::RectF(x, y, x + cellSize, y + cellSize),
+                        brush
+                    );
+                }
+            }
+        }
+        else if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::SolidColor && g_customColorBrush)
+        {
+            g_renderTarget->Clear(g_customColorBrush->GetColor());
+        }
+
+        D2D1_RECT_F dest = D2D1::RectF(
+            0.0f,
+            0.0f,
+            drawWidth,
+            drawHeight
+        );
+
+        g_renderTarget->DrawBitmap(
+            g_bitmap,
+            dest,
+            1.0f,
+            D2D1_BITMAP_INTERPOLATION_MODE_LINEAR
+        );
+    }
+    else
+    {
+        g_renderTarget->Clear(D2D1::ColorF(0.12f, 0.12f, 0.12f));
+
+        const wchar_t* placeholderText = L"Drop image here";
+        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+        D2D1_RECT_F textRect = D2D1::RectF(
+            0.0f,
+            0.0f,
+            rtSize.width,
+            rtSize.height
+        );
+
+        if (g_placeholderBrush && g_placeholderFormat)
+        {
+            g_renderTarget->DrawTextW(
+                placeholderText,
+                static_cast<UINT32>(wcslen(placeholderText)),
+                g_placeholderFormat,
+                textRect,
+                g_placeholderBrush
+            );
+        }
+    }
+
+    HRESULT hr = g_renderTarget->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET)
+    {
+        DiscardRenderTarget();
+        InvalidateRect(hwnd, nullptr, TRUE);
+    }
+}
+
+// =====================
+// エントリポイント
+// =====================
+int WINAPI wWinMain(
+    HINSTANCE hInstance,
+    HINSTANCE,
+    PWSTR,
+    int nCmdShow
+)
+{
+    SetProcessDPIAware();
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
+    const wchar_t CLASS_NAME[] = L"FloatVisionWindow";
+
+    WNDCLASSEX wc{};
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInstance;
+    wc.lpszClassName = CLASS_NAME;
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_FLOATVISION));
+    wc.hIconSm = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
+
+    RegisterClassEx(&wc);
+
+    HWND hwnd = CreateWindowEx(
+        0,
+        CLASS_NAME,
+        L"FloatVision",
+        WS_POPUP,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        800, 600,
+        nullptr,
+        nullptr,
+        hInstance,
+        nullptr
+    );
+    g_hwnd = hwnd;
+    if (g_hwnd)
+    {
+        wchar_t modulePath[MAX_PATH]{};
+        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) > 0)
+        {
+            std::filesystem::path iniPath(modulePath);
+            iniPath.replace_extension(L".ini");
+            g_iniPath = iniPath.wstring();
+        }
+    }
+
+    if (!hwnd)
+    {
         MessageBox(nullptr, L"CreateWindowEx failed", L"Error", MB_OK);
         return 0;
     }
