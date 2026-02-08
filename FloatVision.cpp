@@ -697,8 +697,10 @@ LRESULT CALLBACK WndProc(
     }
 
     default:
-        return DefWindowProc(hwnd, msg, wParam, lParam);
+        break;
     }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
 }
 
 // =====================
@@ -1164,7 +1166,7 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
     WideCharToMultiByte(CP_UTF8, 0, markdown.data(), static_cast<int>(markdown.size()), utf8.data(), utf8Size, nullptr, nullptr);
 
     std::string html;
-    md_html(utf8.data(), utf8.size(), AppendMarkdownHtml, &html, 0, 0);
+    md_html(utf8.data(), static_cast<MD_SIZE>(utf8.size()), AppendMarkdownHtml, &html, 0, 0);
 
     if (html.empty())
     {
