@@ -70,6 +70,14 @@ bool g_textWrap = true;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
+bool g_webviewInputTimerActive = false;
+enum class HtmlInputKey
+{
+    Shift = 0,
+    Ctrl = 1,
+    Alt = 2
+};
+HtmlInputKey g_htmlInputKey = HtmlInputKey::Shift;
 
 enum class TransparencyMode
 {
@@ -119,6 +127,8 @@ constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
 constexpr int kMenuSortTimeDesc = 1104;
+constexpr UINT_PTR kWebViewInputTimerId = 2001;
+constexpr UINT kWebViewInputTimerIntervalMs = 50;
 
 // =====================
 // 前方宣言
@@ -158,6 +168,8 @@ void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
+void UpdateWebViewInputTimer();
+WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
@@ -575,6 +587,11 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
@@ -633,6 +650,37 @@ LRESULT CALLBACK WndProc(
             return 0;
         }
         return 0;
+    }
+
+    case WM_KEYUP:
+    {
+        if (g_hasHtml)
+        {
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+        return 0;
+    }
+
+    case WM_TIMER:
+    {
+        if (wParam == kWebViewInputTimerId)
+        {
+            if (g_hasHtml)
+            {
+                UpdateWebViewInputState();
+            }
+            else
+            {
+                UpdateWebViewInputTimer();
+            }
+            return 0;
+        }
+        break;
     }
 
     case WM_DESTROY:
@@ -1097,6 +1145,11 @@ void HideWebView()
     {
         g_webviewController->put_IsVisible(FALSE);
     }
+    if (g_webviewInputTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewInputTimerId);
+        g_webviewInputTimerActive = false;
+    }
 }
 
 void UpdateWebViewBounds()
@@ -1141,6 +1194,41 @@ void UpdateWebViewWindowHandle()
     g_webviewWindow = found;
 }
 
+void UpdateWebViewInputTimer()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    if (g_hasHtml)
+    {
+        if (!g_webviewInputTimerActive)
+        {
+            SetTimer(g_hwnd, kWebViewInputTimerId, kWebViewInputTimerIntervalMs, nullptr);
+            g_webviewInputTimerActive = true;
+        }
+    }
+    else if (g_webviewInputTimerActive)
+    {
+        KillTimer(g_hwnd, kWebViewInputTimerId);
+        g_webviewInputTimerActive = false;
+    }
+}
+
+WORD GetHtmlInputVirtualKey()
+{
+    switch (g_htmlInputKey)
+    {
+    case HtmlInputKey::Ctrl:
+        return VK_CONTROL;
+    case HtmlInputKey::Alt:
+        return VK_MENU;
+    case HtmlInputKey::Shift:
+    default:
+        return VK_SHIFT;
+    }
+}
+
 void UpdateWebViewInputState()
 {
     if (!g_webviewWindow)
@@ -1149,7 +1237,9 @@ void UpdateWebViewInputState()
     }
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    if (g_hasHtml)
+    WORD inputKey = GetHtmlInputVirtualKey();
+    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+    if (g_hasHtml && !keyDown)
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
@@ -1182,6 +1272,7 @@ bool EnsureWebView2(HWND hwnd)
         g_webviewController->put_IsVisible(TRUE);
         UpdateWebViewWindowHandle();
         UpdateWebViewInputState();
+        UpdateWebViewInputTimer();
         UpdateWebViewBounds();
         if (!g_pendingHtmlContent.empty())
         {
@@ -1238,6 +1329,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController->put_IsVisible(TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
+                            UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
                             if (g_webview && !g_pendingHtmlContent.empty())
                             {
@@ -1256,6 +1348,11 @@ void CloseWebView()
     if (g_webviewController)
     {
         g_webviewController->Close();
+    }
+    if (g_webviewInputTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewInputTimerId);
+        g_webviewInputTimerActive = false;
     }
     g_webviewController.Reset();
     g_webviewController2.Reset();
@@ -1391,6 +1488,9 @@ void ShowSettingsDialog(HWND hwnd)
     const int kIdFontColor = 2006;
     const int kIdBackColor = 2007;
     const int kIdWrap = 2008;
+    const int kIdHtmlKeyShift = 2009;
+    const int kIdHtmlKeyCtrl = 2010;
+    const int kIdHtmlKeyAlt = 2011;
 
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
@@ -1444,11 +1544,11 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 12);
+    appendWord(tmpl, 16);
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
     appendWord(tmpl, 220);
-    appendWord(tmpl, 170);
+    appendWord(tmpl, 206);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -1466,8 +1566,12 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 94, 80, 14, kIdFontColor, 0x0080, L"Font color");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 112, 80, 14, kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 130, 80, 12, kIdWrap, 0x0080, L"Wrap");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 154, 40, 14, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 154, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 148, 208, 30, 0xFFFF, 0x0080, L"HTML input key");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 14, 162, 60, 12, kIdHtmlKeyShift, 0x0080, L"Shift");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 80, 162, 60, 12, kIdHtmlKeyCtrl, 0x0080, L"Ctrl");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 146, 162, 60, 12, kIdHtmlKeyAlt, 0x0080, L"Alt");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 182, 40, 14, IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 182, 40, 14, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -1478,7 +1582,8 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF fontColor;
         COLORREF backgroundColor;
         bool wrap;
-    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap };
+        HtmlInputKey htmlInputKey;
+    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap, g_htmlInputKey };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
@@ -1494,6 +1599,9 @@ void ShowSettingsDialog(HWND hwnd)
             CheckRadioButton(dlg, 2001, 2003, radioId);
             EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
             CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
+            int htmlKeyId = (dialogState->htmlInputKey == HtmlInputKey::Shift) ? 2009
+                : (dialogState->htmlInputKey == HtmlInputKey::Ctrl) ? 2010 : 2011;
+            CheckRadioButton(dlg, 2009, 2011, htmlKeyId);
             return TRUE;
         }
         case WM_COMMAND:
@@ -1505,6 +1613,13 @@ void ShowSettingsDialog(HWND hwnd)
                     : (id == 2002) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
                 CheckRadioButton(dlg, 2001, 2003, id);
                 EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+                return TRUE;
+            }
+            if (id == 2009 || id == 2010 || id == 2011)
+            {
+                dialogState->htmlInputKey = (id == 2009) ? HtmlInputKey::Shift
+                    : (id == 2010) ? HtmlInputKey::Ctrl : HtmlInputKey::Alt;
+                CheckRadioButton(dlg, 2009, 2011, id);
                 return TRUE;
             }
             if (id == 2004 || id == 2006 || id == 2007)
@@ -1571,6 +1686,18 @@ void ShowSettingsDialog(HWND hwnd)
                     dialogState->mode = TransparencyMode::SolidColor;
                 }
                 dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
+                if (IsDlgButtonChecked(dlg, 2009) == BST_CHECKED)
+                {
+                    dialogState->htmlInputKey = HtmlInputKey::Shift;
+                }
+                else if (IsDlgButtonChecked(dlg, 2010) == BST_CHECKED)
+                {
+                    dialogState->htmlInputKey = HtmlInputKey::Ctrl;
+                }
+                else
+                {
+                    dialogState->htmlInputKey = HtmlInputKey::Alt;
+                }
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
@@ -1602,10 +1729,12 @@ void ShowSettingsDialog(HWND hwnd)
         g_textColor = state.fontColor;
         g_textBackground = state.backgroundColor;
         g_textWrap = state.wrap;
+        g_htmlInputKey = state.htmlInputKey;
         SaveSettings();
         ApplyTransparencyMode();
         UpdateTextFormat();
         UpdateTextBrush();
+        UpdateWebViewInputState();
         InvalidateRect(hwnd, nullptr, TRUE);
     }
 }
@@ -1887,6 +2016,14 @@ void LoadSettings()
     g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
     GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
     g_textWrap = (_wtoi(buffer) != 0);
+
+    GetPrivateProfileStringW(L"Html", L"InputKey", L"0", buffer, 32, g_iniPath.c_str());
+    int inputKeyValue = _wtoi(buffer);
+    if (inputKeyValue < 0 || inputKeyValue > 2)
+    {
+        inputKeyValue = 0;
+    }
+    g_htmlInputKey = static_cast<HtmlInputKey>(inputKeyValue);
 }
 
 void SaveSettings()
@@ -1918,6 +2055,9 @@ void SaveSettings()
     WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
     WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_htmlInputKey));
+    WritePrivateProfileStringW(L"Html", L"InputKey", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
