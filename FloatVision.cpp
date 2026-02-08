@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <fstream>
 #include <string>
 #include "resource.h"
 
@@ -30,11 +31,13 @@ ID2D1SolidColorBrush* g_placeholderBrush = nullptr;
 ID2D1SolidColorBrush* g_checkerBrushA = nullptr;
 ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
 ID2D1SolidColorBrush* g_customColorBrush = nullptr;
+ID2D1SolidColorBrush* g_textBrush = nullptr;
 HWND g_hwnd = nullptr;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
 IDWriteTextFormat* g_placeholderFormat = nullptr;
+IDWriteTextFormat* g_textFormat = nullptr;
 IWICBitmapSource* g_wicSource = nullptr;
 
 UINT g_imageWidth = 0;
@@ -47,6 +50,14 @@ bool g_isEdgeDragging = false;
 POINT g_dragStartPoint{};
 float g_dragStartZoom = 1.0f;
 float g_dragStartScale = 1.0f;
+
+bool g_hasText = false;
+std::wstring g_textContent;
+std::wstring g_textFontName = L"Consolas";
+float g_textFontSize = 18.0f;
+COLORREF g_textColor = RGB(240, 240, 240);
+COLORREF g_textBackground = RGB(20, 20, 20);
+bool g_textWrap = true;
 
 enum class TransparencyMode
 {
@@ -105,6 +116,7 @@ bool InitDirect2D(HWND hwnd);
 bool InitWIC();
 bool InitDirectWrite();
 bool LoadImageFromFile(const wchar_t* path);
+bool LoadTextFromFile(const wchar_t* path);
 void NavigateImage(int delta);
 void CleanupResources();
 void DiscardRenderTarget();
@@ -128,6 +140,8 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
 void ApplyTransparencyMode();
 void UpdateCustomColorBrush();
 void ShowSettingsDialog(HWND hwnd);
+void UpdateTextFormat();
+void UpdateTextBrush();
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -140,6 +154,17 @@ bool IsImageFile(const std::filesystem::path& path)
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
     return ext == L".png" || ext == L".jpg" || ext == L".jpeg" || ext == L".bmp"
         || ext == L".gif" || ext == L".tif" || ext == L".tiff" || ext == L".webp";
+}
+
+bool IsTextFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".txt";
 }
 
 void SortImageList()
@@ -232,7 +257,14 @@ LRESULT CALLBACK WndProc(
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
                 path.resize(pathLength);
-                if (LoadImageFromFile(path.c_str()))
+                if (IsTextFile(path))
+                {
+                    if (LoadTextFromFile(path.c_str()))
+                    {
+                        InvalidateRect(hwnd, nullptr, TRUE);
+                    }
+                }
+                else if (LoadImageFromFile(path.c_str()))
                 {
                     RefreshImageList(path);
                     UpdateZoomToFitScreen(hwnd);
@@ -556,6 +588,7 @@ bool InitDirect2D(HWND hwnd)
     }
 
     UpdateCustomColorBrush();
+    UpdateTextBrush();
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
         D2D1::ColorF(0.85f, 0.85f, 0.85f),
@@ -595,6 +628,11 @@ void DiscardRenderTarget()
         g_customColorBrush->Release();
         g_customColorBrush = nullptr;
     }
+    if (g_textBrush)
+    {
+        g_textBrush->Release();
+        g_textBrush = nullptr;
+    }
     if (g_bitmap)
     {
         g_bitmap->Release();
@@ -623,6 +661,11 @@ void CleanupResources()
     {
         g_placeholderFormat->Release();
         g_placeholderFormat = nullptr;
+    }
+    if (g_textFormat)
+    {
+        g_textFormat->Release();
+        g_textFormat = nullptr;
     }
     if (g_dwriteFactory)
     {
@@ -688,6 +731,8 @@ bool InitDirectWrite()
     g_placeholderFormat->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
     g_placeholderFormat->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
+    UpdateTextFormat();
+
     return true;
 }
 
@@ -714,6 +759,8 @@ bool LoadImageFromFile(const wchar_t* path)
     g_imageWidth = 0;
     g_imageHeight = 0;
     g_imageHasAlpha = false;
+    g_hasText = false;
+    g_textContent.clear();
 
     HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
         path,
@@ -767,6 +814,50 @@ cleanup:
 
     ApplyTransparencyMode();
     return SUCCEEDED(hr);
+}
+
+bool LoadTextFromFile(const wchar_t* path)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+
+    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
+        && static_cast<unsigned char>(bytes[1]) == 0xBB
+        && static_cast<unsigned char>(bytes[2]) == 0xBF)
+    {
+        bytes.erase(0, 3);
+    }
+
+    int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    if (needed <= 0)
+    {
+        return false;
+    }
+
+    std::wstring text(needed, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), needed);
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSource)
+    {
+        g_wicSource->Release();
+        g_wicSource = nullptr;
+    }
+    g_imageWidth = 0;
+    g_imageHeight = 0;
+    g_imageHasAlpha = false;
+    g_hasText = true;
+    g_textContent = std::move(text);
+    ApplyTransparencyMode();
+    return true;
 }
 
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
@@ -832,12 +923,62 @@ void UpdateCustomColorBrush()
     g_renderTarget->CreateSolidColorBrush(color, &g_customColorBrush);
 }
 
+void UpdateTextFormat()
+{
+    if (!g_dwriteFactory)
+    {
+        return;
+    }
+    if (g_textFormat)
+    {
+        g_textFormat->Release();
+        g_textFormat = nullptr;
+    }
+    g_dwriteFactory->CreateTextFormat(
+        g_textFontName.c_str(),
+        nullptr,
+        DWRITE_FONT_WEIGHT_REGULAR,
+        DWRITE_FONT_STYLE_NORMAL,
+        DWRITE_FONT_STRETCH_NORMAL,
+        g_textFontSize,
+        L"ja-jp",
+        &g_textFormat
+    );
+    if (g_textFormat)
+    {
+        g_textFormat->SetWordWrapping(g_textWrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    }
+}
+
+void UpdateTextBrush()
+{
+    if (!g_renderTarget)
+    {
+        return;
+    }
+    if (g_textBrush)
+    {
+        g_textBrush->Release();
+        g_textBrush = nullptr;
+    }
+    D2D1_COLOR_F color = D2D1::ColorF(
+        GetRValue(g_textColor) / 255.0f,
+        GetGValue(g_textColor) / 255.0f,
+        GetBValue(g_textColor) / 255.0f
+    );
+    g_renderTarget->CreateSolidColorBrush(color, &g_textBrush);
+}
+
 void ShowSettingsDialog(HWND hwnd)
 {
     const int kIdTransparent = 2001;
     const int kIdChecker = 2002;
     const int kIdSolid = 2003;
     const int kIdColor = 2004;
+    const int kIdFont = 2005;
+    const int kIdFontColor = 2006;
+    const int kIdBackColor = 2007;
+    const int kIdWrap = 2008;
 
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
@@ -891,29 +1032,38 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 5);
+    appendWord(tmpl, 8);
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
-    appendWord(tmpl, 200);
-    appendWord(tmpl, 110);
+    appendWord(tmpl, 220);
+    appendWord(tmpl, 160);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
     appendWord(tmpl, 9);
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 10, 12, 160, 12, kIdTransparent, 0x0080, L"Transparent (show desktop)");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 28, 160, 12, kIdChecker, 0x0080, L"Checkerboard");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 44, 160, 12, kIdSolid, 0x0080, L"Solid color");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 62, 70, 14, kIdColor, 0x0080, L"Color...");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 110, 80, 40, 14, IDOK, 0x0080, L"OK");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 155, 80, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 10, 12, 200, 12, kIdTransparent, 0x0080, L"Transparent (show desktop)");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 28, 200, 12, kIdChecker, 0x0080, L"Checkerboard");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 10, 44, 200, 12, kIdSolid, 0x0080, L"Solid color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 62, 80, 14, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 10, 84, 80, 14, kIdFont, 0x0080, L"Font...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 84, 80, 14, kIdFontColor, 0x0080, L"Font color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 62, 80, 14, kIdBackColor, 0x0080, L"Background");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 10, 106, 160, 12, kIdWrap, 0x0080, L"Wrap text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 126, 40, 14, IDOK, 0x0080, L"OK");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 126, 40, 14, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
         TransparencyMode mode;
         COLORREF color;
-    } state{ g_transparencyMode, g_customColor };
+        std::wstring fontName;
+        float fontSize;
+        COLORREF fontColor;
+        COLORREF backgroundColor;
+        bool wrap;
+    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
@@ -928,6 +1078,7 @@ void ShowSettingsDialog(HWND hwnd)
                 : (dialogState->mode == TransparencyMode::Checkerboard) ? 2002 : 2003;
             CheckRadioButton(dlg, 2001, 2003, radioId);
             EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+            CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
             return TRUE;
         }
         case WM_COMMAND:
@@ -941,19 +1092,53 @@ void ShowSettingsDialog(HWND hwnd)
                 EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
                 return TRUE;
             }
-            if (id == 2004)
+            if (id == 2004 || id == 2006 || id == 2007)
             {
                 CHOOSECOLOR cc{};
                 COLORREF custom[16]{};
                 cc.lStructSize = sizeof(cc);
                 cc.hwndOwner = dlg;
-                cc.rgbResult = dialogState->color;
+                cc.rgbResult = (id == 2004) ? dialogState->color
+                    : (id == 2006) ? dialogState->fontColor : dialogState->backgroundColor;
                 cc.lpCustColors = custom;
                 cc.Flags = CC_FULLOPEN | CC_RGBINIT;
                 if (ChooseColor(&cc))
                 {
-                    dialogState->color = cc.rgbResult;
+                    if (id == 2004)
+                    {
+                        dialogState->color = cc.rgbResult;
+                    }
+                    else if (id == 2006)
+                    {
+                        dialogState->fontColor = cc.rgbResult;
+                    }
+                    else
+                    {
+                        dialogState->backgroundColor = cc.rgbResult;
+                    }
                 }
+                return TRUE;
+            }
+            if (id == 2005)
+            {
+                LOGFONT lf{};
+                wcsncpy_s(lf.lfFaceName, dialogState->fontName.c_str(), LF_FACESIZE - 1);
+                lf.lfHeight = -static_cast<LONG>(dialogState->fontSize);
+                CHOOSEFONT cf{};
+                cf.lStructSize = sizeof(cf);
+                cf.hwndOwner = dlg;
+                cf.lpLogFont = &lf;
+                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
+                if (ChooseFont(&cf))
+                {
+                    dialogState->fontName = lf.lfFaceName;
+                    dialogState->fontSize = static_cast<float>(std::abs(lf.lfHeight));
+                }
+                return TRUE;
+            }
+            if (id == 2008)
+            {
+                dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
                 return TRUE;
             }
             if (id == IDOK)
@@ -984,8 +1169,15 @@ void ShowSettingsDialog(HWND hwnd)
     {
         g_transparencyMode = state.mode;
         g_customColor = state.color;
+        g_textFontName = state.fontName;
+        g_textFontSize = state.fontSize;
+        g_textColor = state.fontColor;
+        g_textBackground = state.backgroundColor;
+        g_textWrap = state.wrap;
         SaveSettings();
         ApplyTransparencyMode();
+        UpdateTextFormat();
+        UpdateTextBrush();
         InvalidateRect(hwnd, nullptr, TRUE);
     }
 }
@@ -1091,7 +1283,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"Image Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Image/Text Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt\0All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
@@ -1100,6 +1292,13 @@ bool ShowOpenImageDialog(HWND hwnd)
         return false;
     }
 
+    if (IsTextFile(filePath))
+    {
+        if (LoadTextFromFile(filePath))
+        {
+            return true;
+        }
+    }
     if (LoadImageFromFile(filePath))
     {
         RefreshImageList(filePath);
@@ -1213,7 +1412,7 @@ void LoadSettings()
         return;
     }
 
-    wchar_t buffer[32]{};
+    wchar_t buffer[64]{};
     GetPrivateProfileStringW(L"Settings", L"SortMode", L"0", buffer, 32, g_iniPath.c_str());
     int sortValue = _wtoi(buffer);
     if (sortValue < 0 || sortValue > 3)
@@ -1235,6 +1434,24 @@ void LoadSettings()
 
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
+
+    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, 32, g_iniPath.c_str());
+    if (buffer[0] != L'\0')
+    {
+        g_textFontName = buffer;
+    }
+    GetPrivateProfileStringW(L"Text", L"FontSize", L"18", buffer, 32, g_iniPath.c_str());
+    g_textFontSize = static_cast<float>(_wtof(buffer));
+    if (g_textFontSize < 8.0f)
+    {
+        g_textFontSize = 8.0f;
+    }
+    GetPrivateProfileStringW(L"Text", L"FontColor", L"15790320", buffer, 32, g_iniPath.c_str());
+    g_textColor = static_cast<COLORREF>(_wtoi(buffer));
+    GetPrivateProfileStringW(L"Text", L"BackgroundColor", L"1315860", buffer, 32, g_iniPath.c_str());
+    g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
+    GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
+    g_textWrap = (_wtoi(buffer) != 0);
 }
 
 void SaveSettings()
@@ -1256,6 +1473,16 @@ void SaveSettings()
 
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
     WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
+
+    WritePrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%.2f", g_textFontSize);
+    WritePrivateProfileStringW(L"Text", L"FontSize", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textColor));
+    WritePrivateProfileStringW(L"Text", L"FontColor", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textBackground));
+    WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
+    WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
@@ -1429,7 +1656,31 @@ void Render(HWND hwnd)
 
     g_renderTarget->BeginDraw();
 
-    if (g_bitmap)
+    if (g_hasText)
+    {
+        D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
+        if (g_renderTarget && rtSize.width > 0.0f && rtSize.height > 0.0f)
+        {
+            D2D1_COLOR_F bgColor = D2D1::ColorF(
+                GetRValue(g_textBackground) / 255.0f,
+                GetGValue(g_textBackground) / 255.0f,
+                GetBValue(g_textBackground) / 255.0f
+            );
+            g_renderTarget->Clear(bgColor);
+            if (g_textFormat && g_textBrush)
+            {
+                D2D1_RECT_F textRect = D2D1::RectF(8.0f, 8.0f, rtSize.width - 8.0f, rtSize.height - 8.0f);
+                g_renderTarget->DrawTextW(
+                    g_textContent.c_str(),
+                    static_cast<UINT32>(g_textContent.size()),
+                    g_textFormat,
+                    textRect,
+                    g_textBrush
+                );
+            }
+        }
+    }
+    else if (g_bitmap)
     {
         float scale = g_zoom;
         float drawWidth = g_imageWidth * scale;
@@ -1605,6 +1856,8 @@ int WINAPI wWinMain(
     LoadWindowPlacement();
     ApplyAlwaysOnTop();
     ApplyTransparencyMode();
+    UpdateTextFormat();
+    UpdateTextBrush();
     if (g_hasSavedWindowPos)
     {
         SetWindowPos(
@@ -1626,11 +1879,18 @@ int WINAPI wWinMain(
     bool loadedImage = false;
     if (argv && argc > 1)
     {
-        loadedImage = LoadImageFromFile(argv[1]);
-        if (loadedImage)
+        if (IsTextFile(argv[1]))
         {
-            RefreshImageList(argv[1]);
-            UpdateZoomToFitScreen(hwnd);
+            loadedImage = LoadTextFromFile(argv[1]);
+        }
+        else
+        {
+            loadedImage = LoadImageFromFile(argv[1]);
+            if (loadedImage)
+            {
+                RefreshImageList(argv[1]);
+                UpdateZoomToFitScreen(hwnd);
+            }
         }
     }
     if (argv)
