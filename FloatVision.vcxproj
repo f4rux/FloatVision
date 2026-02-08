@@ -139,8 +139,8 @@
     <ResourceCompile Include="FloatVision.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\..\..\Desktop\FloatVision.ico" />
-    <Image Include="..\..\..\Desktop\small.ico" />
+    <Image Include="FloatVision.ico" />
+    <Image Include="small.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
