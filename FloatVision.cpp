@@ -111,6 +111,7 @@ void LoadWindowPlacement();
 void SaveWindowPlacement();
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
+bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -657,6 +658,7 @@ bool LoadImageFromFile(const wchar_t* path)
     IWICBitmapDecoder* decoder = nullptr;
     IWICBitmapFrameDecode* frame = nullptr;
     IWICFormatConverter* converter = nullptr;
+    WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
 
     if (g_bitmap)
     {
@@ -687,15 +689,10 @@ bool LoadImageFromFile(const wchar_t* path)
     hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
     if (FAILED(hr)) goto cleanup;
 
-    WICPixelFormatGUID pixelFormat{};
     hr = frame->GetPixelFormat(&pixelFormat);
     if (SUCCEEDED(hr))
     {
-        BOOL hasAlpha = FALSE;
-        if (SUCCEEDED(WICPixelFormatHasAlpha(pixelFormat, &hasAlpha)))
-        {
-            g_imageHasAlpha = (hasAlpha == TRUE);
-        }
+        g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
     }
 
     hr = g_wicFactory->CreateFormatConverter(&converter);
@@ -729,6 +726,37 @@ cleanup:
 
     UpdateLayeredStyle(g_imageHasAlpha);
     return SUCCEEDED(hr);
+}
+
+bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
+{
+    if (!g_wicFactory)
+    {
+        return false;
+    }
+
+    IWICComponentInfo* componentInfo = nullptr;
+    IWICPixelFormatInfo2* formatInfo = nullptr;
+    bool hasAlpha = false;
+
+    HRESULT hr = g_wicFactory->CreateComponentInfo(format, &componentInfo);
+    if (SUCCEEDED(hr))
+    {
+        hr = componentInfo->QueryInterface(IID_PPV_ARGS(&formatInfo));
+    }
+    if (SUCCEEDED(hr))
+    {
+        BOOL supportsTransparency = FALSE;
+        if (SUCCEEDED(formatInfo->SupportsTransparency(&supportsTransparency)))
+        {
+            hasAlpha = supportsTransparency == TRUE;
+        }
+    }
+
+    if (formatInfo) formatInfo->Release();
+    if (componentInfo) componentInfo->Release();
+
+    return hasAlpha;
 }
 
 void NavigateImage(int delta)
