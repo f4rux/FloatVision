@@ -544,6 +544,16 @@ void DiscardRenderTarget()
         g_placeholderBrush->Release();
         g_placeholderBrush = nullptr;
     }
+    if (g_checkerBrushA)
+    {
+        g_checkerBrushA->Release();
+        g_checkerBrushA = nullptr;
+    }
+    if (g_checkerBrushB)
+    {
+        g_checkerBrushB->Release();
+        g_checkerBrushB = nullptr;
+    }
     if (g_bitmap)
     {
         g_bitmap->Release();
