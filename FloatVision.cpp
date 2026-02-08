@@ -12,6 +12,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <string>
+#include "resource.h"
 
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
@@ -231,12 +232,13 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_STRING, kMenuOriginalSize, L"Original Size");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
-        AppendMenu(menu, MF_STRING, kMenuExit, L"Exit");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeAsc, L"Sort: Modified (Old-New)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeDesc, L"Sort: Modified (New-Old)");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuExit, L"Exit");
 
         if (g_imageList.size() < 2)
         {
@@ -1085,12 +1087,15 @@ int WINAPI wWinMain(
 
     const wchar_t CLASS_NAME[] = L"FloatVisionWindow";
 
-    WNDCLASS wc{};
+    WNDCLASSEX wc{};
+    wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = WndProc;
     wc.hInstance = hInstance;
     wc.lpszClassName = CLASS_NAME;
+    wc.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_FLOATVISION));
+    wc.hIconSm = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_SMALL));
 
-    RegisterClass(&wc);
+    RegisterClassEx(&wc);
 
     HWND hwnd = CreateWindowEx(
         0,
