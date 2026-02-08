@@ -70,6 +70,7 @@ bool g_textWrap = true;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
+bool g_webviewInputTimerActive = false;
 
 enum class TransparencyMode
 {
@@ -119,6 +120,8 @@ constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
 constexpr int kMenuSortTimeDesc = 1104;
+constexpr UINT_PTR kWebViewInputTimerId = 2001;
+constexpr UINT kWebViewInputTimerIntervalMs = 50;
 
 // =====================
 // 前方宣言
@@ -158,6 +161,7 @@ void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
+void UpdateWebViewInputTimer();
 void UpdateWebViewInputState();
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
@@ -575,6 +579,10 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
+            if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL)
+            {
+                UpdateWebViewInputState();
+            }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
@@ -633,6 +641,36 @@ LRESULT CALLBACK WndProc(
             return 0;
         }
         return 0;
+    }
+
+    case WM_KEYUP:
+    {
+        if (g_hasHtml)
+        {
+            if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL)
+            {
+                UpdateWebViewInputState();
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+        return 0;
+    }
+
+    case WM_TIMER:
+    {
+        if (wParam == kWebViewInputTimerId)
+        {
+            if (g_hasHtml)
+            {
+                UpdateWebViewInputState();
+            }
+            else
+            {
+                UpdateWebViewInputTimer();
+            }
+            return 0;
+        }
+        break;
     }
 
     case WM_DESTROY:
@@ -1097,6 +1135,11 @@ void HideWebView()
     {
         g_webviewController->put_IsVisible(FALSE);
     }
+    if (g_webviewInputTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewInputTimerId);
+        g_webviewInputTimerActive = false;
+    }
 }
 
 void UpdateWebViewBounds()
@@ -1141,6 +1184,27 @@ void UpdateWebViewWindowHandle()
     g_webviewWindow = found;
 }
 
+void UpdateWebViewInputTimer()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    if (g_hasHtml)
+    {
+        if (!g_webviewInputTimerActive)
+        {
+            SetTimer(g_hwnd, kWebViewInputTimerId, kWebViewInputTimerIntervalMs, nullptr);
+            g_webviewInputTimerActive = true;
+        }
+    }
+    else if (g_webviewInputTimerActive)
+    {
+        KillTimer(g_hwnd, kWebViewInputTimerId);
+        g_webviewInputTimerActive = false;
+    }
+}
+
 void UpdateWebViewInputState()
 {
     if (!g_webviewWindow)
@@ -1149,7 +1213,8 @@ void UpdateWebViewInputState()
     }
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    if (g_hasHtml)
+    bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    if (g_hasHtml && !ctrlDown)
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
@@ -1182,6 +1247,7 @@ bool EnsureWebView2(HWND hwnd)
         g_webviewController->put_IsVisible(TRUE);
         UpdateWebViewWindowHandle();
         UpdateWebViewInputState();
+        UpdateWebViewInputTimer();
         UpdateWebViewBounds();
         if (!g_pendingHtmlContent.empty())
         {
@@ -1238,6 +1304,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController->put_IsVisible(TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
+                            UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
                             if (g_webview && !g_pendingHtmlContent.empty())
                             {
@@ -1256,6 +1323,11 @@ void CloseWebView()
     if (g_webviewController)
     {
         g_webviewController->Close();
+    }
+    if (g_webviewInputTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewInputTimerId);
+        g_webviewInputTimerActive = false;
     }
     g_webviewController.Reset();
     g_webviewController2.Reset();
