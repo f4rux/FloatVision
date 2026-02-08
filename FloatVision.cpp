@@ -1119,6 +1119,12 @@ void InitializeWebView(HWND hwnd)
             {
                 if (FAILED(hr))
                 {
+                    g_showingWeb = false;
+                    g_hasText = true;
+                    g_textContent = L"WebView2 initialization failed.";
+                    g_pendingWebHtml.clear();
+                    g_webViewReady = false;
+                    InvalidateRect(hwnd, nullptr, TRUE);
                     return hr;
                 }
                 return env->CreateCoreWebView2Controller(hwnd,
@@ -1127,6 +1133,12 @@ void InitializeWebView(HWND hwnd)
                         {
                             if (FAILED(hr2))
                             {
+                                g_showingWeb = false;
+                                g_hasText = true;
+                                g_textContent = L"WebView2 initialization failed.";
+                                g_pendingWebHtml.clear();
+                                g_webViewReady = false;
+                                InvalidateRect(hwnd, nullptr, TRUE);
                                 return hr2;
                             }
                             g_webViewController = controller;
@@ -1134,11 +1146,13 @@ void InitializeWebView(HWND hwnd)
                             RECT bounds{};
                             GetClientRect(hwnd, &bounds);
                             g_webViewController->put_Bounds(bounds);
+                            g_webViewController->put_IsVisible(TRUE);
                             g_webViewReady = g_webView != nullptr;
                             if (g_webView && !g_pendingWebHtml.empty())
                             {
                                 g_webView->NavigateToString(g_pendingWebHtml.c_str());
                                 g_pendingWebHtml.clear();
+                                InvalidateRect(hwnd, nullptr, TRUE);
                             }
                             return S_OK;
                         }).Get());
