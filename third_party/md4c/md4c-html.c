@@ -60,8 +60,11 @@ int md_html(const MD_CHAR* text, MD_SIZE size, MD_OUTPUT_FUNC output, void* user
         return 0;
     }
 
-    emit(output, userdata, "<html><head><meta charset=\"utf-8\"/><style>");
-    emit(output, userdata, "body{font-family:Segoe UI, sans-serif;margin:16px;background:#fff;color:#111;}");
+    emit(output, userdata, "<html><head><meta charset=\"utf-8\"/>");
+    emit(output, userdata, "<meta name=\"color-scheme\" content=\"light\"/>");
+    emit(output, userdata, "<style>");
+    emit(output, userdata, "html,body{background:#fff;color:#111;}");
+    emit(output, userdata, "body{font-family:Segoe UI, sans-serif;margin:16px;}");
     emit(output, userdata, "code,pre{font-family:Consolas,monospace;}");
     emit(output, userdata, "pre{background:#f3f3f3;color:#111;padding:12px;border-radius:6px;}");
     emit(output, userdata, "</style></head><body>");

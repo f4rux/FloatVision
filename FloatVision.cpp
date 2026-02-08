@@ -514,7 +514,7 @@ LRESULT CALLBACK WndProc(
         GetClientRect(hwnd, &rc);
         bool nearEdge = pt.x <= g_edgeDragMargin || pt.y <= g_edgeDragMargin
             || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
-        if (nearEdge && (g_bitmap || g_hasText))
+        if (nearEdge && (g_bitmap || g_hasText || g_showingWeb))
         {
             g_fitToWindow = false;
             g_isEdgeDragging = true;
@@ -539,7 +539,7 @@ LRESULT CALLBACK WndProc(
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             float deltaX = static_cast<float>(pt.x - g_dragStartPoint.x);
             float deltaY = static_cast<float>(pt.y - g_dragStartPoint.y);
-            if (g_hasText)
+            if (g_hasText || g_showingWeb)
             {
                 float nextWidth = std::max(200.0f, g_dragStartWidth + deltaX);
                 float nextHeight = std::max(200.0f, g_dragStartHeight + deltaY);
