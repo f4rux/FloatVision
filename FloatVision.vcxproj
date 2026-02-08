@@ -136,6 +136,7 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FloatVision.cpp" />
+    <ClCompile Include="third_party\md4c\entity.c" />
     <ClCompile Include="third_party\md4c\md4c-html.c" />
     <ClCompile Include="third_party\md4c\md4c.c" />
   </ItemGroup>
