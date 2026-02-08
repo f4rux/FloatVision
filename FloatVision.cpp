@@ -18,6 +18,8 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "dwrite.lib")
 
+#ifndef FLOATVISION_GLOBALS_DEFINED
+#define FLOATVISION_GLOBALS_DEFINED
 // =====================
 // グローバル変数
 // =====================
@@ -35,52 +37,6 @@ IWICBitmapSource* g_wicSource = nullptr;
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
 bool g_imageHasAlpha = false;
-
-float g_zoom = 1.0f;
-bool g_fitToWindow = true;
-bool g_isEdgeDragging = false;
-POINT g_dragStartPoint{};
-float g_dragStartZoom = 1.0f;
-float g_dragStartScale = 1.0f;
-
-enum class SortMode
-{
-    NameAsc,
-    NameDesc,
-    TimeAsc,
-    TimeDesc
-};
-
-struct ImageEntry
-{
-    std::filesystem::path path;
-    std::filesystem::file_time_type writeTime;
-};
-
-std::vector<ImageEntry> g_imageList;
-size_t g_currentIndex = 0;
-SortMode g_sortMode = SortMode::NameAsc;
-std::filesystem::path g_currentImagePath;
-const float g_zoomMin = 0.05f;
-const float g_zoomMax = 20.0f;
-const float g_edgeDragMargin = 12.0f;
-bool g_alwaysOnTop = false;
-std::wstring g_iniPath;
-POINT g_windowPos{ CW_USEDEFAULT, CW_USEDEFAULT };
-bool g_hasSavedWindowPos = false;
-
-constexpr int kMenuOpen = 1001;
-constexpr int kMenuNext = 1002;
-constexpr int kMenuPrev = 1003;
-constexpr int kMenuZoomIn = 1005;
-constexpr int kMenuZoomOut = 1006;
-constexpr int kMenuOriginalSize = 1007;
-constexpr int kMenuAlwaysOnTop = 1008;
-constexpr int kMenuExit = 1009;
-constexpr int kMenuSortNameAsc = 1101;
-constexpr int kMenuSortNameDesc = 1102;
-constexpr int kMenuSortTimeAsc = 1103;
-constexpr int kMenuSortTimeDesc = 1104;
 
 float g_zoom = 1.0f;
 bool g_fitToWindow = true;
@@ -155,6 +111,7 @@ void LoadWindowPlacement();
 void SaveWindowPlacement();
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
+#endif
 
 bool IsImageFile(const std::filesystem::path& path)
 {
