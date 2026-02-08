@@ -8,9 +8,11 @@
 #include <commdlg.h>
 #include <filesystem>
 #include <vector>
+#include <array>
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <cwctype>
 #include <fstream>
 #include <string>
 #include <wrl.h>
@@ -42,6 +44,7 @@ IWICBitmapSource* g_wicSource = nullptr;
 Microsoft::WRL::ComPtr<ICoreWebView2Controller> g_webviewController;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
+HWND g_webviewWindow = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -153,6 +156,9 @@ void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
+std::wstring InjectHtmlBaseStyles(const std::wstring& html);
+void UpdateWebViewInputState();
+void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -492,16 +498,12 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONDOWN:
     {
-        if (g_hasHtml)
-        {
-            return DefWindowProc(hwnd, msg, wParam, lParam);
-        }
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
         RECT rc{};
         GetClientRect(hwnd, &rc);
         bool nearEdge = pt.x <= g_edgeDragMargin || pt.y <= g_edgeDragMargin
             || pt.x >= (rc.right - g_edgeDragMargin) || pt.y >= (rc.bottom - g_edgeDragMargin);
-        if (nearEdge && (g_bitmap || g_hasText))
+        if (nearEdge && (g_bitmap || g_hasText || g_hasHtml))
         {
             g_fitToWindow = false;
             g_isEdgeDragging = true;
@@ -524,16 +526,12 @@ LRESULT CALLBACK WndProc(
 
     case WM_MOUSEMOVE:
     {
-        if (g_hasHtml)
-        {
-            return DefWindowProc(hwnd, msg, wParam, lParam);
-        }
         if (g_isEdgeDragging && (wParam & MK_LBUTTON))
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
             float deltaX = static_cast<float>(pt.x - g_dragStartPoint.x);
             float deltaY = static_cast<float>(pt.y - g_dragStartPoint.y);
-            if (g_hasText)
+            if (g_hasText || g_hasHtml)
             {
                 float nextWidth = std::max(200.0f, g_dragStartWidth + deltaX);
                 float nextHeight = std::max(200.0f, g_dragStartHeight + deltaY);
@@ -564,10 +562,6 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONUP:
     {
-        if (g_hasHtml)
-        {
-            return DefWindowProc(hwnd, msg, wParam, lParam);
-        }
         if (g_isEdgeDragging)
         {
             g_isEdgeDragging = false;
@@ -688,7 +682,7 @@ bool InitDirect2D(HWND hwnd)
     g_renderTarget->SetDpi(96.0f, 96.0f);
 
     if (FAILED(g_renderTarget->CreateSolidColorBrush(
-        D2D1::ColorF(D2D1::ColorF::Black),
+        D2D1::ColorF(0.992f, 0.992f, 0.992f),
         &g_placeholderBrush)))
     {
         return false;
@@ -975,6 +969,25 @@ bool LoadTextFromFile(const wchar_t* path)
     return true;
 }
 
+std::wstring InjectHtmlBaseStyles(const std::wstring& html)
+{
+    const std::wstring style = L"<style>html, body { background: #ffffff !important; margin: 0; }</style>";
+    std::wstring lowered = html;
+    std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::towlower);
+    size_t headPos = lowered.find(L"<head");
+    if (headPos != std::wstring::npos)
+    {
+        size_t insertPos = lowered.find(L'>', headPos);
+        if (insertPos != std::wstring::npos)
+        {
+            std::wstring result = html;
+            result.insert(insertPos + 1, style);
+            return result;
+        }
+    }
+    return style + html;
+}
+
 bool LoadHtmlFromFile(const wchar_t* path)
 {
     std::ifstream file(path, std::ios::binary);
@@ -999,6 +1012,7 @@ bool LoadHtmlFromFile(const wchar_t* path)
 
     std::wstring html(needed, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), html.data(), needed);
+    html = InjectHtmlBaseStyles(html);
 
     if (g_bitmap)
     {
@@ -1095,6 +1109,66 @@ void UpdateWebViewBounds()
     g_webviewController->put_Bounds(bounds);
 }
 
+void UpdateWebViewWindowHandle()
+{
+    if (!g_hwnd)
+    {
+        g_webviewWindow = nullptr;
+        return;
+    }
+
+    HWND found = nullptr;
+    EnumChildWindows(
+        g_hwnd,
+        [](HWND child, LPARAM lParam) -> BOOL
+        {
+            wchar_t className[64] = {};
+            GetClassNameW(child, className, static_cast<int>(std::size(className)));
+            if (wcsncmp(className, L"Chrome_WidgetWin", 16) == 0)
+            {
+                *reinterpret_cast<HWND*>(lParam) = child;
+                return FALSE;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&found));
+
+    if (!found)
+    {
+        found = GetWindow(g_hwnd, GW_CHILD);
+    }
+    g_webviewWindow = found;
+}
+
+void UpdateWebViewInputState()
+{
+    if (!g_webviewWindow)
+    {
+        return;
+    }
+
+    LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
+    if (g_hasHtml)
+    {
+        exStyle |= WS_EX_TRANSPARENT;
+        EnableWindow(g_webviewWindow, FALSE);
+    }
+    else
+    {
+        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+        EnableWindow(g_webviewWindow, TRUE);
+    }
+    SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
+    SetWindowPos(
+        g_webviewWindow,
+        nullptr,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -1105,6 +1179,8 @@ bool EnsureWebView2(HWND hwnd)
     if (g_webviewController && g_webview)
     {
         g_webviewController->put_IsVisible(TRUE);
+        UpdateWebViewWindowHandle();
+        UpdateWebViewInputState();
         UpdateWebViewBounds();
         if (!g_pendingHtmlContent.empty())
         {
@@ -1158,6 +1234,8 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController->put_IsVisible(TRUE);
+                            UpdateWebViewWindowHandle();
+                            UpdateWebViewInputState();
                             UpdateWebViewBounds();
                             if (g_webview && !g_pendingHtmlContent.empty())
                             {
@@ -1179,6 +1257,7 @@ void CloseWebView()
     }
     g_webviewController.Reset();
     g_webview.Reset();
+    g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
         FreeLibrary(g_webviewLoader);
@@ -2115,7 +2194,7 @@ void Render(HWND hwnd)
     }
     else
     {
-        g_renderTarget->Clear(D2D1::ColorF(0.12f, 0.12f, 0.12f));
+        g_renderTarget->Clear(D2D1::ColorF(0.121568f, 0.121568f, 0.121568f));
 
         const wchar_t* placeholderText = L"Drop image here";
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
