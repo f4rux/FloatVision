@@ -16,12 +16,7 @@
 #include <wrl.h>
 #include "md4c.h"
 #include "md4c-html.h"
-#if __has_include(<WebView2.h>)
 #include <WebView2.h>
-#define FLOATVISION_HAS_WEBVIEW2 1
-#else
-#define FLOATVISION_HAS_WEBVIEW2 0
-#endif
 #include "resource.h"
 
 #pragma comment(lib, "d2d1.lib")
@@ -42,12 +37,10 @@ ID2D1SolidColorBrush* g_checkerBrushB = nullptr;
 ID2D1SolidColorBrush* g_customColorBrush = nullptr;
 ID2D1SolidColorBrush* g_textBrush = nullptr;
 HWND g_hwnd = nullptr;
-#if FLOATVISION_HAS_WEBVIEW2
 ICoreWebView2Controller* g_webViewController = nullptr;
 ICoreWebView2* g_webView = nullptr;
 EventRegistrationToken g_webViewNavToken{};
 bool g_webViewNavigationHooked = false;
-#endif
 bool g_showingWeb = false;
 std::wstring g_pendingWebHtml;
 bool g_webViewReady = false;
@@ -292,14 +285,12 @@ LRESULT CALLBACK WndProc(
             UINT h = HIWORD(lParam);
             g_renderTarget->Resize(D2D1::SizeU(w, h));
         }
-#if FLOATVISION_HAS_WEBVIEW2
         if (g_webViewController)
         {
             RECT bounds{};
             GetClientRect(hwnd, &bounds);
             g_webViewController->put_Bounds(bounds);
         }
-#endif
         if (g_fitToWindow)
         {
             UpdateFitZoomFromWindow(hwnd);
@@ -653,7 +644,6 @@ LRESULT CALLBACK WndProc(
 
     case WM_DESTROY:
     {
-#if FLOATVISION_HAS_WEBVIEW2
         if (g_webView)
         {
             g_webView->Release();
@@ -668,7 +658,6 @@ LRESULT CALLBACK WndProc(
         g_webViewFallbackText.clear();
         g_webViewReady = false;
         g_webViewNavigationHooked = false;
-#endif
         SaveWindowPlacement();
         SaveSettings();
         PostQuitMessage(0);
@@ -1025,7 +1014,6 @@ bool LoadTextFromFile(const wchar_t* path)
     if (g_textIsMarkdown)
     {
         std::wstring html = ConvertMarkdownToHtml(g_textContent);
-#if FLOATVISION_HAS_WEBVIEW2
         g_webViewFallbackText = g_textContent;
         InitializeWebView(g_hwnd);
         NavigateWebContent(html);
@@ -1035,9 +1023,6 @@ bool LoadTextFromFile(const wchar_t* path)
         g_webViewStartTick = GetTickCount();
         SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
         return true;
-#else
-        g_textContent = ConvertMarkdownToDisplayText(g_textContent);
-#endif
     }
     ApplyTransparencyMode();
     return true;
@@ -1065,7 +1050,6 @@ bool LoadHtmlFromFile(const wchar_t* path)
     std::wstring html(needed, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), html.data(), needed);
 
-#if FLOATVISION_HAS_WEBVIEW2
     g_showingWeb = false;
     InitializeWebView(g_hwnd);
     NavigateWebContent(html);
@@ -1073,16 +1057,10 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasText = false;
     g_textContent.clear();
     g_textIsMarkdown = false;
-    g_webViewFallbackText = L"HTML viewing requires WebView2.";
+    g_webViewFallbackText = html;
     g_webViewStartTick = GetTickCount();
     SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
     return true;
-#else
-    g_showingWeb = false;
-    g_hasText = true;
-    g_textContent = L"WebView2 is not available in this build.";
-    return true;
-#endif
 }
 
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
@@ -1205,7 +1183,6 @@ std::wstring ConvertMarkdownToHtml(const std::wstring& markdown)
 
 void InitializeWebView(HWND hwnd)
 {
-#if FLOATVISION_HAS_WEBVIEW2
     if (!hwnd || g_webViewController)
     {
         return;
@@ -1294,14 +1271,10 @@ void InitializeWebView(HWND hwnd)
                             return S_OK;
                         }).Get());
             }).Get());
-#else
-    (void)hwnd;
-#endif
 }
 
 void NavigateWebContent(const std::wstring& html)
 {
-#if FLOATVISION_HAS_WEBVIEW2
     if (g_webView)
     {
         g_webViewReady = false;
@@ -1322,9 +1295,6 @@ void NavigateWebContent(const std::wstring& html)
             SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
         }
     }
-#else
-    (void)html;
-#endif
 }
 
 std::wstring ConvertMarkdownToDisplayText(const std::wstring& markdown)
