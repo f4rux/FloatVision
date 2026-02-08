@@ -575,6 +575,10 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
+            if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL)
+            {
+                UpdateWebViewInputState();
+            }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
@@ -631,6 +635,19 @@ LRESULT CALLBACK WndProc(
             g_zoom = 1.0f;
             InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
+        }
+        return 0;
+    }
+
+    case WM_KEYUP:
+    {
+        if (g_hasHtml)
+        {
+            if (wParam == VK_CONTROL || wParam == VK_LCONTROL || wParam == VK_RCONTROL)
+            {
+                UpdateWebViewInputState();
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         return 0;
     }
@@ -1149,7 +1166,8 @@ void UpdateWebViewInputState()
     }
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    if (g_hasHtml)
+    bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    if (g_hasHtml && !ctrlDown)
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
