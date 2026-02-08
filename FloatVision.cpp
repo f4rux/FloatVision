@@ -77,7 +77,7 @@ enum class HtmlInputKey
     Ctrl = 1,
     Alt = 2
 };
-HtmlInputKey g_htmlInputKey = HtmlInputKey::Shift;
+HtmlInputKey g_htmlInputKey = HtmlInputKey::Alt;
 
 enum class TransparencyMode
 {
@@ -1501,9 +1501,6 @@ void ShowSettingsDialog(HWND hwnd)
     const int kIdFontColor = 2006;
     const int kIdBackColor = 2007;
     const int kIdWrap = 2008;
-    const int kIdHtmlKeyShift = 2009;
-    const int kIdHtmlKeyCtrl = 2010;
-    const int kIdHtmlKeyAlt = 2011;
 
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
@@ -1557,11 +1554,11 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 16);
+    appendWord(tmpl, 12);
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
     appendWord(tmpl, 220);
-    appendWord(tmpl, 206);
+    appendWord(tmpl, 176);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -1579,12 +1576,8 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 94, 80, 14, kIdFontColor, 0x0080, L"Font color");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 112, 80, 14, kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 130, 80, 12, kIdWrap, 0x0080, L"Wrap");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 148, 208, 30, 0xFFFF, 0x0080, L"HTML input key");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 14, 162, 60, 12, kIdHtmlKeyShift, 0x0080, L"Shift");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 80, 162, 60, 12, kIdHtmlKeyCtrl, 0x0080, L"Ctrl");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 146, 162, 60, 12, kIdHtmlKeyAlt, 0x0080, L"Alt");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 182, 40, 14, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 182, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 152, 40, 14, IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 152, 40, 14, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -1595,8 +1588,7 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF fontColor;
         COLORREF backgroundColor;
         bool wrap;
-        HtmlInputKey htmlInputKey;
-    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap, g_htmlInputKey };
+    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
@@ -1612,9 +1604,6 @@ void ShowSettingsDialog(HWND hwnd)
             CheckRadioButton(dlg, 2001, 2003, radioId);
             EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
             CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
-            int htmlKeyId = (dialogState->htmlInputKey == HtmlInputKey::Shift) ? 2009
-                : (dialogState->htmlInputKey == HtmlInputKey::Ctrl) ? 2010 : 2011;
-            CheckRadioButton(dlg, 2009, 2011, htmlKeyId);
             return TRUE;
         }
         case WM_COMMAND:
@@ -1626,13 +1615,6 @@ void ShowSettingsDialog(HWND hwnd)
                     : (id == 2002) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
                 CheckRadioButton(dlg, 2001, 2003, id);
                 EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
-                return TRUE;
-            }
-            if (id == 2009 || id == 2010 || id == 2011)
-            {
-                dialogState->htmlInputKey = (id == 2009) ? HtmlInputKey::Shift
-                    : (id == 2010) ? HtmlInputKey::Ctrl : HtmlInputKey::Alt;
-                CheckRadioButton(dlg, 2009, 2011, id);
                 return TRUE;
             }
             if (id == 2004 || id == 2006 || id == 2007)
@@ -1699,18 +1681,6 @@ void ShowSettingsDialog(HWND hwnd)
                     dialogState->mode = TransparencyMode::SolidColor;
                 }
                 dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
-                if (IsDlgButtonChecked(dlg, 2009) == BST_CHECKED)
-                {
-                    dialogState->htmlInputKey = HtmlInputKey::Shift;
-                }
-                else if (IsDlgButtonChecked(dlg, 2010) == BST_CHECKED)
-                {
-                    dialogState->htmlInputKey = HtmlInputKey::Ctrl;
-                }
-                else
-                {
-                    dialogState->htmlInputKey = HtmlInputKey::Alt;
-                }
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
@@ -1742,7 +1712,6 @@ void ShowSettingsDialog(HWND hwnd)
         g_textColor = state.fontColor;
         g_textBackground = state.backgroundColor;
         g_textWrap = state.wrap;
-        g_htmlInputKey = state.htmlInputKey;
         SaveSettings();
         ApplyTransparencyMode();
         UpdateTextFormat();
@@ -2029,14 +1998,6 @@ void LoadSettings()
     g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
     GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
     g_textWrap = (_wtoi(buffer) != 0);
-
-    GetPrivateProfileStringW(L"Html", L"InputKey", L"0", buffer, 32, g_iniPath.c_str());
-    int inputKeyValue = _wtoi(buffer);
-    if (inputKeyValue < 0 || inputKeyValue > 2)
-    {
-        inputKeyValue = 0;
-    }
-    g_htmlInputKey = static_cast<HtmlInputKey>(inputKeyValue);
 }
 
 void SaveSettings()
@@ -2068,9 +2029,6 @@ void SaveSettings()
     WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
     WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
-
-    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_htmlInputKey));
-    WritePrivateProfileStringW(L"Html", L"InputKey", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
