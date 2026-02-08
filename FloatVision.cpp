@@ -50,6 +50,11 @@ bool g_webViewNavigationHooked = false;
 bool g_showingWeb = false;
 std::wstring g_pendingWebHtml;
 bool g_webViewReady = false;
+DWORD g_webViewStartTick = 0;
+std::wstring g_webViewFallbackText;
+
+constexpr UINT_PTR kWebViewTimeoutId = 42;
+constexpr DWORD kWebViewTimeoutMs = 3000;
 
 IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
@@ -658,6 +663,7 @@ LRESULT CALLBACK WndProc(
             g_webViewController = nullptr;
         }
         g_pendingWebHtml.clear();
+        g_webViewFallbackText.clear();
         g_webViewReady = false;
         g_webViewNavigationHooked = false;
 #endif
@@ -665,6 +671,38 @@ LRESULT CALLBACK WndProc(
         SaveSettings();
         PostQuitMessage(0);
         return 0;
+    }
+
+    case WM_TIMER:
+    {
+        if (wParam == kWebViewTimeoutId)
+        {
+            if (g_showingWeb && !g_webViewReady)
+            {
+                DWORD elapsed = GetTickCount() - g_webViewStartTick;
+                if (elapsed >= kWebViewTimeoutMs)
+                {
+                    g_showingWeb = false;
+                    g_hasText = true;
+                    if (g_textIsMarkdown && !g_webViewFallbackText.empty())
+                    {
+                        g_textContent = ConvertMarkdownToDisplayText(g_webViewFallbackText);
+                    }
+                    else if (!g_webViewFallbackText.empty())
+                    {
+                        g_textContent = g_webViewFallbackText;
+                    }
+                    else
+                    {
+                        g_textContent = L"WebView2 initialization timed out.";
+                    }
+                    KillTimer(hwnd, kWebViewTimeoutId);
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
+            }
+            return 0;
+        }
+        break;
     }
 
     return DefWindowProc(hwnd, msg, wParam, lParam);
@@ -984,11 +1022,14 @@ bool LoadTextFromFile(const wchar_t* path)
     {
         std::wstring html = ConvertMarkdownToHtml(g_textContent);
 #if FLOATVISION_HAS_WEBVIEW2
+        g_webViewFallbackText = g_textContent;
         InitializeWebView(g_hwnd);
         NavigateWebContent(html);
         g_showingWeb = true;
         g_hasText = false;
         g_textContent.clear();
+        g_webViewStartTick = GetTickCount();
+        SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
         return true;
 #else
         g_textContent = ConvertMarkdownToDisplayText(g_textContent);
@@ -1027,6 +1068,10 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_showingWeb = true;
     g_hasText = false;
     g_textContent.clear();
+    g_textIsMarkdown = false;
+    g_webViewFallbackText = L"HTML viewing requires WebView2.";
+    g_webViewStartTick = GetTickCount();
+    SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
     return true;
 #else
     g_showingWeb = false;
@@ -1210,6 +1255,10 @@ void InitializeWebView(HWND hwnd)
                                             if (success)
                                             {
                                                 g_webViewReady = true;
+                                                if (g_hwnd)
+                                                {
+                                                    KillTimer(g_hwnd, kWebViewTimeoutId);
+                                                }
                                             }
                                             else
                                             {
@@ -1217,6 +1266,10 @@ void InitializeWebView(HWND hwnd)
                                                 g_hasText = true;
                                                 g_textContent = L"WebView2 failed to render content.";
                                                 g_webViewReady = false;
+                                                if (g_hwnd)
+                                                {
+                                                    KillTimer(g_hwnd, kWebViewTimeoutId);
+                                                }
                                             }
                                             if (g_hwnd)
                                             {
@@ -1259,6 +1312,11 @@ void NavigateWebContent(const std::wstring& html)
     {
         g_pendingWebHtml = html;
         g_webViewReady = false;
+        g_webViewStartTick = GetTickCount();
+        if (g_hwnd)
+        {
+            SetTimer(g_hwnd, kWebViewTimeoutId, 200, nullptr);
+        }
     }
 #else
     (void)html;
