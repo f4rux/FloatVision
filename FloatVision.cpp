@@ -203,6 +203,7 @@ bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
 void CloseWebView();
+void RefreshMenuTheme();
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
