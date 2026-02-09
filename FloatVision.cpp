@@ -133,15 +133,98 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
     {
         return DefSubclassProc(hwnd, msg, wParam, lParam);
     }
+    auto isHotkeyClass = [hwnd]()
+    {
+        wchar_t className[64]{};
+        if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) == 0)
+        {
+            return false;
+        }
+        return wcscmp(className, L"msctls_hotkey32") == 0;
+    };
     switch (msg)
     {
     case WM_ERASEBKGND:
     {
+        if (isHotkeyClass())
+        {
+            return 1;
+        }
         HDC hdc = reinterpret_cast<HDC>(wParam);
         RECT rc;
         GetClientRect(hwnd, &rc);
         FillRect(hdc, &rc, colors->backgroundBrush);
         return 1;
+    }
+    case WM_PAINT:
+    {
+        if (!isHotkeyClass())
+        {
+            break;
+        }
+        PAINTSTRUCT ps{};
+        HDC hdc = BeginPaint(hwnd, &ps);
+        if (!hdc)
+        {
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        RECT rc{};
+        GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, colors->backgroundBrush);
+
+        DWORD hotkey = static_cast<DWORD>(SendMessage(hwnd, HKM_GETHOTKEY, 0, 0));
+        WORD vk = LOBYTE(hotkey);
+        WORD mods = HIBYTE(hotkey);
+
+        std::wstring text;
+        if (mods & HOTKEYF_CONTROL)
+        {
+            text += L"Ctrl + ";
+        }
+        if (mods & HOTKEYF_SHIFT)
+        {
+            text += L"Shift + ";
+        }
+        if (mods & HOTKEYF_ALT)
+        {
+            text += L"Alt + ";
+        }
+
+        if (vk != 0)
+        {
+            wchar_t keyName[64]{};
+            UINT scanCode = MapVirtualKey(vk, MAPVK_VK_TO_VSC);
+            if (GetKeyNameText(static_cast<LONG>(scanCode << 16), keyName, static_cast<int>(std::size(keyName))))
+            {
+                text += keyName;
+            }
+        }
+        if (text.empty())
+        {
+            text = L"None";
+        }
+
+        COLORREF textColor = IsWindowEnabled(hwnd) ? colors->textColor : GetSysColor(COLOR_GRAYTEXT);
+        SetTextColor(hdc, textColor);
+        SetBkMode(hdc, TRANSPARENT);
+        HFONT font = reinterpret_cast<HFONT>(SendMessage(hwnd, WM_GETFONT, 0, 0));
+        HFONT oldFont = font ? reinterpret_cast<HFONT>(SelectObject(hdc, font)) : nullptr;
+
+        RECT textRect = rc;
+        textRect.left += 4;
+        DrawText(hdc, text.c_str(), -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+
+        if (oldFont)
+        {
+            SelectObject(hdc, oldFont);
+        }
+        if (GetFocus() == hwnd)
+        {
+            DrawFocusRect(hdc, &rc);
+        }
+        EndPaint(hwnd, &ps);
+        return 0;
     }
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORSTATIC:
