@@ -144,6 +144,28 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
     };
     switch (msg)
     {
+    case WM_KEYDOWN:
+    {
+        if (wParam == VK_ESCAPE)
+        {
+            HWND target = hwnd;
+            wchar_t className[64]{};
+            if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") != 0)
+            {
+                HWND parent = GetParent(hwnd);
+                if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                    && wcscmp(className, L"msctls_hotkey32") == 0)
+                {
+                    target = parent;
+                }
+            }
+            SendMessage(target, HKM_SETHOTKEY, MAKEWORD(VK_ESCAPE, 0), 0);
+            InvalidateRect(target, nullptr, TRUE);
+            return 0;
+        }
+        break;
+    }
     case WM_ERASEBKGND:
     {
         if (isHotkeyClass())
