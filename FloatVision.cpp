@@ -1633,7 +1633,7 @@ ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& na
 
 std::wstring GetFontFamilyNameForSave(const std::wstring& fontName)
 {
-    return TrimString(fontName);
+    return fontName;
 }
 
 ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
@@ -3610,6 +3610,7 @@ void LoadSettings()
         return;
     }
 
+    g_textFontFaceName.clear();
     wchar_t buffer[128]{};
     auto readKeySetting = [&](const wchar_t* keyName, WORD defaultKey)
     {
@@ -3710,8 +3711,6 @@ void LoadSettings()
             LoadTextSettingsFromMarkdown(markdownPath);
         }
     }
-    g_textFontFaceName = TrimString(g_textFontName);
-
     g_keyNextFile = readKeySetting(L"NextFile", VK_RIGHT);
     g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
     g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
