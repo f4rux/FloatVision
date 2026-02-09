@@ -8,6 +8,7 @@
 #include <commdlg.h>
 #include <commctrl.h>
 #include <uxtheme.h>
+#include <dwmapi.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -28,6 +29,8 @@
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "UxTheme.lib")
+#pragma comment(lib, "Dwmapi.lib")
+#pragma comment(lib, "Advapi32.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #ifndef FLOATVISION_GLOBALS_DEFINED
@@ -420,6 +423,7 @@ LRESULT CALLBACK WndProc(
         CheckMenuItem(menu, kMenuAlwaysOnTop, MF_BYCOMMAND | (g_alwaysOnTop ? MF_CHECKED : MF_UNCHECKED));
 
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        RefreshMenuTheme();
         TrackPopupMenu(menu, TPM_RIGHTBUTTON, pt.x, pt.y, 0, hwnd, nullptr);
         DestroyMenu(menu);
         return 0;
@@ -1801,17 +1805,95 @@ namespace
     constexpr int kIdKeyAlwaysOnTop = 2107;
 }
 
+enum class PreferredAppMode
+{
+    Default,
+    AllowDark,
+    ForceDark,
+    ForceLight,
+    Max
+};
+
+using SetPreferredAppModeFn = PreferredAppMode(WINAPI*)(PreferredAppMode appMode);
+using FlushMenuThemesFn = void (WINAPI*)();
+
+SetPreferredAppModeFn g_setPreferredAppMode = nullptr;
+FlushMenuThemesFn g_flushMenuThemes = nullptr;
+
+bool IsDarkModeEnabled()
+{
+    DWORD value = 1;
+    DWORD valueSize = sizeof(value);
+    if (RegGetValueW(
+        HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        L"AppsUseLightTheme",
+        RRF_RT_REG_DWORD,
+        nullptr,
+        &value,
+        &valueSize
+    ) == ERROR_SUCCESS)
+    {
+        return value == 0;
+    }
+    return false;
+}
+
+void InitializeThemeMode()
+{
+    HMODULE themeModule = GetModuleHandleW(L"uxtheme.dll");
+    if (!themeModule)
+    {
+        return;
+    }
+    g_setPreferredAppMode = reinterpret_cast<SetPreferredAppModeFn>(
+        GetProcAddress(themeModule, MAKEINTRESOURCEA(135))
+    );
+    g_flushMenuThemes = reinterpret_cast<FlushMenuThemesFn>(
+        GetProcAddress(themeModule, MAKEINTRESOURCEA(136))
+    );
+    if (g_setPreferredAppMode)
+    {
+        g_setPreferredAppMode(PreferredAppMode::AllowDark);
+        if (g_flushMenuThemes)
+        {
+            g_flushMenuThemes();
+        }
+    }
+}
+
+void ApplyImmersiveDarkMode(HWND target, bool enabled)
+{
+    const DWORD darkModeAttribute = 20;
+    const DWORD darkModeAttributeFallback = 19;
+    BOOL useDark = enabled ? TRUE : FALSE;
+    DwmSetWindowAttribute(target, darkModeAttribute, &useDark, sizeof(useDark));
+    DwmSetWindowAttribute(target, darkModeAttributeFallback, &useDark, sizeof(useDark));
+}
+
+void RefreshMenuTheme()
+{
+    if (g_flushMenuThemes && IsDarkModeEnabled())
+    {
+        g_flushMenuThemes();
+    }
+}
+
 static void ApplyExplorerTheme(HWND target)
 {
-    SetWindowTheme(target, L"Explorer", nullptr);
+    bool darkMode = IsDarkModeEnabled();
+    const wchar_t* themeName = darkMode ? L"DarkMode_Explorer" : L"Explorer";
+    ApplyImmersiveDarkMode(target, darkMode);
+    SetWindowTheme(target, themeName, nullptr);
     EnumChildWindows(
         target,
-        [](HWND child, LPARAM) -> BOOL
+        [](HWND child, LPARAM param) -> BOOL
         {
-            SetWindowTheme(child, L"Explorer", nullptr);
+            const wchar_t* theme = reinterpret_cast<const wchar_t*>(param);
+            SetWindowTheme(child, theme, nullptr);
             return TRUE;
         },
-        0
+        reinterpret_cast<LPARAM>(themeName)
     );
 }
 
@@ -1881,48 +1963,54 @@ void ShowSettingsDialog(HWND hwnd)
     std::vector<BYTE> tmpl;
     tmpl.reserve(1024);
 
+    constexpr float kDialogScale = 0.9f;
+    auto scale = [=](short value)
+    {
+        return static_cast<short>(std::lround(value * kDialogScale));
+    };
+
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
     appendWord(tmpl, 25);
-    appendWord(tmpl, 10);
-    appendWord(tmpl, 10);
-    appendWord(tmpl, 248);
-    appendWord(tmpl, 320);
+    appendWord(tmpl, scale(10));
+    appendWord(tmpl, scale(10));
+    appendWord(tmpl, scale(248));
+    appendWord(tmpl, scale(320));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
-    appendWord(tmpl, 10);
+    appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 8, 6, 232, 78, 0xFFFF, 0x0080, L"Background of transparent images");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 16, 22, 214, 80, kIdTransparencySelect, 0x0085, L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 16, 60, 90, 16, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(232), scale(78), 0xFFFF, 0x0080, L"Background of transparent images");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, scale(16), scale(22), scale(214), scale(80), kIdTransparencySelect, 0x0085, L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(60), scale(90), scale(16), kIdColor, 0x0080, L"Color...");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 8, 90, 232, 78, 0xFFFF, 0x0080, L"Text");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 16, 106, 90, 16, kIdFont, 0x0080, L"Font...");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 112, 106, 90, 16, kIdFontColor, 0x0080, L"Font color");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 112, 126, 90, 16, kIdBackColor, 0x0080, L"Background");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 16, 128, 80, 12, kIdWrap, 0x0080, L"Wrap");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(90), scale(232), scale(78), 0xFFFF, 0x0080, L"Text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(106), scale(90), scale(16), kIdFont, 0x0080, L"Font...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(106), scale(90), scale(16), kIdFontColor, 0x0080, L"Font color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(126), scale(90), scale(16), kIdBackColor, 0x0080, L"Background");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(16), scale(128), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 8, 174, 232, 124, 0xFFFF, 0x0080, L"Key Config");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 190, 110, 12, 0xFFFF, 0x0082, L"Next file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 188, 88, 16, kIdKeyNext, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 206, 110, 12, 0xFFFF, 0x0082, L"Previous file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 204, 88, 16, kIdKeyPrev, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 222, 110, 12, 0xFFFF, 0x0082, L"Zoom in");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 220, 88, 16, kIdKeyZoomIn, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 238, 110, 12, 0xFFFF, 0x0082, L"Zoom out");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 236, 88, 16, kIdKeyZoomOut, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 254, 110, 12, 0xFFFF, 0x0082, L"Open file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 252, 88, 16, kIdKeyOpen, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 270, 110, 12, 0xFFFF, 0x0082, L"Exit");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 268, 88, 16, kIdKeyExit, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 286, 110, 12, 0xFFFF, 0x0082, L"Always on Top");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 284, 88, 16, kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(174), scale(232), scale(124), 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(190), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(188), scale(88), scale(16), kIdKeyNext, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(206), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(204), scale(88), scale(16), kIdKeyPrev, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(222), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom in");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(220), scale(88), scale(16), kIdKeyZoomIn, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(238), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom out");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(236), scale(88), scale(16), kIdKeyZoomOut, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(254), scale(110), scale(12), 0xFFFF, 0x0082, L"Open file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(252), scale(88), scale(16), kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(270), scale(110), scale(12), 0xFFFF, 0x0082, L"Exit");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(268), scale(88), scale(16), kIdKeyExit, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(286), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(284), scale(88), scale(16), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 124, 304, 54, 18, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 184, 304, 54, 18, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, scale(124), scale(304), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(304), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -2819,6 +2907,7 @@ int WINAPI wWinMain(
     icc.dwSize = sizeof(icc);
     icc.dwICC = ICC_WIN95_CLASSES;
     InitCommonControlsEx(&icc);
+    InitializeThemeMode();
 
     const wchar_t CLASS_NAME[] = L"FloatVisionWindow";
 
