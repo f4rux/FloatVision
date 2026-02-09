@@ -159,6 +159,22 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         EndPaint(hwnd, &ps);
         return 0;
     }
+    case WM_PRINTCLIENT:
+    {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        if (!hdc)
+        {
+            break;
+        }
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
+        FillRect(hdc, &rc, brush);
+        DeleteObject(brush);
+        SetBkColor(hdc, colors->backgroundColor);
+        SetTextColor(hdc, colors->textColor);
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
     case WM_NCDESTROY:
     {
         delete colors;
