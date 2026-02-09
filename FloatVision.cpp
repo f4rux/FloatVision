@@ -2029,8 +2029,14 @@ void ShowSettingsDialog(HWND hwnd)
         WORD keyOpen;
         WORD keyExit;
         WORD keyAlwaysOnTop;
+        HBRUSH dialogBrush;
+        HBRUSH controlBrush;
+        COLORREF dialogBackgroundColor;
+        COLORREF controlBackgroundColor;
+        COLORREF dialogTextColor;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
-        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop };
+        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop,
+        nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
@@ -2042,6 +2048,12 @@ void ShowSettingsDialog(HWND hwnd)
             SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
             dialogState = reinterpret_cast<DialogState*>(lParam);
             ApplyExplorerTheme(dlg);
+            bool darkMode = IsDarkModeEnabled();
+            dialogState->dialogBackgroundColor = darkMode ? RGB(32, 32, 32) : RGB(255, 255, 255);
+            dialogState->controlBackgroundColor = darkMode ? RGB(48, 48, 48) : RGB(255, 255, 255);
+            dialogState->dialogTextColor = darkMode ? RGB(240, 240, 240) : RGB(0, 0, 0);
+            dialogState->dialogBrush = CreateSolidBrush(dialogState->dialogBackgroundColor);
+            dialogState->controlBrush = CreateSolidBrush(dialogState->controlBackgroundColor);
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Transparent (show desktop)"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Checkerboard"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Solid color"));
@@ -2058,6 +2070,58 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdKeyExit, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyAlwaysOnTop, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
             return TRUE;
+        }
+        case WM_CTLCOLORDLG:
+        {
+            if (!dialogState)
+            {
+                break;
+            }
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdc, dialogState->dialogTextColor);
+            SetBkColor(hdc, dialogState->dialogBackgroundColor);
+            return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
+        }
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN:
+        {
+            if (!dialogState)
+            {
+                break;
+            }
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdc, dialogState->dialogTextColor);
+            SetBkColor(hdc, dialogState->dialogBackgroundColor);
+            return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
+        }
+        case WM_CTLCOLOREDIT:
+        case WM_CTLCOLORLISTBOX:
+        {
+            if (!dialogState)
+            {
+                break;
+            }
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdc, dialogState->dialogTextColor);
+            SetBkColor(hdc, dialogState->controlBackgroundColor);
+            return reinterpret_cast<INT_PTR>(dialogState->controlBrush);
+        }
+        case WM_DESTROY:
+        {
+            if (dialogState)
+            {
+                if (dialogState->dialogBrush)
+                {
+                    DeleteObject(dialogState->dialogBrush);
+                    dialogState->dialogBrush = nullptr;
+                }
+                if (dialogState->controlBrush)
+                {
+                    DeleteObject(dialogState->controlBrush);
+                    dialogState->controlBrush = nullptr;
+                }
+            }
+            break;
         }
         case WM_COMMAND:
         {
