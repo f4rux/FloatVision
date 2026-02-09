@@ -78,6 +78,7 @@
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)native\include\;$(ProjectDir)third_party\md4c\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -93,6 +94,7 @@
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)native\include\;$(ProjectDir)third_party\md4c\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -122,6 +124,7 @@
       <PreprocessorDefinitions>NDEBUG;_WINDOWS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp20</LanguageStandard>
+      <AdditionalIncludeDirectories>$(MSBuildThisFileDirectory)native\include\;$(ProjectDir)third_party\md4c\;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
@@ -136,6 +139,8 @@
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="FloatVision.cpp" />
+    <ClCompile Include="third_party\md4c\md4c-html.c" />
+    <ClCompile Include="third_party\md4c\md4c.c" />
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="FloatVision.rc" />
