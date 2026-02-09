@@ -2063,6 +2063,13 @@ void ShowSettingsDialog(HWND hwnd)
             SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdWrap), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdFont), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdFontColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdBackColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, IDOK), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, IDCANCEL), themeName, nullptr);
             if (darkMode)
             {
                 EnumChildWindows(dlg, [](HWND hwnd, LPARAM) -> BOOL
@@ -2079,10 +2086,6 @@ void ShowSettingsDialog(HWND hwnd)
                         {
                             SetWindowTheme(hwnd, L"", L"");
                         }
-                    }
-                    else if (wcscmp(className, L"ComboBox") == 0 || wcscmp(className, L"msctls_hotkey32") == 0)
-                    {
-                        SetWindowTheme(hwnd, L"", L"");
                     }
                     return TRUE;
                 }, 0);
@@ -2167,14 +2170,8 @@ void ShowSettingsDialog(HWND hwnd)
                 comboInfo.cbSize = sizeof(comboInfo);
                 if (GetComboBoxInfo(GetDlgItem(dlg, kIdTransparencySelect), &comboInfo))
                 {
-                    if (IsDarkModeEnabled())
-                    {
-                        SetWindowTheme(comboInfo.hwndList, L"", L"");
-                    }
-                    else
-                    {
-                        SetWindowTheme(comboInfo.hwndList, L"Explorer", nullptr);
-                    }
+                    const wchar_t* themeName = IsDarkModeEnabled() ? L"DarkMode_Explorer" : L"Explorer";
+                    SetWindowTheme(comboInfo.hwndList, themeName, nullptr);
                 }
                 return TRUE;
             }
