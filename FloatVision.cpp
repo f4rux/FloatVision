@@ -1996,19 +1996,19 @@ void ShowSettingsDialog(HWND hwnd)
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(174), scale(232), scale(124), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(190), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(188), scale(88), scale(16), kIdKeyNext, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(188), scale(88), scale(14), kIdKeyNext, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(206), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(204), scale(88), scale(16), kIdKeyPrev, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(204), scale(88), scale(14), kIdKeyPrev, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(222), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom in");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(220), scale(88), scale(16), kIdKeyZoomIn, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(220), scale(88), scale(14), kIdKeyZoomIn, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(238), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom out");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(236), scale(88), scale(16), kIdKeyZoomOut, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(236), scale(88), scale(14), kIdKeyZoomOut, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(254), scale(110), scale(12), 0xFFFF, 0x0082, L"Open file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(252), scale(88), scale(16), kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(252), scale(88), scale(14), kIdKeyOpen, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(270), scale(110), scale(12), 0xFFFF, 0x0082, L"Exit");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(268), scale(88), scale(16), kIdKeyExit, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(268), scale(88), scale(14), kIdKeyExit, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(286), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(284), scale(88), scale(16), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(284), scale(88), scale(14), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, scale(124), scale(304), scale(54), scale(18), IDOK, 0x0080, L"Save");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(304), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
@@ -2054,6 +2054,15 @@ void ShowSettingsDialog(HWND hwnd)
             dialogState->dialogTextColor = darkMode ? RGB(240, 240, 240) : RGB(0, 0, 0);
             dialogState->dialogBrush = CreateSolidBrush(dialogState->dialogBackgroundColor);
             dialogState->controlBrush = CreateSolidBrush(dialogState->controlBackgroundColor);
+            const wchar_t* themeName = darkMode ? L"DarkMode_Explorer" : L"Explorer";
+            SetWindowTheme(GetDlgItem(dlg, kIdTransparencySelect), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyNext), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyPrev), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomIn), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomOut), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Transparent (show desktop)"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Checkerboard"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Solid color"));
@@ -2092,6 +2101,7 @@ void ShowSettingsDialog(HWND hwnd)
             HDC hdc = reinterpret_cast<HDC>(wParam);
             SetTextColor(hdc, dialogState->dialogTextColor);
             SetBkColor(hdc, dialogState->dialogBackgroundColor);
+            SetBkMode(hdc, TRANSPARENT);
             return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
         }
         case WM_CTLCOLOREDIT:
@@ -2104,6 +2114,7 @@ void ShowSettingsDialog(HWND hwnd)
             HDC hdc = reinterpret_cast<HDC>(wParam);
             SetTextColor(hdc, dialogState->dialogTextColor);
             SetBkColor(hdc, dialogState->controlBackgroundColor);
+            SetBkMode(hdc, OPAQUE);
             return reinterpret_cast<INT_PTR>(dialogState->controlBrush);
         }
         case WM_DESTROY:
@@ -2126,6 +2137,17 @@ void ShowSettingsDialog(HWND hwnd)
         case WM_COMMAND:
         {
             int id = LOWORD(wParam);
+            if (id == kIdTransparencySelect && HIWORD(wParam) == CBN_DROPDOWN)
+            {
+                COMBOBOXINFO comboInfo{};
+                comboInfo.cbSize = sizeof(comboInfo);
+                if (GetComboBoxInfo(GetDlgItem(dlg, kIdTransparencySelect), &comboInfo))
+                {
+                    const wchar_t* themeName = IsDarkModeEnabled() ? L"DarkMode_Explorer" : L"Explorer";
+                    SetWindowTheme(comboInfo.hwndList, themeName, nullptr);
+                }
+                return TRUE;
+            }
             if (id == kIdTransparencySelect && HIWORD(wParam) == CBN_SELCHANGE)
             {
                 int selection = static_cast<int>(SendDlgItemMessage(dlg, kIdTransparencySelect, CB_GETCURSEL, 0, 0));
