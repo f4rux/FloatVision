@@ -77,6 +77,7 @@ float g_dragStartHeight = 0.0f;
 bool g_hasText = false;
 std::wstring g_textContent;
 std::wstring g_textFontName = L"Consolas";
+std::wstring g_textFontFaceName;
 float g_textFontSize = 18.0f;
 COLORREF g_textColor = RGB(240, 240, 240);
 COLORREF g_textBackground = RGB(20, 20, 20);
@@ -1632,49 +1633,7 @@ ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& na
 
 std::wstring GetFontFamilyNameForSave(const std::wstring& fontName)
 {
-    std::wstring normalized = NormalizeFontName(fontName);
-    if (normalized.empty())
-    {
-        return fontName;
-    }
-
-    ResolvedFontInfo resolved = ResolveFontInfo(g_dwriteFactory, normalized);
-    if (!resolved.familyName.empty())
-    {
-        return resolved.familyName;
-    }
-
-    if (!g_dwriteFactory)
-    {
-        return normalized;
-    }
-
-    IDWriteFontCollection* collection = nullptr;
-    if (FAILED(g_dwriteFactory->GetSystemFontCollection(&collection, FALSE)) || !collection)
-    {
-        return normalized;
-    }
-
-    std::wstring candidate = normalized;
-    while (!candidate.empty())
-    {
-        UINT32 index = 0;
-        BOOL exists = FALSE;
-        if (SUCCEEDED(collection->FindFamilyName(candidate.c_str(), &index, &exists)) && exists)
-        {
-            collection->Release();
-            return candidate;
-        }
-        size_t pos = candidate.find_last_of(L' ');
-        if (pos == std::wstring::npos)
-        {
-            break;
-        }
-        candidate = TrimString(candidate.substr(0, pos));
-    }
-
-    collection->Release();
-    return normalized;
+    return fontName;
 }
 
 ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
@@ -2857,6 +2816,7 @@ void ShowSettingsDialog(HWND hwnd)
         TransparencyMode mode;
         COLORREF color;
         std::wstring fontName;
+        std::wstring fontFaceName;
         float fontSize;
         COLORREF fontColor;
         COLORREF backgroundColor;
@@ -2873,7 +2833,7 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF dialogBackgroundColor;
         COLORREF controlBackgroundColor;
         COLORREF dialogTextColor;
-    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
+    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontFaceName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
         g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop,
         nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
 
@@ -3296,6 +3256,7 @@ void ShowSettingsDialog(HWND hwnd)
                 if (ChooseFont(&cf))
                 {
                     dialogState->fontName = lf.lfFaceName;
+                    dialogState->fontFaceName = lf.lfFaceName;
                     dialogState->fontSize = static_cast<float>(std::abs(lf.lfHeight));
                 }
                 return TRUE;
@@ -3355,6 +3316,7 @@ void ShowSettingsDialog(HWND hwnd)
         g_transparencyMode = state.mode;
         g_customColor = state.color;
         g_textFontName = state.fontName;
+        g_textFontFaceName = state.fontFaceName.empty() ? state.fontName : state.fontFaceName;
         g_textFontSize = state.fontSize;
         g_textColor = state.fontColor;
         g_textBackground = state.backgroundColor;
@@ -3647,6 +3609,7 @@ void LoadSettings()
         return;
     }
 
+    g_textFontFaceName.clear();
     wchar_t buffer[128]{};
     auto readKeySetting = [&](const wchar_t* keyName, WORD defaultKey)
     {
@@ -3746,7 +3709,6 @@ void LoadSettings()
             LoadTextSettingsFromMarkdown(markdownPath);
         }
     }
-
     g_keyNextFile = readKeySetting(L"NextFile", VK_RIGHT);
     g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
     g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
@@ -3779,7 +3741,8 @@ void SaveSettings()
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
     WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
 
-    std::wstring fontNameToSave = GetFontFamilyNameForSave(g_textFontName);
+    std::wstring fontNameSource = g_textFontFaceName.empty() ? g_textFontName : g_textFontFaceName;
+    std::wstring fontNameToSave = GetFontFamilyNameForSave(fontNameSource);
     WritePrivateProfileStringW(L"Text", L"FontName", fontNameToSave.c_str(), g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%.2f", g_textFontSize);
     WritePrivateProfileStringW(L"Text", L"FontSize", buffer, g_iniPath.c_str());
