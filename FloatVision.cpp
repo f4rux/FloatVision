@@ -380,6 +380,7 @@ bool LoadMarkdownFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
+std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
