@@ -1327,6 +1327,48 @@ bool ReadFileBytes(const wchar_t* path, std::string& bytes)
     return true;
 }
 
+bool TryGetIniValueFromContent(const std::wstring& content, const std::wstring& section, const std::wstring& key, std::wstring& value)
+{
+    std::wstringstream stream(content);
+    std::wstring line;
+    bool inSection = false;
+    std::wstring sectionHeader = L"[" + section + L"]";
+    while (std::getline(stream, line))
+    {
+        std::wstring trimmed = TrimString(line);
+        if (trimmed.empty())
+        {
+            continue;
+        }
+        if (trimmed[0] == L';' || trimmed[0] == L'#')
+        {
+            continue;
+        }
+        if (trimmed.front() == L'[' && trimmed.back() == L']')
+        {
+            inSection = (_wcsicmp(trimmed.c_str(), sectionHeader.c_str()) == 0);
+            continue;
+        }
+        if (!inSection)
+        {
+            continue;
+        }
+        size_t eqPos = trimmed.find(L'=');
+        if (eqPos == std::wstring::npos)
+        {
+            continue;
+        }
+        std::wstring foundKey = TrimString(trimmed.substr(0, eqPos));
+        if (_wcsicmp(foundKey.c_str(), key.c_str()) != 0)
+        {
+            continue;
+        }
+        value = TrimString(trimmed.substr(eqPos + 1));
+        return true;
+    }
+    return false;
+}
+
 bool Utf8ToWide(const std::string& bytes, std::wstring& text)
 {
     if (bytes.empty())
@@ -1406,6 +1448,11 @@ std::wstring TrimString(const std::wstring& value)
 std::wstring NormalizeFontName(const std::wstring& value)
 {
     std::wstring trimmed = TrimString(value);
+    size_t commaPos = trimmed.find(L',');
+    if (commaPos != std::wstring::npos)
+    {
+        trimmed = TrimString(trimmed.substr(0, commaPos));
+    }
     if (trimmed.size() >= 2)
     {
         wchar_t first = trimmed.front();
@@ -3417,8 +3464,35 @@ void LoadSettings()
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
-    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, static_cast<DWORD>(std::size(buffer)), g_iniPath.c_str());
-    std::wstring normalizedFontName = NormalizeFontName(buffer);
+    std::wstring normalizedFontName;
+    bool loadedUtf8FontName = false;
+    std::string iniBytes;
+    if (ReadFileBytes(g_iniPath.c_str(), iniBytes) && !iniBytes.empty())
+    {
+        std::string utf8Bytes = iniBytes;
+        if (utf8Bytes.size() >= 3
+            && static_cast<unsigned char>(utf8Bytes[0]) == 0xEF
+            && static_cast<unsigned char>(utf8Bytes[1]) == 0xBB
+            && static_cast<unsigned char>(utf8Bytes[2]) == 0xBF)
+        {
+            utf8Bytes.erase(0, 3);
+        }
+        std::wstring content;
+        if (Utf8ToWide(utf8Bytes, content))
+        {
+            std::wstring value;
+            if (TryGetIniValueFromContent(content, L"Text", L"FontName", value))
+            {
+                normalizedFontName = NormalizeFontName(value);
+                loadedUtf8FontName = !normalizedFontName.empty();
+            }
+        }
+    }
+    if (!loadedUtf8FontName)
+    {
+        GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, static_cast<DWORD>(std::size(buffer)), g_iniPath.c_str());
+        normalizedFontName = NormalizeFontName(buffer);
+    }
     if (!normalizedFontName.empty())
     {
         g_textFontName = std::move(normalizedFontName);
