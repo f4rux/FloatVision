@@ -2840,7 +2840,7 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 25);
+    appendWord(tmpl, 27);
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(248));
@@ -3454,6 +3454,40 @@ void ReloadCurrentFile(bool reloadSettings)
         return;
     }
     RefreshImageList(g_currentImagePath);
+    bool currentInList = false;
+    for (const auto& entry : g_imageList)
+    {
+        if (entry.path == g_currentImagePath)
+        {
+            currentInList = true;
+            break;
+        }
+    }
+    if (!currentInList)
+    {
+        bool result = false;
+        if (IsMarkdownFile(g_currentImagePath))
+        {
+            result = LoadMarkdownFromFile(g_currentImagePath.c_str());
+        }
+        else if (IsHtmlFile(g_currentImagePath))
+        {
+            result = LoadHtmlFromFile(g_currentImagePath.c_str());
+        }
+        else if (IsTextFile(g_currentImagePath))
+        {
+            result = LoadTextFromFile(g_currentImagePath.c_str());
+        }
+        else
+        {
+            result = LoadImageFromFile(g_currentImagePath.c_str());
+        }
+        if (result && g_hwnd)
+        {
+            InvalidateRect(g_hwnd, nullptr, TRUE);
+        }
+        return;
+    }
     if (LoadImageByIndex(g_currentIndex) && g_hwnd)
     {
         if (wasImage)
