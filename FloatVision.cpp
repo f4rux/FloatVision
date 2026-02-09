@@ -1403,6 +1403,21 @@ std::wstring TrimString(const std::wstring& value)
     return value.substr(start, end - start);
 }
 
+std::wstring NormalizeFontName(const std::wstring& value)
+{
+    std::wstring trimmed = TrimString(value);
+    if (trimmed.size() >= 2)
+    {
+        wchar_t first = trimmed.front();
+        wchar_t last = trimmed.back();
+        if ((first == L'"' && last == L'"') || (first == L'\'' && last == L'\''))
+        {
+            trimmed = TrimString(trimmed.substr(1, trimmed.size() - 2));
+        }
+    }
+    return trimmed;
+}
+
 std::wstring NormalizeSettingKey(const std::wstring& key)
 {
     std::wstring result;
@@ -1564,7 +1579,7 @@ void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
         std::wstring normalized = NormalizeSettingKey(key);
         if (normalized == L"font")
         {
-            std::wstring fontName = TrimString(value);
+            std::wstring fontName = NormalizeFontName(value);
             if (!fontName.empty())
             {
                 g_textFontName = std::move(fontName);
@@ -3288,9 +3303,10 @@ void LoadSettings()
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
     GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, static_cast<DWORD>(std::size(buffer)), g_iniPath.c_str());
-    if (buffer[0] != L'\0')
+    std::wstring normalizedFontName = NormalizeFontName(buffer);
+    if (!normalizedFontName.empty())
     {
-        g_textFontName = buffer;
+        g_textFontName = std::move(normalizedFontName);
     }
     GetPrivateProfileStringW(L"Text", L"FontSize", L"18", buffer, 32, g_iniPath.c_str());
     g_textFontSize = static_cast<float>(_wtof(buffer));
