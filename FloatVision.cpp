@@ -1627,6 +1627,19 @@ std::wstring NormalizeFontName(const std::wstring& value)
             trimmed = TrimString(trimmed.substr(1, trimmed.size() - 2));
         }
     }
+    size_t dotPos = trimmed.find_last_of(L'.');
+    if (dotPos != std::wstring::npos)
+    {
+        std::wstring ext = trimmed.substr(dotPos);
+        for (auto& ch : ext)
+        {
+            ch = static_cast<wchar_t>(towlower(ch));
+        }
+        if (ext == L".ttf" || ext == L".otf" || ext == L".ttc")
+        {
+            trimmed = TrimString(trimmed.substr(0, dotPos));
+        }
+    }
     return trimmed;
 }
 
