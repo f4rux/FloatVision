@@ -1853,9 +1853,9 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, 9);
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 72, 0xFFFF, 0x0080, L"Background of transparent images");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 50, 0xFFFF, 0x0080, L"Background of transparent images");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 14, 18, 190, 60, kIdTransparencySelect, 0x0085, L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 62, 80, 14, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 36, 80, 14, kIdColor, 0x0080, L"Color...");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 80, 208, 70, 0xFFFF, 0x0080, L"Text");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 94, 80, 14, kIdFont, 0x0080, L"Font...");
