@@ -163,6 +163,32 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         RemoveWindowSubclass(hwnd, HotkeySubclassProc, 0);
         break;
     }
+    case WM_PARENTNOTIFY:
+    {
+        if (LOWORD(wParam) != WM_CREATE)
+        {
+            break;
+        }
+        HWND child = reinterpret_cast<HWND>(lParam);
+        if (!child)
+        {
+            break;
+        }
+        wchar_t className[64]{};
+        if (GetClassName(child, className, static_cast<int>(std::size(className))) == 0)
+        {
+            break;
+        }
+        SetWindowTheme(child, L"", L"");
+        if (wcscmp(className, L"Edit") == 0)
+        {
+            SendMessage(child, EM_SETBKGNDCOLOR, 0, static_cast<LPARAM>(colors->backgroundColor));
+        }
+        auto* childColors = new HotkeyColors{ colors->textColor, colors->backgroundColor,
+            CreateSolidBrush(colors->backgroundColor) };
+        SetWindowSubclass(child, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(childColors));
+        break;
+    }
     default:
         break;
     }
