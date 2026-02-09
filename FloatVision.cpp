@@ -1633,7 +1633,62 @@ ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& na
 
 std::wstring GetFontFamilyNameForSave(const std::wstring& fontName)
 {
-    return fontName;
+    if (fontName.empty())
+    {
+        return fontName;
+    }
+    if (!g_dwriteFactory)
+    {
+        return fontName;
+    }
+
+    IDWriteGdiInterop* gdiInterop = nullptr;
+    HRESULT hr = g_dwriteFactory->GetGdiInterop(&gdiInterop);
+    if (FAILED(hr) || !gdiInterop)
+    {
+        return fontName;
+    }
+
+    LOGFONT lf{};
+    wcsncpy_s(lf.lfFaceName, fontName.c_str(), LF_FACESIZE - 1);
+    lf.lfHeight = -12;
+    lf.lfCharSet = DEFAULT_CHARSET;
+
+    IDWriteFont* font = nullptr;
+    hr = gdiInterop->CreateFontFromLOGFONT(&lf, &font);
+    gdiInterop->Release();
+    if (FAILED(hr) || !font)
+    {
+        return fontName;
+    }
+
+    IDWriteFontFamily* family = nullptr;
+    hr = font->GetFontFamily(&family);
+    font->Release();
+    if (FAILED(hr) || !family)
+    {
+        return fontName;
+    }
+
+    std::wstring result = fontName;
+    IDWriteLocalizedStrings* familyNames = nullptr;
+    hr = family->GetFamilyNames(&familyNames);
+    if (SUCCEEDED(hr) && familyNames)
+    {
+        UINT32 length = 0;
+        if (SUCCEEDED(familyNames->GetStringLength(0, &length)) && length > 0)
+        {
+            std::wstring familyName(length + 1, L'\0');
+            if (SUCCEEDED(familyNames->GetString(0, familyName.data(), length + 1)))
+            {
+                familyName.resize(length);
+                result = std::move(familyName);
+            }
+        }
+        familyNames->Release();
+    }
+    family->Release();
+    return result;
 }
 
 ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
