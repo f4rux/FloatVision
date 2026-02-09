@@ -144,6 +144,28 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
     };
     switch (msg)
     {
+    case WM_KEYDOWN:
+    {
+        if (wParam == VK_ESCAPE)
+        {
+            HWND target = hwnd;
+            wchar_t className[64]{};
+            if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") != 0)
+            {
+                HWND parent = GetParent(hwnd);
+                if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                    && wcscmp(className, L"msctls_hotkey32") == 0)
+                {
+                    target = parent;
+                }
+            }
+            SendMessage(target, HKM_SETHOTKEY, MAKEWORD(VK_ESCAPE, 0), 0);
+            InvalidateRect(target, nullptr, TRUE);
+            return 0;
+        }
+        break;
+    }
     case WM_ERASEBKGND:
     {
         if (isHotkeyClass())
@@ -2196,6 +2218,27 @@ void ShowSettingsDialog(HWND hwnd)
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
         auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
+        auto isHotkeyFocus = [dlg]() -> bool
+        {
+            HWND focus = GetFocus();
+            if (!focus)
+            {
+                return false;
+            }
+            wchar_t className[64]{};
+            if (GetClassName(focus, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") == 0)
+            {
+                return true;
+            }
+            HWND parent = GetParent(focus);
+            if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") == 0)
+            {
+                return true;
+            }
+            return false;
+        };
         switch (msg)
         {
         case WM_INITDIALOG:
@@ -2598,6 +2641,10 @@ void ShowSettingsDialog(HWND hwnd)
             }
             if (id == IDCANCEL)
             {
+                if (isHotkeyFocus())
+                {
+                    return TRUE;
+                }
                 EndDialog(dlg, IDCANCEL);
                 return TRUE;
             }
