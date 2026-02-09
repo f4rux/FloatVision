@@ -2119,7 +2119,6 @@ void ShowSettingsDialog(HWND hwnd)
             return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
         }
         case WM_CTLCOLORSTATIC:
-        case WM_CTLCOLORBTN:
         {
             if (!dialogState)
             {
@@ -2129,6 +2128,18 @@ void ShowSettingsDialog(HWND hwnd)
             SetTextColor(hdc, dialogState->dialogTextColor);
             SetBkColor(hdc, dialogState->dialogBackgroundColor);
             SetBkMode(hdc, TRANSPARENT);
+            return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
+        }
+        case WM_CTLCOLORBTN:
+        {
+            if (!dialogState)
+            {
+                break;
+            }
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdc, dialogState->dialogTextColor);
+            SetBkColor(hdc, dialogState->dialogBackgroundColor);
+            SetBkMode(hdc, OPAQUE);
             return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
         }
         case WM_CTLCOLOREDIT:
