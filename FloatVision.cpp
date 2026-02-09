@@ -152,7 +152,8 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         FillRect(hdc, &rc, colors->backgroundBrush);
         SetBkColor(hdc, colors->backgroundColor);
         SetTextColor(hdc, colors->textColor);
-        DefSubclassProc(hwnd, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(hdc), PRF_CLIENT | PRF_ERASEBKGND);
+        DefSubclassProc(hwnd, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(hdc),
+            PRF_CLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
         EndPaint(hwnd, &ps);
         return 0;
     }
@@ -168,7 +169,12 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         FillRect(hdc, &rc, colors->backgroundBrush);
         SetBkColor(hdc, colors->backgroundColor);
         SetTextColor(hdc, colors->textColor);
-        return DefSubclassProc(hwnd, msg, wParam, lParam);
+        LPARAM flags = lParam;
+        if ((flags & PRF_CHILDREN) == 0)
+        {
+            flags |= PRF_CHILDREN;
+        }
+        return DefSubclassProc(hwnd, msg, wParam, flags);
     }
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORSTATIC:
