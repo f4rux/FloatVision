@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cwctype>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <string>
 #include <wrl.h>
@@ -1629,16 +1630,61 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
         return false;
     }
 
-    const char* kMarkdownStyle = R"(
+    auto toHex = [](COLORREF color)
+    {
+        std::ostringstream stream;
+        stream << '#'
+               << std::hex << std::setw(2) << std::setfill('0') << std::nouppercase
+               << static_cast<int>(GetRValue(color))
+               << std::setw(2) << static_cast<int>(GetGValue(color))
+               << std::setw(2) << static_cast<int>(GetBValue(color));
+        return stream.str();
+    };
+
+    std::string fontName = "Segoe UI";
+    if (!g_textFontName.empty())
+    {
+        std::wstring wideFont = g_textFontName;
+        int needed = WideCharToMultiByte(CP_UTF8, 0, wideFont.c_str(), -1, nullptr, 0, nullptr, nullptr);
+        if (needed > 0)
+        {
+            std::string utf8Font(static_cast<size_t>(needed), '\0');
+            WideCharToMultiByte(CP_UTF8, 0, wideFont.c_str(), -1, utf8Font.data(), needed, nullptr, nullptr);
+            if (!utf8Font.empty())
+            {
+                if (utf8Font.back() == '\0')
+                {
+                    utf8Font.pop_back();
+                }
+                fontName = utf8Font;
+            }
+        }
+    }
+
+    std::string bodyBackground = toHex(g_textBackground);
+    std::string bodyColor = toHex(g_textColor);
+    const char* wrapValue = g_textWrap ? "normal" : "pre";
+
+    std::ostringstream style;
+    style << R"(
         :root {
             color-scheme: light dark;
         }
         body {
             margin: 0;
             padding: 24px;
-            font-family: "Segoe UI", "Meiryo", sans-serif;
-            background: #ffffff;
-            color: #1f2328;
+            font-family: ")"
+          << fontName
+          << R"(", "Segoe UI", "Meiryo", sans-serif;
+            background: )"
+          << bodyBackground
+          << R"(;
+            color: )"
+          << bodyColor
+          << R"(;
+            white-space: )"
+          << wrapValue
+          << R"(;
         }
         .markdown-body {
             max-width: 960px;
@@ -1674,7 +1720,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     )";
 
     html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>";
-    html += kMarkdownStyle;
+    html += style.str();
     html += "</style></head><body><article class=\"markdown-body\">";
     html += body;
     html += "</article></body></html>";
