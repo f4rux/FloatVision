@@ -1446,6 +1446,10 @@ bool UpdateIniValue(std::wstring& content, const std::wstring& section, const st
     std::wstring sectionHeader = L"[" + section + L"]";
     while (std::getline(stream, line))
     {
+        if (!line.empty() && line.back() == L'\r')
+        {
+            line.pop_back();
+        }
         std::wstring trimmed = TrimString(line);
         if (!trimmed.empty() && trimmed.front() == L'[' && trimmed.back() == L']')
         {
