@@ -1016,7 +1016,7 @@ bool LoadImageFromFile(const wchar_t* path)
     if (FAILED(hr)) goto cleanup;
 
     bitmapProperties = D2D1::BitmapProperties(
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT)
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
     );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
