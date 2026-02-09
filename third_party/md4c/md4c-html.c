@@ -41,8 +41,9 @@
     #endif
 #endif
 
-#ifdef _WIN32
-    #define snprintf _snprintf
+#if defined(_MSC_VER)
+    #define snprintf(buffer, size, format, ...) \
+        _snprintf_s((buffer), (size), _TRUNCATE, (format), __VA_ARGS__)
 #endif
 
 
@@ -564,4 +565,3 @@ md_html(const MD_CHAR* input, MD_SIZE input_size,
 
     return md_parse(input, input_size, &parser, (void*) &render);
 }
-
