@@ -1433,24 +1433,38 @@ std::wstring NormalizeSettingKey(const std::wstring& key)
     return result;
 }
 
-std::wstring ResolveFontFamilyName(IDWriteFactory* factory, const std::wstring& name)
+struct ResolvedFontInfo
 {
+    std::wstring familyName;
+    DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_REGULAR;
+    DWRITE_FONT_STYLE style = DWRITE_FONT_STYLE_NORMAL;
+    DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
+    bool matched = false;
+};
+
+ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
+{
+    ResolvedFontInfo resolved;
     if (!factory || name.empty())
     {
-        return name;
+        resolved.familyName = name;
+        return resolved;
     }
     IDWriteFontCollection* collection = nullptr;
     if (FAILED(factory->GetSystemFontCollection(&collection, FALSE)) || !collection)
     {
-        return name;
+        resolved.familyName = name;
+        return resolved;
     }
 
     UINT32 index = 0;
     BOOL exists = FALSE;
     if (SUCCEEDED(collection->FindFamilyName(name.c_str(), &index, &exists)) && exists)
     {
+        resolved.familyName = name;
+        resolved.matched = true;
         collection->Release();
-        return name;
+        return resolved;
     }
 
     UINT32 familyCount = collection->GetFontFamilyCount();
@@ -1488,6 +1502,9 @@ std::wstring ResolveFontFamilyName(IDWriteFactory* factory, const std::wstring& 
                         if (_wcsicmp(faceName.c_str(), name.c_str()) == 0)
                         {
                             match = true;
+                            resolved.weight = font->GetWeight();
+                            resolved.style = font->GetStyle();
+                            resolved.stretch = font->GetStretch();
                             break;
                         }
                     }
@@ -1508,20 +1525,25 @@ std::wstring ResolveFontFamilyName(IDWriteFactory* factory, const std::wstring& 
                     if (SUCCEEDED(familyNames->GetString(0, familyName.data(), length + 1)))
                     {
                         familyName.resize(length);
-                        familyNames->Release();
-                        family->Release();
-                        collection->Release();
-                        return familyName;
+                        resolved.familyName = std::move(familyName);
+                        resolved.matched = true;
                     }
                 }
                 familyNames->Release();
             }
         }
+        if (match && resolved.matched)
+        {
+            family->Release();
+            collection->Release();
+            return resolved;
+        }
         family->Release();
     }
 
     collection->Release();
-    return name;
+    resolved.familyName = name;
+    return resolved;
 }
 
 bool TryParseMarkdownLine(const std::wstring& line, std::wstring& key, std::wstring& value)
@@ -2253,13 +2275,14 @@ void UpdateTextFormat()
         g_textFormat->Release();
         g_textFormat = nullptr;
     }
-    std::wstring resolvedFontName = ResolveFontFamilyName(g_dwriteFactory, g_textFontName);
+    ResolvedFontInfo resolvedFont = ResolveFontInfo(g_dwriteFactory, g_textFontName);
+    const wchar_t* fontName = resolvedFont.familyName.empty() ? g_textFontName.c_str() : resolvedFont.familyName.c_str();
     g_dwriteFactory->CreateTextFormat(
-        resolvedFontName.c_str(),
+        fontName,
         nullptr,
-        DWRITE_FONT_WEIGHT_REGULAR,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
+        resolvedFont.weight,
+        resolvedFont.style,
+        resolvedFont.stretch,
         g_textFontSize,
         L"ja-jp",
         &g_textFormat
