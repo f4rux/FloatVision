@@ -1846,7 +1846,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
     appendWord(tmpl, 220);
-    appendWord(tmpl, 294);
+    appendWord(tmpl, 274);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
