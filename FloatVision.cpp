@@ -116,6 +116,7 @@ struct ImageEntry
 std::vector<ImageEntry> g_imageList;
 size_t g_currentIndex = 0;
 SortMode g_sortMode = SortMode::NameAsc;
+bool g_sortImageOnly = true;
 std::filesystem::path g_currentImagePath;
 const float g_zoomMin = 0.05f;
 const float g_zoomMax = 20.0f;
@@ -140,6 +141,7 @@ constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
 constexpr int kMenuSortTimeDesc = 1104;
+constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 
@@ -242,6 +244,11 @@ bool IsMarkdownFile(const std::filesystem::path& path)
     return ext == L".md" || ext == L".markdown";
 }
 
+bool IsSupportedFile(const std::filesystem::path& path)
+{
+    return IsImageFile(path) || IsTextFile(path) || IsHtmlFile(path) || IsMarkdownFile(path);
+}
+
 void SortImageList()
 {
     auto compareNameAsc = [](const ImageEntry& a, const ImageEntry& b)
@@ -340,6 +347,7 @@ LRESULT CALLBACK WndProc(
                 {
                     if (LoadMarkdownFromFile(path.c_str()))
                     {
+                        RefreshImageList(path);
                         InvalidateRect(hwnd, nullptr, TRUE);
                     }
                 }
@@ -347,6 +355,7 @@ LRESULT CALLBACK WndProc(
                 {
                     if (LoadHtmlFromFile(path.c_str()))
                     {
+                        RefreshImageList(path);
                         InvalidateRect(hwnd, nullptr, TRUE);
                     }
                 }
@@ -354,6 +363,7 @@ LRESULT CALLBACK WndProc(
                 {
                     if (LoadTextFromFile(path.c_str()))
                     {
+                        RefreshImageList(path);
                         InvalidateRect(hwnd, nullptr, TRUE);
                     }
                 }
@@ -389,6 +399,7 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeAsc, L"Sort: Modified (Old-New)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeDesc, L"Sort: Modified (New-Old)");
+        AppendMenu(menu, MF_STRING, kMenuSortImageOnly, L"Sort: Image only");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuExit, L"Exit");
 
@@ -402,6 +413,7 @@ LRESULT CALLBACK WndProc(
         CheckMenuItem(menu, kMenuSortNameDesc, MF_BYCOMMAND | (g_sortMode == SortMode::NameDesc ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menu, kMenuSortTimeAsc, MF_BYCOMMAND | (g_sortMode == SortMode::TimeAsc ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menu, kMenuSortTimeDesc, MF_BYCOMMAND | (g_sortMode == SortMode::TimeDesc ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(menu, kMenuSortImageOnly, MF_BYCOMMAND | (g_sortImageOnly ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(menu, kMenuAlwaysOnTop, MF_BYCOMMAND | (g_alwaysOnTop ? MF_CHECKED : MF_UNCHECKED));
 
         POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -492,6 +504,15 @@ LRESULT CALLBACK WndProc(
             return 0;
         case kMenuSortTimeDesc:
             g_sortMode = SortMode::TimeDesc;
+            if (!g_currentImagePath.empty())
+            {
+                RefreshImageList(g_currentImagePath);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            SaveSettings();
+            return 0;
+        case kMenuSortImageOnly:
+            g_sortImageOnly = !g_sortImageOnly;
             if (!g_currentImagePath.empty())
             {
                 RefreshImageList(g_currentImagePath);
@@ -2091,7 +2112,8 @@ void RefreshImageList(const std::filesystem::path& imagePath)
             continue;
         }
         std::filesystem::path filePath = entry.path();
-        if (!IsImageFile(filePath))
+        bool shouldInclude = g_sortImageOnly ? IsImageFile(filePath) : IsSupportedFile(filePath);
+        if (!shouldInclude)
         {
             continue;
         }
@@ -2119,17 +2141,33 @@ bool LoadImageByIndex(size_t index)
     }
     g_currentIndex = index;
     g_currentImagePath = g_imageList[index].path;
-    bool result = LoadImageFromFile(g_currentImagePath.c_str());
-    if (result)
+    bool result = false;
+    if (IsMarkdownFile(g_currentImagePath))
     {
-        UpdateZoomToFitScreen(g_hwnd);
-        if (g_hwnd && g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        result = LoadMarkdownFromFile(g_currentImagePath.c_str());
+    }
+    else if (IsHtmlFile(g_currentImagePath))
+    {
+        result = LoadHtmlFromFile(g_currentImagePath.c_str());
+    }
+    else if (IsTextFile(g_currentImagePath))
+    {
+        result = LoadTextFromFile(g_currentImagePath.c_str());
+    }
+    else
+    {
+        result = LoadImageFromFile(g_currentImagePath.c_str());
+        if (result)
         {
-            UpdateLayeredWindowFromWic(
-                g_hwnd,
-                g_imageWidth * g_zoom,
-                g_imageHeight * g_zoom
-            );
+            UpdateZoomToFitScreen(g_hwnd);
+            if (g_hwnd && g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+            {
+                UpdateLayeredWindowFromWic(
+                    g_hwnd,
+                    g_imageWidth * g_zoom,
+                    g_imageHeight * g_zoom
+                );
+            }
         }
     }
     return result;
@@ -2175,6 +2213,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     {
         if (LoadMarkdownFromFile(filePath))
         {
+            RefreshImageList(filePath);
             return true;
         }
     }
@@ -2182,6 +2221,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     {
         if (LoadHtmlFromFile(filePath))
         {
+            RefreshImageList(filePath);
             return true;
         }
     }
@@ -2189,6 +2229,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     {
         if (LoadTextFromFile(filePath))
         {
+            RefreshImageList(filePath);
             return true;
         }
     }
@@ -2326,6 +2367,9 @@ void LoadSettings()
     }
     g_sortMode = static_cast<SortMode>(sortValue);
 
+    GetPrivateProfileStringW(L"Settings", L"SortImageOnly", L"1", buffer, 32, g_iniPath.c_str());
+    g_sortImageOnly = (_wtoi(buffer) != 0);
+
     GetPrivateProfileStringW(L"Settings", L"AlwaysOnTop", L"0", buffer, 32, g_iniPath.c_str());
     g_alwaysOnTop = (_wtoi(buffer) != 0);
 
@@ -2377,6 +2421,9 @@ void SaveSettings()
     wchar_t buffer[32]{};
     _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_sortMode));
     WritePrivateProfileStringW(L"Settings", L"SortMode", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_sortImageOnly ? 1 : 0);
+    WritePrivateProfileStringW(L"Settings", L"SortImageOnly", buffer, g_iniPath.c_str());
 
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_alwaysOnTop ? 1 : 0);
     WritePrivateProfileStringW(L"Settings", L"AlwaysOnTop", buffer, g_iniPath.c_str());
@@ -2843,14 +2890,26 @@ int WINAPI wWinMain(
         if (IsMarkdownFile(argv[1]))
         {
             loadedImage = LoadMarkdownFromFile(argv[1]);
+            if (loadedImage)
+            {
+                RefreshImageList(argv[1]);
+            }
         }
         else if (IsHtmlFile(argv[1]))
         {
             loadedImage = LoadHtmlFromFile(argv[1]);
+            if (loadedImage)
+            {
+                RefreshImageList(argv[1]);
+            }
         }
         else if (IsTextFile(argv[1]))
         {
             loadedImage = LoadTextFromFile(argv[1]);
+            if (loadedImage)
+            {
+                RefreshImageList(argv[1]);
+            }
         }
         else
         {
