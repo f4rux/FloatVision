@@ -1628,6 +1628,8 @@ struct ResolvedFontInfo
     bool matched = false;
 };
 
+ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name);
+
 std::wstring GetFontFamilyNameForSave(const std::wstring& fontName)
 {
     std::wstring normalized = NormalizeFontName(fontName);
