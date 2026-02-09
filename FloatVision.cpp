@@ -2196,6 +2196,27 @@ void ShowSettingsDialog(HWND hwnd)
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
         auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
+        auto isHotkeyFocus = [dlg]() -> bool
+        {
+            HWND focus = GetFocus();
+            if (!focus)
+            {
+                return false;
+            }
+            wchar_t className[64]{};
+            if (GetClassName(focus, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") == 0)
+            {
+                return true;
+            }
+            HWND parent = GetParent(focus);
+            if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") == 0)
+            {
+                return true;
+            }
+            return false;
+        };
         switch (msg)
         {
         case WM_INITDIALOG:
@@ -2598,6 +2619,10 @@ void ShowSettingsDialog(HWND hwnd)
             }
             if (id == IDCANCEL)
             {
+                if (isHotkeyFocus())
+                {
+                    return TRUE;
+                }
                 EndDialog(dlg, IDCANCEL);
                 return TRUE;
             }
