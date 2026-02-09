@@ -1020,8 +1020,8 @@ bool LoadImageFromFile(const wchar_t* path)
     );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
-        converterStraight,
-        &bitmapProperties,
+        converterPremultiplied,
+        nullptr,
         &g_bitmap
     );
     if (SUCCEEDED(hr))
