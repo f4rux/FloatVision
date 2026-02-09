@@ -2071,6 +2071,65 @@ void ShowSettingsDialog(HWND hwnd)
                 InvalidateRect(hotkey, nullptr, TRUE);
                 UpdateWindow(hotkey);
             };
+            auto subclassHotkey = [&](HWND hotkey)
+            {
+                if (!hotkey)
+                {
+                    return;
+                }
+                struct HotkeyColors
+                {
+                    COLORREF textColor;
+                    COLORREF backgroundColor;
+                };
+                auto hotkeyProc = [](HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR refData) -> LRESULT
+                {
+                    auto* colors = reinterpret_cast<HotkeyColors*>(refData);
+                    if (!colors)
+                    {
+                        return DefSubclassProc(hwnd, msg, wParam, lParam);
+                    }
+                    switch (msg)
+                    {
+                    case WM_ERASEBKGND:
+                    {
+                        HDC hdc = reinterpret_cast<HDC>(wParam);
+                        RECT rc;
+                        GetClientRect(hwnd, &rc);
+                        HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
+                        FillRect(hdc, &rc, brush);
+                        DeleteObject(brush);
+                        return 1;
+                    }
+                    case WM_PAINT:
+                    {
+                        PAINTSTRUCT ps{};
+                        HDC hdc = BeginPaint(hwnd, &ps);
+                        RECT rc;
+                        GetClientRect(hwnd, &rc);
+                        HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
+                        FillRect(hdc, &rc, brush);
+                        DeleteObject(brush);
+                        SetBkColor(hdc, colors->backgroundColor);
+                        SetTextColor(hdc, colors->textColor);
+                        DefSubclassProc(hwnd, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(hdc), PRF_CLIENT | PRF_ERASEBKGND);
+                        EndPaint(hwnd, &ps);
+                        return 0;
+                    }
+                    case WM_NCDESTROY:
+                    {
+                        delete colors;
+                        RemoveWindowSubclass(hwnd, hotkeyProc, 0);
+                        break;
+                    }
+                    default:
+                        break;
+                    }
+                    return DefSubclassProc(hwnd, msg, wParam, lParam);
+                };
+                auto* colors = new HotkeyColors{ dialogState->dialogTextColor, dialogState->controlBackgroundColor };
+                SetWindowSubclass(hotkey, hotkeyProc, 0, reinterpret_cast<DWORD_PTR>(colors));
+            };
             SetWindowTheme(GetDlgItem(dlg, kIdTransparencySelect), themeName, nullptr);
             if (darkMode)
             {
@@ -2081,6 +2140,91 @@ void ShowSettingsDialog(HWND hwnd)
                 clearHotkeyTheme(kIdKeyOpen);
                 clearHotkeyTheme(kIdKeyExit);
                 clearHotkeyTheme(kIdKeyAlwaysOnTop);
+                subclassHotkey(GetDlgItem(dlg, kIdKeyNext));
+                subclassHotkey(GetDlgItem(dlg, kIdKeyPrev));
+                subclassHotkey(GetDlgItem(dlg, kIdKeyZoomIn));
+                subclassHotkey(GetDlgItem(dlg, kIdKeyZoomOut));
+                subclassHotkey(GetDlgItem(dlg, kIdKeyOpen));
+                subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
+                subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
+                EnumChildWindows(dlg, [](HWND hwnd, LPARAM refData) -> BOOL
+                {
+                    auto* state = reinterpret_cast<DialogState*>(refData);
+                    if (!state)
+                    {
+                        return TRUE;
+                    }
+                    wchar_t className[64]{};
+                    if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) == 0)
+                    {
+                        return TRUE;
+                    }
+                    if (wcscmp(className, L"msctls_hotkey32") == 0)
+                    {
+                        EnumChildWindows(hwnd, [](HWND child, LPARAM ref) -> BOOL
+                        {
+                            auto* dialogStateChild = reinterpret_cast<DialogState*>(ref);
+                            if (!dialogStateChild)
+                            {
+                                return TRUE;
+                            }
+                            struct HotkeyColors
+                            {
+                                COLORREF textColor;
+                                COLORREF backgroundColor;
+                            };
+                            auto hotkeyChildProc = [](HWND childHwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR refData) -> LRESULT
+                            {
+                                auto* colors = reinterpret_cast<HotkeyColors*>(refData);
+                                if (!colors)
+                                {
+                                    return DefSubclassProc(childHwnd, msg, wParam, lParam);
+                                }
+                                switch (msg)
+                                {
+                                case WM_ERASEBKGND:
+                                {
+                                    HDC hdc = reinterpret_cast<HDC>(wParam);
+                                    RECT rc;
+                                    GetClientRect(childHwnd, &rc);
+                                    HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
+                                    FillRect(hdc, &rc, brush);
+                                    DeleteObject(brush);
+                                    return 1;
+                                }
+                                case WM_PAINT:
+                                {
+                                    PAINTSTRUCT ps{};
+                                    HDC hdc = BeginPaint(childHwnd, &ps);
+                                    RECT rc;
+                                    GetClientRect(childHwnd, &rc);
+                                    HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
+                                    FillRect(hdc, &rc, brush);
+                                    DeleteObject(brush);
+                                    SetBkColor(hdc, colors->backgroundColor);
+                                    SetTextColor(hdc, colors->textColor);
+                                    DefSubclassProc(childHwnd, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(hdc), PRF_CLIENT | PRF_ERASEBKGND);
+                                    EndPaint(childHwnd, &ps);
+                                    return 0;
+                                }
+                                case WM_NCDESTROY:
+                                {
+                                    delete colors;
+                                    RemoveWindowSubclass(childHwnd, hotkeyChildProc, 0);
+                                    break;
+                                }
+                                default:
+                                    break;
+                                }
+                                return DefSubclassProc(childHwnd, msg, wParam, lParam);
+                            };
+                            auto* colors = new HotkeyColors{ dialogStateChild->dialogTextColor, dialogStateChild->controlBackgroundColor };
+                            SetWindowSubclass(child, hotkeyChildProc, 0, reinterpret_cast<DWORD_PTR>(colors));
+                            return TRUE;
+                        }, reinterpret_cast<LPARAM>(state));
+                    }
+                    return TRUE;
+                }, reinterpret_cast<LPARAM>(dialogState));
             }
             else
             {
