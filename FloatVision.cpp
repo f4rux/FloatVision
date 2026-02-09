@@ -1923,6 +1923,7 @@ void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
             if (!fontName.empty())
             {
                 g_textFontName = std::move(fontName);
+                g_textFontFaceName = TrimString(g_textFontName);
             }
         }
         else if (normalized == L"fontcolor")
@@ -3681,6 +3682,7 @@ void LoadSettings()
     {
         g_textFontName = std::move(normalizedFontName);
     }
+    g_textFontFaceName = TrimString(g_textFontName);
     GetPrivateProfileStringW(L"Text", L"FontSize", L"18", buffer, 32, g_iniPath.c_str());
     g_textFontSize = static_cast<float>(_wtof(buffer));
     if (g_textFontSize < 8.0f)
