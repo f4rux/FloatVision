@@ -1784,21 +1784,39 @@ void ScrollTextBy(float delta)
     g_textScroll = std::max(0.0f, std::min(g_textScroll + delta, maxScroll));
 }
 
+namespace
+{
+    constexpr int kIdTransparencySelect = 2001;
+    constexpr int kIdColor = 2004;
+    constexpr int kIdFont = 2005;
+    constexpr int kIdFontColor = 2006;
+    constexpr int kIdBackColor = 2007;
+    constexpr int kIdWrap = 2008;
+    constexpr int kIdKeyNext = 2101;
+    constexpr int kIdKeyPrev = 2102;
+    constexpr int kIdKeyZoomIn = 2103;
+    constexpr int kIdKeyZoomOut = 2104;
+    constexpr int kIdKeyOpen = 2105;
+    constexpr int kIdKeyExit = 2106;
+    constexpr int kIdKeyAlwaysOnTop = 2107;
+}
+
+static void ApplyExplorerTheme(HWND target)
+{
+    SetWindowTheme(target, L"Explorer", nullptr);
+    EnumChildWindows(
+        target,
+        [](HWND child, LPARAM) -> BOOL
+        {
+            SetWindowTheme(child, L"Explorer", nullptr);
+            return TRUE;
+        },
+        0
+    );
+}
+
 void ShowSettingsDialog(HWND hwnd)
 {
-    const int kIdTransparencySelect = 2001;
-    const int kIdColor = 2004;
-    const int kIdFont = 2005;
-    const int kIdFontColor = 2006;
-    const int kIdBackColor = 2007;
-    const int kIdWrap = 2008;
-    const int kIdKeyNext = 2101;
-    const int kIdKeyPrev = 2102;
-    const int kIdKeyZoomIn = 2103;
-    const int kIdKeyZoomOut = 2104;
-    const int kIdKeyOpen = 2105;
-    const int kIdKeyExit = 2106;
-    const int kIdKeyAlwaysOnTop = 2107;
 
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
@@ -1925,21 +1943,7 @@ void ShowSettingsDialog(HWND hwnd)
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
         g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop };
 
-    auto applyExplorerTheme = [](HWND target)
-    {
-        SetWindowTheme(target, L"Explorer", nullptr);
-        EnumChildWindows(
-            target,
-            [](HWND child, LPARAM) -> BOOL
-            {
-                SetWindowTheme(child, L"Explorer", nullptr);
-                return TRUE;
-            },
-            0
-        );
-    };
-
-    auto dialogProc = [applyExplorerTheme](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
         auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
         switch (msg)
@@ -1948,7 +1952,7 @@ void ShowSettingsDialog(HWND hwnd)
         {
             SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
             dialogState = reinterpret_cast<DialogState*>(lParam);
-            applyExplorerTheme(dlg);
+            ApplyExplorerTheme(dlg);
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Transparent (show desktop)"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Checkerboard"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Solid color"));
@@ -1956,14 +1960,14 @@ void ShowSettingsDialog(HWND hwnd)
                 : (dialogState->mode == TransparencyMode::Checkerboard) ? 1 : 2;
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_SETCURSEL, selection, 0);
             EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
-            CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
-            SendDlgItemMessage(dlg, 2101, HKM_SETHOTKEY, MAKEWORD(dialogState->keyNext, 0), 0);
-            SendDlgItemMessage(dlg, 2102, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
-            SendDlgItemMessage(dlg, 2103, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomIn, 0), 0);
-            SendDlgItemMessage(dlg, 2104, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomOut, 0), 0);
-            SendDlgItemMessage(dlg, 2105, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
-            SendDlgItemMessage(dlg, 2106, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
-            SendDlgItemMessage(dlg, 2107, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
+            CheckDlgButton(dlg, kIdWrap, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
+            SendDlgItemMessage(dlg, kIdKeyNext, HKM_SETHOTKEY, MAKEWORD(dialogState->keyNext, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyPrev, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyZoomIn, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomIn, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyZoomOut, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomOut, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyOpen, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyExit, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyAlwaysOnTop, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
             return TRUE;
         }
         case WM_COMMAND:
@@ -1977,23 +1981,23 @@ void ShowSettingsDialog(HWND hwnd)
                 EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
                 return TRUE;
             }
-            if (id == 2004 || id == 2006 || id == 2007)
+            if (id == kIdColor || id == kIdFontColor || id == kIdBackColor)
             {
                 CHOOSECOLOR cc{};
                 COLORREF custom[16]{};
                 cc.lStructSize = sizeof(cc);
                 cc.hwndOwner = dlg;
-                cc.rgbResult = (id == 2004) ? dialogState->color
-                    : (id == 2006) ? dialogState->fontColor : dialogState->backgroundColor;
+                cc.rgbResult = (id == kIdColor) ? dialogState->color
+                    : (id == kIdFontColor) ? dialogState->fontColor : dialogState->backgroundColor;
                 cc.lpCustColors = custom;
                 cc.Flags = CC_FULLOPEN | CC_RGBINIT;
                 if (ChooseColor(&cc))
                 {
-                    if (id == 2004)
+                    if (id == kIdColor)
                     {
                         dialogState->color = cc.rgbResult;
                     }
-                    else if (id == 2006)
+                    else if (id == kIdFontColor)
                     {
                         dialogState->fontColor = cc.rgbResult;
                     }
@@ -2004,7 +2008,7 @@ void ShowSettingsDialog(HWND hwnd)
                 }
                 return TRUE;
             }
-            if (id == 2005)
+            if (id == kIdFont)
             {
                 LOGFONT lf{};
                 wcsncpy_s(lf.lfFaceName, dialogState->fontName.c_str(), LF_FACESIZE - 1);
@@ -2021,9 +2025,9 @@ void ShowSettingsDialog(HWND hwnd)
                 }
                 return TRUE;
             }
-            if (id == 2008)
+            if (id == kIdWrap)
             {
-                dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
+                dialogState->wrap = (IsDlgButtonChecked(dlg, kIdWrap) == BST_CHECKED);
                 return TRUE;
             }
             if (id == IDOK)
@@ -2037,14 +2041,14 @@ void ShowSettingsDialog(HWND hwnd)
                 int selection = static_cast<int>(SendDlgItemMessage(dlg, kIdTransparencySelect, CB_GETCURSEL, 0, 0));
                 dialogState->mode = (selection == 0) ? TransparencyMode::Transparent
                     : (selection == 1) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
-                dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
-                dialogState->keyNext = readHotKey(2101, dialogState->keyNext);
-                dialogState->keyPrev = readHotKey(2102, dialogState->keyPrev);
-                dialogState->keyZoomIn = readHotKey(2103, dialogState->keyZoomIn);
-                dialogState->keyZoomOut = readHotKey(2104, dialogState->keyZoomOut);
-                dialogState->keyOpen = readHotKey(2105, dialogState->keyOpen);
-                dialogState->keyExit = readHotKey(2106, dialogState->keyExit);
-                dialogState->keyAlwaysOnTop = readHotKey(2107, dialogState->keyAlwaysOnTop);
+                dialogState->wrap = (IsDlgButtonChecked(dlg, kIdWrap) == BST_CHECKED);
+                dialogState->keyNext = readHotKey(kIdKeyNext, dialogState->keyNext);
+                dialogState->keyPrev = readHotKey(kIdKeyPrev, dialogState->keyPrev);
+                dialogState->keyZoomIn = readHotKey(kIdKeyZoomIn, dialogState->keyZoomIn);
+                dialogState->keyZoomOut = readHotKey(kIdKeyZoomOut, dialogState->keyZoomOut);
+                dialogState->keyOpen = readHotKey(kIdKeyOpen, dialogState->keyOpen);
+                dialogState->keyExit = readHotKey(kIdKeyExit, dialogState->keyExit);
+                dialogState->keyAlwaysOnTop = readHotKey(kIdKeyAlwaysOnTop, dialogState->keyAlwaysOnTop);
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
