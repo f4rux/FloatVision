@@ -169,7 +169,12 @@ void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
 bool LoadHtmlFromFile(const wchar_t* path);
+bool LoadMarkdownFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
+bool ReadFileBytes(const wchar_t* path, std::string& bytes);
+bool Utf8ToWide(const std::string& bytes, std::wstring& text);
+bool ApplyHtmlContent(std::wstring html);
+bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
@@ -212,6 +217,17 @@ bool IsHtmlFile(const std::filesystem::path& path)
     std::wstring ext = path.extension().wstring();
     std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
     return ext == L".html" || ext == L".htm";
+}
+
+bool IsMarkdownFile(const std::filesystem::path& path)
+{
+    if (!path.has_extension())
+    {
+        return false;
+    }
+    std::wstring ext = path.extension().wstring();
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::towlower);
+    return ext == L".md" || ext == L".markdown";
 }
 
 void SortImageList()
@@ -308,7 +324,14 @@ LRESULT CALLBACK WndProc(
                 std::wstring path(pathLength + 1, L'\0');
                 DragQueryFileW(drop, 0, path.data(), pathLength + 1);
                 path.resize(pathLength);
-                if (IsHtmlFile(path))
+                if (IsMarkdownFile(path))
+                {
+                    if (LoadMarkdownFromFile(path.c_str()))
+                    {
+                        InvalidateRect(hwnd, nullptr, TRUE);
+                    }
+                }
+                else if (IsHtmlFile(path))
                 {
                     if (LoadHtmlFromFile(path.c_str()))
                     {
@@ -985,7 +1008,7 @@ cleanup:
     return SUCCEEDED(hr);
 }
 
-bool LoadTextFromFile(const wchar_t* path)
+bool ReadFileBytes(const wchar_t* path, std::string& bytes)
 {
     std::ifstream file(path, std::ios::binary);
     if (!file)
@@ -993,12 +1016,22 @@ bool LoadTextFromFile(const wchar_t* path)
         return false;
     }
 
-    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    bytes.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
         && static_cast<unsigned char>(bytes[1]) == 0xBB
         && static_cast<unsigned char>(bytes[2]) == 0xBF)
     {
         bytes.erase(0, 3);
+    }
+    return true;
+}
+
+bool Utf8ToWide(const std::string& bytes, std::wstring& text)
+{
+    if (bytes.empty())
+    {
+        text.clear();
+        return true;
     }
 
     int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
@@ -1007,8 +1040,24 @@ bool LoadTextFromFile(const wchar_t* path)
         return false;
     }
 
-    std::wstring text(needed, L'\0');
+    text.assign(needed, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), needed);
+    return true;
+}
+
+bool LoadTextFromFile(const wchar_t* path)
+{
+    std::string bytes;
+    if (!ReadFileBytes(path, bytes))
+    {
+        return false;
+    }
+
+    std::wstring text;
+    if (!Utf8ToWide(bytes, text))
+    {
+        return false;
+    }
 
     if (g_bitmap)
     {
@@ -1052,32 +1101,74 @@ std::wstring InjectHtmlBaseStyles(const std::wstring& html)
     return style + html;
 }
 
-bool LoadHtmlFromFile(const wchar_t* path)
+bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
 {
-    std::ifstream file(path, std::ios::binary);
-    if (!file)
+    std::string body;
+    auto appendChunk = [](const MD_CHAR* text, MD_SIZE size, void* userdata)
+    {
+        auto* output = static_cast<std::string*>(userdata);
+        output->append(text, size);
+    };
+
+    if (md_html(markdown.data(), static_cast<MD_SIZE>(markdown.size()), appendChunk, &body, MD_DIALECT_GITHUB, 0) != 0)
     {
         return false;
     }
 
-    std::string bytes((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    if (bytes.size() >= 3 && static_cast<unsigned char>(bytes[0]) == 0xEF
-        && static_cast<unsigned char>(bytes[1]) == 0xBB
-        && static_cast<unsigned char>(bytes[2]) == 0xBF)
-    {
-        bytes.erase(0, 3);
-    }
+    const char* kMarkdownStyle = R"(
+        :root {
+            color-scheme: light dark;
+        }
+        body {
+            margin: 0;
+            padding: 24px;
+            font-family: "Segoe UI", "Meiryo", sans-serif;
+            background: #ffffff;
+            color: #1f2328;
+        }
+        .markdown-body {
+            max-width: 960px;
+            margin: 0 auto;
+        }
+        pre, code {
+            font-family: "Consolas", "Courier New", monospace;
+        }
+        pre {
+            padding: 12px;
+            background: #f6f8fa;
+            border-radius: 6px;
+            overflow: auto;
+        }
+        code {
+            background: #f6f8fa;
+            border-radius: 4px;
+            padding: 0 4px;
+        }
+        table {
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #d0d7de;
+            padding: 6px 10px;
+        }
+        blockquote {
+            border-left: 4px solid #d0d7de;
+            margin: 0;
+            padding-left: 16px;
+            color: #57606a;
+        }
+    )";
 
-    int needed = MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
-    if (needed <= 0)
-    {
-        return false;
-    }
+    html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>";
+    html += kMarkdownStyle;
+    html += "</style></head><body><article class=\"markdown-body\">";
+    html += body;
+    html += "</article></body></html>";
+    return true;
+}
 
-    std::wstring html(needed, L'\0');
-    MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), html.data(), needed);
-    html = InjectHtmlBaseStyles(html);
-
+bool ApplyHtmlContent(std::wstring html)
+{
     if (g_bitmap)
     {
         g_bitmap->Release();
@@ -1108,6 +1199,47 @@ bool LoadHtmlFromFile(const wchar_t* path)
     }
 
     return true;
+}
+
+bool LoadHtmlFromFile(const wchar_t* path)
+{
+    std::string bytes;
+    if (!ReadFileBytes(path, bytes))
+    {
+        return false;
+    }
+
+    std::wstring html;
+    if (!Utf8ToWide(bytes, html))
+    {
+        return false;
+    }
+
+    html = InjectHtmlBaseStyles(html);
+    return ApplyHtmlContent(std::move(html));
+}
+
+bool LoadMarkdownFromFile(const wchar_t* path)
+{
+    std::string bytes;
+    if (!ReadFileBytes(path, bytes))
+    {
+        return false;
+    }
+
+    std::string htmlUtf8;
+    if (!RenderMarkdownToHtml(bytes, htmlUtf8))
+    {
+        return false;
+    }
+
+    std::wstring html;
+    if (!Utf8ToWide(htmlUtf8, html))
+    {
+        return false;
+    }
+
+    return ApplyHtmlContent(std::move(html));
 }
 
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
@@ -1824,7 +1956,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     ofn.hwndOwner = hwnd;
     ofn.lpstrFile = filePath;
     ofn.nMaxFile = MAX_PATH;
-    ofn.lpstrFilter = L"Image/Text/HTML Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.html;*.htm\0All Files\0*.*\0";
+    ofn.lpstrFilter = L"Image/Text/HTML/Markdown Files\0*.png;*.jpg;*.jpeg;*.bmp;*.gif;*.tif;*.tiff;*.webp;*.txt;*.html;*.htm;*.md;*.markdown\0All Files\0*.*\0";
     ofn.nFilterIndex = 1;
     ofn.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
 
@@ -1833,6 +1965,13 @@ bool ShowOpenImageDialog(HWND hwnd)
         return false;
     }
 
+    if (IsMarkdownFile(filePath))
+    {
+        if (LoadMarkdownFromFile(filePath))
+        {
+            return true;
+        }
+    }
     if (IsHtmlFile(filePath))
     {
         if (LoadHtmlFromFile(filePath))
@@ -2443,7 +2582,11 @@ int WINAPI wWinMain(
     bool loadedImage = false;
     if (argv && argc > 1)
     {
-        if (IsHtmlFile(argv[1]))
+        if (IsMarkdownFile(argv[1]))
+        {
+            loadedImage = LoadMarkdownFromFile(argv[1]);
+        }
+        else if (IsHtmlFile(argv[1]))
         {
             loadedImage = LoadHtmlFromFile(argv[1]);
         }
