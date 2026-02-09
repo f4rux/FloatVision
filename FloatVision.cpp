@@ -20,6 +20,7 @@
 #include "resource.h"
 #include "md4c.h"
 #include "md4c-html.h"
+#include "entity.h"
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "dwrite.lib")
