@@ -51,9 +51,6 @@
     <Image Include="res\FloatVision.ico">
       <Filter>リソース ファイル</Filter>
     </Image>
-    <Image Include="res\small.ico">
-      <Filter>リソース ファイル</Filter>
-    </Image>
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />

@@ -148,7 +148,6 @@
   </ItemGroup>
   <ItemGroup>
     <Image Include="res\FloatVision.ico" />
-    <Image Include="res\small.ico" />
   </ItemGroup>
   <ItemGroup>
     <None Include="packages.config" />
