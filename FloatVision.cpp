@@ -2010,7 +2010,7 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(286), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(284), scale(88), scale(14), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, scale(124), scale(304), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(304), scale(54), scale(18), IDOK, 0x0080, L"Save");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(304), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
@@ -2125,6 +2125,18 @@ void ShowSettingsDialog(HWND hwnd)
                 break;
             }
             HDC hdc = reinterpret_cast<HDC>(wParam);
+            HWND control = reinterpret_cast<HWND>(lParam);
+            wchar_t className[64]{};
+            if (control && GetClassName(control, className, static_cast<int>(std::size(className))))
+            {
+                if (wcscmp(className, L"msctls_hotkey32") == 0)
+                {
+                    SetTextColor(hdc, dialogState->dialogTextColor);
+                    SetBkColor(hdc, dialogState->controlBackgroundColor);
+                    SetBkMode(hdc, OPAQUE);
+                    return reinterpret_cast<INT_PTR>(dialogState->controlBrush);
+                }
+            }
             SetTextColor(hdc, dialogState->dialogTextColor);
             SetBkColor(hdc, dialogState->dialogBackgroundColor);
             SetBkMode(hdc, TRANSPARENT);
