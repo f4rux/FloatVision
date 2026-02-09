@@ -2448,10 +2448,9 @@ void Render(HWND hwnd)
         }
     }
 
-    g_renderTarget->BeginDraw();
-
     if (g_hasText)
     {
+        g_renderTarget->BeginDraw();
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
         if (g_renderTarget && rtSize.width > 0.0f && rtSize.height > 0.0f)
         {
@@ -2483,6 +2482,12 @@ void Render(HWND hwnd)
                 }
             }
         }
+        HRESULT hr = g_renderTarget->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET)
+        {
+            DiscardRenderTarget();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
     }
     else if (g_bitmap)
     {
@@ -2498,6 +2503,7 @@ void Render(HWND hwnd)
             return;
         }
 
+        g_renderTarget->BeginDraw();
         if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
@@ -2547,9 +2553,17 @@ void Render(HWND hwnd)
             1.0f,
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR
         );
+
+        HRESULT hr = g_renderTarget->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET)
+        {
+            DiscardRenderTarget();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
     }
     else
     {
+        g_renderTarget->BeginDraw();
         g_renderTarget->Clear(D2D1::ColorF(0.121568f, 0.121568f, 0.121568f));
 
         const wchar_t* placeholderText = L"Drop image here";
@@ -2571,13 +2585,12 @@ void Render(HWND hwnd)
                 g_placeholderBrush
             );
         }
-    }
-
-    HRESULT hr = g_renderTarget->EndDraw();
-    if (hr == D2DERR_RECREATE_TARGET)
-    {
-        DiscardRenderTarget();
-        InvalidateRect(hwnd, nullptr, TRUE);
+        HRESULT hr = g_renderTarget->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET)
+        {
+            DiscardRenderTarget();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
     }
 }
 
