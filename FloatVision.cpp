@@ -1687,6 +1687,39 @@ ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& na
         {
             continue;
         }
+        IDWriteLocalizedStrings* familyNames = nullptr;
+        if (SUCCEEDED(family->GetFamilyNames(&familyNames)) && familyNames)
+        {
+            UINT32 familyNameCount = familyNames->GetCount();
+            bool matchedFamilyName = false;
+            for (UINT32 nameIndex = 0; nameIndex < familyNameCount; ++nameIndex)
+            {
+                UINT32 length = 0;
+                if (FAILED(familyNames->GetStringLength(nameIndex, &length)) || length == 0)
+                {
+                    continue;
+                }
+                std::wstring familyName(length + 1, L'\0');
+                if (SUCCEEDED(familyNames->GetString(nameIndex, familyName.data(), length + 1)))
+                {
+                    familyName.resize(length);
+                    if (_wcsicmp(familyName.c_str(), name.c_str()) == 0)
+                    {
+                        resolved.familyName = std::move(familyName);
+                        resolved.matched = true;
+                        matchedFamilyName = true;
+                        break;
+                    }
+                }
+            }
+            familyNames->Release();
+            if (matchedFamilyName)
+            {
+                family->Release();
+                collection->Release();
+                return resolved;
+            }
+        }
         UINT32 fontCount = family->GetFontCount();
         bool match = false;
         for (UINT32 fontIndex = 0; fontIndex < fontCount && !match; ++fontIndex)
