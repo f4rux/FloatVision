@@ -123,6 +123,7 @@ struct HotkeyColors
 {
     COLORREF textColor;
     COLORREF backgroundColor;
+    HBRUSH backgroundBrush;
 };
 
 static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR refData)
@@ -139,9 +140,7 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         HDC hdc = reinterpret_cast<HDC>(wParam);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
-        FillRect(hdc, &rc, brush);
-        DeleteObject(brush);
+        FillRect(hdc, &rc, colors->backgroundBrush);
         return 1;
     }
     case WM_PAINT:
@@ -150,17 +149,43 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         HDC hdc = BeginPaint(hwnd, &ps);
         RECT rc;
         GetClientRect(hwnd, &rc);
-        HBRUSH brush = CreateSolidBrush(colors->backgroundColor);
-        FillRect(hdc, &rc, brush);
-        DeleteObject(brush);
+        FillRect(hdc, &rc, colors->backgroundBrush);
         SetBkColor(hdc, colors->backgroundColor);
         SetTextColor(hdc, colors->textColor);
         DefSubclassProc(hwnd, WM_PRINTCLIENT, reinterpret_cast<WPARAM>(hdc), PRF_CLIENT | PRF_ERASEBKGND);
         EndPaint(hwnd, &ps);
         return 0;
     }
+    case WM_PRINTCLIENT:
+    {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        if (!hdc)
+        {
+            break;
+        }
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        FillRect(hdc, &rc, colors->backgroundBrush);
+        SetBkColor(hdc, colors->backgroundColor);
+        SetTextColor(hdc, colors->textColor);
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC hdc = reinterpret_cast<HDC>(wParam);
+        if (!hdc)
+        {
+            break;
+        }
+        SetTextColor(hdc, colors->textColor);
+        SetBkColor(hdc, colors->backgroundColor);
+        SetBkMode(hdc, OPAQUE);
+        return reinterpret_cast<LRESULT>(colors->backgroundBrush);
+    }
     case WM_NCDESTROY:
     {
+        DeleteObject(colors->backgroundBrush);
         delete colors;
         RemoveWindowSubclass(hwnd, HotkeySubclassProc, 0);
         break;
@@ -2129,7 +2154,8 @@ void ShowSettingsDialog(HWND hwnd)
                 {
                     return;
                 }
-                auto* colors = new HotkeyColors{ dialogState->dialogTextColor, dialogState->controlBackgroundColor };
+                auto* colors = new HotkeyColors{ dialogState->dialogTextColor, dialogState->controlBackgroundColor,
+                    CreateSolidBrush(dialogState->controlBackgroundColor) };
                 SetWindowSubclass(hotkey, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(colors));
             };
             SetWindowTheme(GetDlgItem(dlg, kIdTransparencySelect), themeName, nullptr);
@@ -2170,7 +2196,8 @@ void ShowSettingsDialog(HWND hwnd)
                             {
                                 return TRUE;
                             }
-                            auto* colors = new HotkeyColors{ dialogStateChild->dialogTextColor, dialogStateChild->controlBackgroundColor };
+                            auto* colors = new HotkeyColors{ dialogStateChild->dialogTextColor, dialogStateChild->controlBackgroundColor,
+                                CreateSolidBrush(dialogStateChild->controlBackgroundColor) };
                             SetWindowSubclass(child, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(colors));
                             return TRUE;
                         }, reinterpret_cast<LPARAM>(state));
