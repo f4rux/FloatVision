@@ -1632,49 +1632,7 @@ ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& na
 
 std::wstring GetFontFamilyNameForSave(const std::wstring& fontName)
 {
-    std::wstring normalized = NormalizeFontName(fontName);
-    if (normalized.empty())
-    {
-        return fontName;
-    }
-
-    ResolvedFontInfo resolved = ResolveFontInfo(g_dwriteFactory, normalized);
-    if (!resolved.familyName.empty())
-    {
-        return resolved.familyName;
-    }
-
-    if (!g_dwriteFactory)
-    {
-        return normalized;
-    }
-
-    IDWriteFontCollection* collection = nullptr;
-    if (FAILED(g_dwriteFactory->GetSystemFontCollection(&collection, FALSE)) || !collection)
-    {
-        return normalized;
-    }
-
-    std::wstring candidate = normalized;
-    while (!candidate.empty())
-    {
-        UINT32 index = 0;
-        BOOL exists = FALSE;
-        if (SUCCEEDED(collection->FindFamilyName(candidate.c_str(), &index, &exists)) && exists)
-        {
-            collection->Release();
-            return candidate;
-        }
-        size_t pos = candidate.find_last_of(L' ');
-        if (pos == std::wstring::npos)
-        {
-            break;
-        }
-        candidate = TrimString(candidate.substr(0, pos));
-    }
-
-    collection->Release();
-    return normalized;
+    return TrimString(fontName);
 }
 
 ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
