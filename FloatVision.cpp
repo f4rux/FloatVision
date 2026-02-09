@@ -163,6 +163,28 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
         RemoveWindowSubclass(hwnd, HotkeySubclassProc, 0);
         break;
     }
+    case WM_PARENTNOTIFY:
+    {
+        if (LOWORD(wParam) != WM_CREATE)
+        {
+            break;
+        }
+        HWND child = reinterpret_cast<HWND>(lParam);
+        if (!child)
+        {
+            break;
+        }
+        wchar_t className[64]{};
+        if (GetClassName(child, className, static_cast<int>(std::size(className))) == 0)
+        {
+            break;
+        }
+        SetWindowTheme(child, L"", L"");
+        auto* childColors = new HotkeyColors{ colors->textColor, colors->backgroundColor,
+            CreateSolidBrush(colors->backgroundColor) };
+        SetWindowSubclass(child, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(childColors));
+        break;
+    }
     default:
         break;
     }
@@ -2254,7 +2276,11 @@ void ShowSettingsDialog(HWND hwnd)
             wchar_t className[64]{};
             if (control && GetClassName(control, className, static_cast<int>(std::size(className))))
             {
-                if (wcscmp(className, L"msctls_hotkey32") == 0)
+                HWND parent = GetParent(control);
+                wchar_t parentClass[64]{};
+                if (wcscmp(className, L"msctls_hotkey32") == 0
+                    || (parent && GetClassName(parent, parentClass, static_cast<int>(std::size(parentClass)))
+                        && wcscmp(parentClass, L"msctls_hotkey32") == 0))
                 {
                     SetTextColor(hdc, dialogState->dialogTextColor);
                     SetBkColor(hdc, dialogState->controlBackgroundColor);
@@ -2287,6 +2313,22 @@ void ShowSettingsDialog(HWND hwnd)
                 break;
             }
             HDC hdc = reinterpret_cast<HDC>(wParam);
+            HWND control = reinterpret_cast<HWND>(lParam);
+            wchar_t className[64]{};
+            if (control && GetClassName(control, className, static_cast<int>(std::size(className))))
+            {
+                HWND parent = GetParent(control);
+                wchar_t parentClass[64]{};
+                if (wcscmp(className, L"msctls_hotkey32") == 0
+                    || (parent && GetClassName(parent, parentClass, static_cast<int>(std::size(parentClass)))
+                        && wcscmp(parentClass, L"msctls_hotkey32") == 0))
+                {
+                    SetTextColor(hdc, dialogState->dialogTextColor);
+                    SetBkColor(hdc, dialogState->controlBackgroundColor);
+                    SetBkMode(hdc, OPAQUE);
+                    return reinterpret_cast<INT_PTR>(dialogState->controlBrush);
+                }
+            }
             SetTextColor(hdc, dialogState->dialogTextColor);
             SetBkColor(hdc, dialogState->controlBackgroundColor);
             SetBkMode(hdc, OPAQUE);
