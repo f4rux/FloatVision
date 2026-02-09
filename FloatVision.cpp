@@ -1553,46 +1553,7 @@ bool SaveUtf8IniValue(const std::filesystem::path& path, const std::wstring& sec
 
 bool LoadTextFromFile(const wchar_t* path)
 {
-    std::string bytes;
-    if (!ReadFileBytes(path, bytes))
-    {
-        return false;
-    }
-
-    std::wstring text;
-    if (!Utf8ToWide(bytes, text))
-    {
-        return false;
-    }
-
-    if (g_bitmap)
-    {
-        g_bitmap->Release();
-        g_bitmap = nullptr;
-    }
-    if (g_wicSourceStraight)
-    {
-        g_wicSourceStraight->Release();
-        g_wicSourceStraight = nullptr;
-    }
-    if (g_wicSourcePremultiplied)
-    {
-        g_wicSourcePremultiplied->Release();
-        g_wicSourcePremultiplied = nullptr;
-    }
-    g_imageWidth = 0;
-    g_imageHeight = 0;
-    g_imageHasAlpha = false;
-    g_hasHtml = false;
-    g_pendingHtmlContent.clear();
-    g_hasText = true;
-    g_textContent = std::move(text);
-    g_textScroll = 0.0f;
-    HideWebView();
-    ApplyTransparencyMode();
-    UpdateTextFormat();
-    UpdateTextBrush();
-    return true;
+    return LoadMarkdownFromFile(path);
 }
 
 std::wstring TrimString(const std::wstring& value)
