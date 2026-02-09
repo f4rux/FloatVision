@@ -1853,34 +1853,34 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, 9);
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 50, 0xFFFF, 0x0080, L"Background of transparent images");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 54, 0xFFFF, 0x0080, L"Background of transparent images");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 14, 18, 190, 60, kIdTransparencySelect, 0x0085, L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 36, 80, 14, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 38, 80, 14, kIdColor, 0x0080, L"Color...");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 80, 208, 70, 0xFFFF, 0x0080, L"Text");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 94, 80, 14, kIdFont, 0x0080, L"Font...");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 94, 80, 14, kIdFontColor, 0x0080, L"Font color");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 112, 80, 14, kIdBackColor, 0x0080, L"Background");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 130, 80, 12, kIdWrap, 0x0080, L"Wrap");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 62, 208, 68, 0xFFFF, 0x0080, L"Text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 76, 80, 14, kIdFont, 0x0080, L"Font...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 76, 80, 14, kIdFontColor, 0x0080, L"Font color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 94, 80, 14, kIdBackColor, 0x0080, L"Background");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 112, 80, 12, kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 154, 208, 112, 0xFFFF, 0x0080, L"Key Config");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 168, 90, 12, 0xFFFF, 0x0082, L"Next file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 166, 70, 14, kIdKeyNext, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 182, 90, 12, 0xFFFF, 0x0082, L"Previous file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 180, 70, 14, kIdKeyPrev, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 196, 90, 12, 0xFFFF, 0x0082, L"Zoom in");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 194, 70, 14, kIdKeyZoomIn, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 210, 90, 12, 0xFFFF, 0x0082, L"Zoom out");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 208, 70, 14, kIdKeyZoomOut, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 224, 90, 12, 0xFFFF, 0x0082, L"Open file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 222, 70, 14, kIdKeyOpen, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 238, 90, 12, 0xFFFF, 0x0082, L"Exit");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 236, 70, 14, kIdKeyExit, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 252, 90, 12, 0xFFFF, 0x0082, L"Always on Top");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 250, 70, 14, kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 134, 208, 112, 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 148, 90, 12, 0xFFFF, 0x0082, L"Next file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 146, 70, 14, kIdKeyNext, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 162, 90, 12, 0xFFFF, 0x0082, L"Previous file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 160, 70, 14, kIdKeyPrev, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 176, 90, 12, 0xFFFF, 0x0082, L"Zoom in");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 174, 70, 14, kIdKeyZoomIn, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 190, 90, 12, 0xFFFF, 0x0082, L"Zoom out");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 188, 70, 14, kIdKeyZoomOut, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 204, 90, 12, 0xFFFF, 0x0082, L"Open file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 202, 70, 14, kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 218, 90, 12, 0xFFFF, 0x0082, L"Exit");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 216, 70, 14, kIdKeyExit, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 232, 90, 12, 0xFFFF, 0x0082, L"Always on Top");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 230, 70, 14, kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 272, 40, 14, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 272, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 252, 40, 14, IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 252, 40, 14, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
