@@ -2706,7 +2706,7 @@ void Render(HWND hwnd)
         g_renderTarget->BeginDraw();
         g_renderTarget->Clear(D2D1::ColorF(0.121568f, 0.121568f, 0.121568f));
 
-        const wchar_t* placeholderText = L"Drop image here";
+        const wchar_t* placeholderText = L"Drop file here";
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
         D2D1_RECT_F textRect = D2D1::RectF(
             0.0f,
