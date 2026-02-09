@@ -1002,6 +1002,11 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
+    if (!g_imageHasAlpha)
+    {
+        g_imageHasAlpha = ImageHasTransparency(converterStraight);
+    }
+
     hr = g_wicFactory->CreateFormatConverter(&converterPremultiplied);
     if (FAILED(hr)) goto cleanup;
 
@@ -1020,7 +1025,7 @@ bool LoadImageFromFile(const wchar_t* path)
     );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
-        converterStraight,
+        converterPremultiplied,
         &bitmapProperties,
         &g_bitmap
     );
@@ -1326,6 +1331,46 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     if (componentInfo) componentInfo->Release();
 
     return hasAlpha;
+}
+
+bool ImageHasTransparency(IWICBitmapSource* source)
+{
+    if (!source)
+    {
+        return false;
+    }
+
+    UINT width = 0;
+    UINT height = 0;
+    HRESULT hr = source->GetSize(&width, &height);
+    if (FAILED(hr) || width == 0 || height == 0)
+    {
+        return false;
+    }
+
+    const UINT stride = width * 4;
+    std::vector<BYTE> row(stride);
+    WICRect rect{ 0, 0, static_cast<INT>(width), 1 };
+
+    for (UINT y = 0; y < height; ++y)
+    {
+        rect.Y = static_cast<INT>(y);
+        hr = source->CopyPixels(&rect, stride, stride, row.data());
+        if (FAILED(hr))
+        {
+            return false;
+        }
+        for (UINT x = 0; x < width; ++x)
+        {
+            BYTE alpha = row[x * 4 + 3];
+            if (alpha < 255)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void ApplyTransparencyMode()
