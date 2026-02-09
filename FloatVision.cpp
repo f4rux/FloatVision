@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <cwctype>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <wrl.h>
 #include <WebView2.h>
@@ -1384,6 +1385,215 @@ bool LoadTextFromFile(const wchar_t* path)
     HideWebView();
     ApplyTransparencyMode();
     return true;
+}
+
+std::wstring TrimString(const std::wstring& value)
+{
+    size_t start = 0;
+    while (start < value.size() && iswspace(value[start]))
+    {
+        ++start;
+    }
+    size_t end = value.size();
+    while (end > start && iswspace(value[end - 1]))
+    {
+        --end;
+    }
+    return value.substr(start, end - start);
+}
+
+std::wstring NormalizeSettingKey(const std::wstring& key)
+{
+    std::wstring result;
+    result.reserve(key.size());
+    for (wchar_t ch : key)
+    {
+        if (ch == L' ' || ch == L'_' || ch == L'-' || ch == L'\t')
+        {
+            continue;
+        }
+        result.push_back(static_cast<wchar_t>(towlower(ch)));
+    }
+    return result;
+}
+
+bool TryParseMarkdownLine(const std::wstring& line, std::wstring& key, std::wstring& value)
+{
+    std::wstring trimmed = TrimString(line);
+    if (trimmed.empty())
+    {
+        return false;
+    }
+    if (trimmed[0] == L'-' || trimmed[0] == L'*')
+    {
+        trimmed = TrimString(trimmed.substr(1));
+    }
+    size_t pipePos = trimmed.find(L'|');
+    if (pipePos != std::wstring::npos)
+    {
+        std::vector<std::wstring> columns;
+        std::wstring current;
+        for (wchar_t ch : trimmed)
+        {
+            if (ch == L'|')
+            {
+                columns.push_back(TrimString(current));
+                current.clear();
+            }
+            else
+            {
+                current.push_back(ch);
+            }
+        }
+        columns.push_back(TrimString(current));
+        std::wstring first;
+        std::wstring second;
+        for (const auto& column : columns)
+        {
+            if (column.empty())
+            {
+                continue;
+            }
+            if (first.empty())
+            {
+                first = column;
+            }
+            else
+            {
+                second = column;
+                break;
+            }
+        }
+        if (!first.empty() && !second.empty())
+        {
+            key = first;
+            value = second;
+            return true;
+        }
+        return false;
+    }
+
+    size_t colonPos = trimmed.find(L':');
+    if (colonPos != std::wstring::npos)
+    {
+        key = TrimString(trimmed.substr(0, colonPos));
+        value = TrimString(trimmed.substr(colonPos + 1));
+        return !(key.empty() || value.empty());
+    }
+    return false;
+}
+
+bool TryParseBoolValue(const std::wstring& value, bool& outValue)
+{
+    std::wstring lowered;
+    lowered.reserve(value.size());
+    for (wchar_t ch : value)
+    {
+        lowered.push_back(static_cast<wchar_t>(towlower(ch)));
+    }
+    lowered = TrimString(lowered);
+    if (lowered == L"1" || lowered == L"true" || lowered == L"yes" || lowered == L"on")
+    {
+        outValue = true;
+        return true;
+    }
+    if (lowered == L"0" || lowered == L"false" || lowered == L"no" || lowered == L"off")
+    {
+        outValue = false;
+        return true;
+    }
+    return false;
+}
+
+bool TryParseColorValue(const std::wstring& value, COLORREF& outColor)
+{
+    std::wstring trimmed = TrimString(value);
+    if (trimmed.empty())
+    {
+        return false;
+    }
+    if (trimmed[0] == L'#' && trimmed.size() == 7)
+    {
+        wchar_t* endPtr = nullptr;
+        unsigned long rgb = std::wcstoul(trimmed.c_str() + 1, &endPtr, 16);
+        if (endPtr && *endPtr == L'\0')
+        {
+            BYTE r = static_cast<BYTE>((rgb >> 16) & 0xFF);
+            BYTE g = static_cast<BYTE>((rgb >> 8) & 0xFF);
+            BYTE b = static_cast<BYTE>(rgb & 0xFF);
+            outColor = RGB(r, g, b);
+            return true;
+        }
+        return false;
+    }
+    wchar_t* endPtr = nullptr;
+    unsigned long valueNum = std::wcstoul(trimmed.c_str(), &endPtr, 0);
+    if (endPtr && *endPtr == L'\0')
+    {
+        outColor = static_cast<COLORREF>(valueNum);
+        return true;
+    }
+    return false;
+}
+
+void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
+{
+    std::string bytes;
+    if (!ReadFileBytes(path.c_str(), bytes))
+    {
+        return;
+    }
+
+    std::wstring content;
+    if (!Utf8ToWide(bytes, content))
+    {
+        return;
+    }
+
+    std::wstringstream stream(content);
+    std::wstring line;
+    while (std::getline(stream, line))
+    {
+        std::wstring key;
+        std::wstring value;
+        if (!TryParseMarkdownLine(line, key, value))
+        {
+            continue;
+        }
+        std::wstring normalized = NormalizeSettingKey(key);
+        if (normalized == L"font")
+        {
+            std::wstring fontName = TrimString(value);
+            if (!fontName.empty())
+            {
+                g_textFontName = std::move(fontName);
+            }
+        }
+        else if (normalized == L"fontcolor")
+        {
+            COLORREF color = g_textColor;
+            if (TryParseColorValue(value, color))
+            {
+                g_textColor = color;
+            }
+        }
+        else if (normalized == L"background")
+        {
+            COLORREF color = g_textBackground;
+            if (TryParseColorValue(value, color))
+            {
+                g_textBackground = color;
+            }
+        }
+        else if (normalized == L"wrap")
+        {
+            bool wrapValue = g_textWrap;
+            if (TryParseBoolValue(value, wrapValue))
+            {
+                g_textWrap = wrapValue;
+            }
+        }
+    }
 }
 
 std::wstring InjectHtmlBaseStyles(const std::wstring& html)
@@ -3048,6 +3258,22 @@ void LoadSettings()
     g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
     GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
     g_textWrap = (_wtoi(buffer) != 0);
+
+    std::filesystem::path markdownPath(g_iniPath);
+    markdownPath.replace_extension(L".md");
+    std::error_code error;
+    if (std::filesystem::exists(markdownPath, error))
+    {
+        LoadTextSettingsFromMarkdown(markdownPath);
+    }
+    else
+    {
+        markdownPath.replace_extension(L".markdown");
+        if (std::filesystem::exists(markdownPath, error))
+        {
+            LoadTextSettingsFromMarkdown(markdownPath);
+        }
+    }
 
     g_keyNextFile = readKeySetting(L"NextFile", VK_RIGHT);
     g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
