@@ -144,6 +144,36 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
     };
     switch (msg)
     {
+    case WM_GETDLGCODE:
+    {
+        if (isHotkeyClass())
+        {
+            return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
+        }
+        break;
+    }
+    case WM_KEYDOWN:
+    {
+        if (wParam == VK_ESCAPE)
+        {
+            HWND target = hwnd;
+            wchar_t className[64]{};
+            if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") != 0)
+            {
+                HWND parent = GetParent(hwnd);
+                if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                    && wcscmp(className, L"msctls_hotkey32") == 0)
+                {
+                    target = parent;
+                }
+            }
+            SendMessage(target, HKM_SETHOTKEY, MAKEWORD(VK_ESCAPE, 0), 0);
+            InvalidateRect(target, nullptr, TRUE);
+            return 0;
+        }
+        break;
+    }
     case WM_ERASEBKGND:
     {
         if (isHotkeyClass())
@@ -2196,8 +2226,55 @@ void ShowSettingsDialog(HWND hwnd)
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
         auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
+        auto isHotkeyFocus = [dlg]() -> bool
+        {
+            HWND focus = GetFocus();
+            if (!focus)
+            {
+                return false;
+            }
+            wchar_t className[64]{};
+            if (GetClassName(focus, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") == 0)
+            {
+                return true;
+            }
+            HWND parent = GetParent(focus);
+            if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                && wcscmp(className, L"msctls_hotkey32") == 0)
+            {
+                return true;
+            }
+            return false;
+        };
         switch (msg)
         {
+        case WM_KEYDOWN:
+        {
+            if (wParam == VK_ESCAPE)
+            {
+                HWND focus = GetFocus();
+                if (focus && isHotkeyFocus())
+                {
+                    HWND target = focus;
+                    wchar_t className[64]{};
+                    if (GetClassName(target, className, static_cast<int>(std::size(className))) != 0
+                        && wcscmp(className, L"msctls_hotkey32") != 0)
+                    {
+                        HWND parent = GetParent(target);
+                        if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                            && wcscmp(className, L"msctls_hotkey32") == 0)
+                        {
+                            target = parent;
+                        }
+                    }
+                    SendMessage(target, HKM_SETHOTKEY, MAKEWORD(VK_ESCAPE, 0), 0);
+                    InvalidateRect(target, nullptr, TRUE);
+                    return TRUE;
+                }
+            }
+            break;
+        }
         case WM_INITDIALOG:
         {
             SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
@@ -2246,42 +2323,6 @@ void ShowSettingsDialog(HWND hwnd)
                 clearHotkeyTheme(kIdKeyOpen);
                 clearHotkeyTheme(kIdKeyExit);
                 clearHotkeyTheme(kIdKeyAlwaysOnTop);
-                subclassHotkey(GetDlgItem(dlg, kIdKeyNext));
-                subclassHotkey(GetDlgItem(dlg, kIdKeyPrev));
-                subclassHotkey(GetDlgItem(dlg, kIdKeyZoomIn));
-                subclassHotkey(GetDlgItem(dlg, kIdKeyZoomOut));
-                subclassHotkey(GetDlgItem(dlg, kIdKeyOpen));
-                subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
-                subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
-                EnumChildWindows(dlg, [](HWND hwnd, LPARAM refData) -> BOOL
-                {
-                    auto* state = reinterpret_cast<DialogState*>(refData);
-                    if (!state)
-                    {
-                        return TRUE;
-                    }
-                    wchar_t className[64]{};
-                    if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) == 0)
-                    {
-                        return TRUE;
-                    }
-                    if (wcscmp(className, L"msctls_hotkey32") == 0)
-                    {
-                        EnumChildWindows(hwnd, [](HWND child, LPARAM ref) -> BOOL
-                        {
-                            auto* dialogStateChild = reinterpret_cast<DialogState*>(ref);
-                            if (!dialogStateChild)
-                            {
-                                return TRUE;
-                            }
-                            auto* colors = new HotkeyColors{ dialogStateChild->dialogTextColor, dialogStateChild->controlBackgroundColor,
-                                CreateSolidBrush(dialogStateChild->controlBackgroundColor) };
-                            SetWindowSubclass(child, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(colors));
-                            return TRUE;
-                        }, reinterpret_cast<LPARAM>(state));
-                    }
-                    return TRUE;
-                }, reinterpret_cast<LPARAM>(dialogState));
             }
             else
             {
@@ -2293,6 +2334,42 @@ void ShowSettingsDialog(HWND hwnd)
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
             }
+            subclassHotkey(GetDlgItem(dlg, kIdKeyNext));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyPrev));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyZoomIn));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyZoomOut));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyOpen));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
+            EnumChildWindows(dlg, [](HWND hwnd, LPARAM refData) -> BOOL
+            {
+                auto* state = reinterpret_cast<DialogState*>(refData);
+                if (!state)
+                {
+                    return TRUE;
+                }
+                wchar_t className[64]{};
+                if (GetClassName(hwnd, className, static_cast<int>(std::size(className))) == 0)
+                {
+                    return TRUE;
+                }
+                if (wcscmp(className, L"msctls_hotkey32") == 0)
+                {
+                    EnumChildWindows(hwnd, [](HWND child, LPARAM ref) -> BOOL
+                    {
+                        auto* dialogStateChild = reinterpret_cast<DialogState*>(ref);
+                        if (!dialogStateChild)
+                        {
+                            return TRUE;
+                        }
+                        auto* colors = new HotkeyColors{ dialogStateChild->dialogTextColor, dialogStateChild->controlBackgroundColor,
+                            CreateSolidBrush(dialogStateChild->controlBackgroundColor) };
+                        SetWindowSubclass(child, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(colors));
+                        return TRUE;
+                    }, reinterpret_cast<LPARAM>(state));
+                }
+                return TRUE;
+            }, reinterpret_cast<LPARAM>(dialogState));
             SetWindowTheme(GetDlgItem(dlg, kIdWrap), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdColor), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdFont), themeName, nullptr);
@@ -2598,6 +2675,10 @@ void ShowSettingsDialog(HWND hwnd)
             }
             if (id == IDCANCEL)
             {
+                if (isHotkeyFocus())
+                {
+                    return TRUE;
+                }
                 EndDialog(dlg, IDCANCEL);
                 return TRUE;
             }
