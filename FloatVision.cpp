@@ -100,6 +100,7 @@ WORD g_keyZoomOut = VK_DOWN;
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
 WORD g_keyAlwaysOnTop = 'P';
+WORD g_keyReload = 'R';
 
 enum class TransparencyMode
 {
@@ -331,6 +332,7 @@ constexpr int kMenuOriginalSize = 1007;
 constexpr int kMenuAlwaysOnTop = 1008;
 constexpr int kMenuExit = 1009;
 constexpr int kMenuSettings = 1010;
+constexpr int kMenuReload = 1011;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -394,6 +396,7 @@ void UpdateWebViewBounds();
 void HideWebView();
 void CloseWebView();
 void RefreshMenuTheme();
+void ReloadCurrentFile(bool reloadSettings);
 #endif
 
 bool IsImageFile(const std::filesystem::path& path)
@@ -580,6 +583,7 @@ LRESULT CALLBACK WndProc(
     {
         HMENU menu = CreatePopupMenu();
         AppendMenu(menu, MF_STRING, kMenuOpen, L"Open...");
+        AppendMenu(menu, MF_STRING, kMenuReload, L"Reload");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuPrev, L"Previous");
         AppendMenu(menu, MF_STRING, kMenuNext, L"Next");
@@ -669,6 +673,9 @@ LRESULT CALLBACK WndProc(
             return 0;
         case kMenuSettings:
             ShowSettingsDialog(hwnd);
+            return 0;
+        case kMenuReload:
+            ReloadCurrentFile(true);
             return 0;
         case kMenuExit:
             DestroyWindow(hwnd);
@@ -865,6 +872,11 @@ LRESULT CALLBACK WndProc(
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
+            return 0;
+        }
+        if (key == g_keyReload)
+        {
+            ReloadCurrentFile(true);
             return 0;
         }
         if (key == g_keyOpenFile)
@@ -2658,6 +2670,7 @@ namespace
     constexpr int kIdKeyOpen = 2105;
     constexpr int kIdKeyExit = 2106;
     constexpr int kIdKeyAlwaysOnTop = 2107;
+    constexpr int kIdKeyReload = 2108;
 }
 
 enum class PreferredAppMode
@@ -2831,7 +2844,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(248));
-    appendWord(tmpl, scale(294));
+    appendWord(tmpl, scale(310));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -2848,7 +2861,7 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(106), scale(90), scale(16), kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(16), scale(108), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(134), scale(232), scale(129), 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(134), scale(232), scale(145), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(150), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(148), scale(88), scale(12), kIdKeyNext, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(166), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
@@ -2864,8 +2877,11 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(246), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(244), scale(88), scale(12), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(270), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(270), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(262), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(260), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(286), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(286), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -2884,13 +2900,14 @@ void ShowSettingsDialog(HWND hwnd)
         WORD keyOpen;
         WORD keyExit;
         WORD keyAlwaysOnTop;
+        WORD keyReload;
         HBRUSH dialogBrush;
         HBRUSH controlBrush;
         COLORREF dialogBackgroundColor;
         COLORREF controlBackgroundColor;
         COLORREF dialogTextColor;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontFaceName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
-        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop,
+        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyReload,
         nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
@@ -2993,6 +3010,7 @@ void ShowSettingsDialog(HWND hwnd)
                 clearHotkeyTheme(kIdKeyOpen);
                 clearHotkeyTheme(kIdKeyExit);
                 clearHotkeyTheme(kIdKeyAlwaysOnTop);
+                clearHotkeyTheme(kIdKeyReload);
             }
             else
             {
@@ -3003,6 +3021,7 @@ void ShowSettingsDialog(HWND hwnd)
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyReload), themeName, nullptr);
             }
             subclassHotkey(GetDlgItem(dlg, kIdKeyNext));
             subclassHotkey(GetDlgItem(dlg, kIdKeyPrev));
@@ -3011,6 +3030,7 @@ void ShowSettingsDialog(HWND hwnd)
             subclassHotkey(GetDlgItem(dlg, kIdKeyOpen));
             subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
             subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyReload));
             EnumChildWindows(dlg, [](HWND hwnd, LPARAM refData) -> BOOL
             {
                 auto* state = reinterpret_cast<DialogState*>(refData);
@@ -3082,6 +3102,7 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdKeyOpen, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyExit, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyAlwaysOnTop, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyReload, HKM_SETHOTKEY, MAKEWORD(dialogState->keyReload, 0), 0);
             return TRUE;
         }
         case WM_CTLCOLORDLG:
@@ -3346,6 +3367,7 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->keyOpen = readHotKey(kIdKeyOpen, dialogState->keyOpen);
                 dialogState->keyExit = readHotKey(kIdKeyExit, dialogState->keyExit);
                 dialogState->keyAlwaysOnTop = readHotKey(kIdKeyAlwaysOnTop, dialogState->keyAlwaysOnTop);
+                dialogState->keyReload = readHotKey(kIdKeyReload, dialogState->keyReload);
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
@@ -3389,12 +3411,13 @@ void ShowSettingsDialog(HWND hwnd)
         g_keyOpenFile = state.keyOpen;
         g_keyExit = state.keyExit;
         g_keyAlwaysOnTop = state.keyAlwaysOnTop;
+        g_keyReload = state.keyReload;
         SaveSettings();
         ApplyTransparencyMode();
         UpdateTextFormat();
         UpdateTextBrush();
         UpdateWebViewInputState();
-        InvalidateRect(hwnd, nullptr, TRUE);
+        ReloadCurrentFile(false);
     }
 }
 void NavigateImage(int delta)
@@ -3408,6 +3431,43 @@ void NavigateImage(int delta)
     size_t index = (g_currentIndex + count + (delta % static_cast<int>(count))) % count;
     if (LoadImageByIndex(index) && g_hwnd)
     {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+}
+
+void ReloadCurrentFile(bool reloadSettings)
+{
+    bool wasFitToWindow = g_fitToWindow;
+    float previousZoom = g_zoom;
+    bool wasImage = !g_currentImagePath.empty() && IsImageFile(g_currentImagePath);
+    if (reloadSettings)
+    {
+        LoadSettings();
+        ApplyAlwaysOnTop();
+        ApplyTransparencyMode();
+        UpdateTextFormat();
+        UpdateTextBrush();
+        UpdateWebViewInputState();
+    }
+    if (g_currentImagePath.empty())
+    {
+        return;
+    }
+    RefreshImageList(g_currentImagePath);
+    if (LoadImageByIndex(g_currentIndex) && g_hwnd)
+    {
+        if (wasImage)
+        {
+            if (wasFitToWindow)
+            {
+                UpdateFitZoomFromWindow(g_hwnd);
+            }
+            else
+            {
+                g_zoom = previousZoom;
+            }
+            UpdateWindowToZoomedImage();
+        }
         InvalidateRect(g_hwnd, nullptr, TRUE);
     }
 }
@@ -3778,6 +3838,7 @@ void LoadSettings()
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
     g_keyAlwaysOnTop = readKeySetting(L"AlwaysOnTop", 'P');
+    g_keyReload = readKeySetting(L"Reload", 'R');
 }
 
 void SaveSettings()
@@ -3830,6 +3891,8 @@ void SaveSettings()
     WritePrivateProfileStringW(L"KeyConfig", L"Exit", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyAlwaysOnTop));
     WritePrivateProfileStringW(L"KeyConfig", L"AlwaysOnTop", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyReload));
+    WritePrivateProfileStringW(L"KeyConfig", L"Reload", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
