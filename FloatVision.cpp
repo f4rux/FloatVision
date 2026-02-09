@@ -1029,6 +1029,17 @@ bool LoadImageFromFile(const wchar_t* path)
         &bitmapProperties,
         &g_bitmap
     );
+    if (FAILED(hr))
+    {
+        bitmapProperties = D2D1::BitmapProperties(
+            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+        );
+        hr = g_renderTarget->CreateBitmapFromWicBitmap(
+            converterPremultiplied,
+            &bitmapProperties,
+            &g_bitmap
+        );
+    }
     if (SUCCEEDED(hr))
     {
         g_wicSourceStraight = converterStraight;
