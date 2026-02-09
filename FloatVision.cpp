@@ -2241,6 +2241,32 @@ void ShowSettingsDialog(HWND hwnd)
         };
         switch (msg)
         {
+        case WM_KEYDOWN:
+        {
+            if (wParam == VK_ESCAPE)
+            {
+                HWND focus = GetFocus();
+                if (focus && isHotkeyFocus())
+                {
+                    HWND target = focus;
+                    wchar_t className[64]{};
+                    if (GetClassName(target, className, static_cast<int>(std::size(className))) != 0
+                        && wcscmp(className, L"msctls_hotkey32") != 0)
+                    {
+                        HWND parent = GetParent(target);
+                        if (parent && GetClassName(parent, className, static_cast<int>(std::size(className))) != 0
+                            && wcscmp(className, L"msctls_hotkey32") == 0)
+                        {
+                            target = parent;
+                        }
+                    }
+                    SendMessage(target, HKM_SETHOTKEY, MAKEWORD(VK_ESCAPE, 0), 0);
+                    InvalidateRect(target, nullptr, TRUE);
+                    return TRUE;
+                }
+            }
+            break;
+        }
         case WM_INITDIALOG:
         {
             SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
