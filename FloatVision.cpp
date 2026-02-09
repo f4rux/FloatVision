@@ -6,6 +6,7 @@
 #include <dwrite.h>
 #include <shellapi.h>
 #include <commdlg.h>
+#include <commctrl.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -24,6 +25,7 @@
 #pragma comment(lib, "d2d1.lib")
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "dwrite.lib")
+#pragma comment(lib, "Comctl32.lib")
 
 #ifndef FLOATVISION_GLOBALS_DEFINED
 #define FLOATVISION_GLOBALS_DEFINED
@@ -82,6 +84,12 @@ enum class HtmlInputKey
     Alt = 2
 };
 HtmlInputKey g_htmlInputKey = HtmlInputKey::Alt;
+WORD g_keyNextFile = VK_RIGHT;
+WORD g_keyPrevFile = VK_LEFT;
+WORD g_keyZoomIn = VK_UP;
+WORD g_keyZoomOut = VK_DOWN;
+WORD g_keyOpenFile = 'O';
+WORD g_keyExit = VK_ESCAPE;
 
 enum class TransparencyMode
 {
@@ -626,6 +634,24 @@ LRESULT CALLBACK WndProc(
 
     case WM_KEYDOWN:
     {
+        WORD key = static_cast<WORD>(wParam);
+        if (key == g_keyExit)
+        {
+            DestroyWindow(hwnd);
+            return 0;
+        }
+        if (key == g_keyOpenFile)
+        {
+            if (ShowOpenImageDialog(hwnd))
+            {
+                if (g_bitmap && !g_hasHtml)
+                {
+                    UpdateZoomToFitScreen(hwnd);
+                }
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+            return 0;
+        }
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
@@ -635,26 +661,26 @@ LRESULT CALLBACK WndProc(
             }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
-        if ((wParam == VK_UP || wParam == VK_DOWN) && g_hasText)
+        if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
-            float delta = (wParam == VK_UP) ? -40.0f : 40.0f;
+            float delta = (key == g_keyZoomIn) ? -40.0f : 40.0f;
             ScrollTextBy(delta);
             InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
         }
-        if (wParam == VK_RIGHT && !g_imageList.empty())
+        if (key == g_keyNextFile && !g_imageList.empty())
         {
             NavigateImage(1);
             return 0;
         }
-        if (wParam == VK_LEFT && !g_imageList.empty())
+        if (key == g_keyPrevFile && !g_imageList.empty())
         {
             NavigateImage(-1);
             return 0;
         }
-        if ((wParam == VK_UP || wParam == VK_DOWN) && g_bitmap)
+        if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_bitmap)
         {
-            float factor = (wParam == VK_UP) ? 1.1f : (1.0f / 1.1f);
+            float factor = (key == g_keyZoomIn) ? 1.1f : (1.0f / 1.1f);
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(factor, pt);
@@ -1736,6 +1762,12 @@ void ShowSettingsDialog(HWND hwnd)
     const int kIdFontColor = 2006;
     const int kIdBackColor = 2007;
     const int kIdWrap = 2008;
+    const int kIdKeyNext = 2101;
+    const int kIdKeyPrev = 2102;
+    const int kIdKeyZoomIn = 2103;
+    const int kIdKeyZoomOut = 2104;
+    const int kIdKeyOpen = 2105;
+    const int kIdKeyExit = 2106;
 
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
@@ -1782,18 +1814,32 @@ void ShowSettingsDialog(HWND hwnd)
         appendString(buffer, text);
         appendWord(buffer, 0);
     };
+    auto addControlWithClassName = [&](std::vector<BYTE>& buffer, DWORD style, short x, short y, short cx, short cy, WORD id, const wchar_t* className, const wchar_t* text)
+    {
+        alignDword(buffer);
+        appendDword(buffer, style);
+        appendDword(buffer, 0);
+        appendWord(buffer, static_cast<WORD>(x));
+        appendWord(buffer, static_cast<WORD>(y));
+        appendWord(buffer, static_cast<WORD>(cx));
+        appendWord(buffer, static_cast<WORD>(cy));
+        appendWord(buffer, id);
+        appendString(buffer, className);
+        appendString(buffer, text);
+        appendWord(buffer, 0);
+    };
 
     std::vector<BYTE> tmpl;
-    tmpl.reserve(512);
+    tmpl.reserve(1024);
 
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 12);
+    appendWord(tmpl, 25);
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
     appendWord(tmpl, 220);
-    appendWord(tmpl, 176);
+    appendWord(tmpl, 278);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -1811,8 +1857,23 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 94, 80, 14, kIdFontColor, 0x0080, L"Font color");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 112, 80, 14, kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 130, 80, 12, kIdWrap, 0x0080, L"Wrap");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 152, 40, 14, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 152, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 154, 208, 98, 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 168, 90, 12, 0xFFFF, 0x0082, L"Next file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 166, 70, 14, kIdKeyNext, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 182, 90, 12, 0xFFFF, 0x0082, L"Previous file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 180, 70, 14, kIdKeyPrev, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 196, 90, 12, 0xFFFF, 0x0082, L"Zoom in");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 194, 70, 14, kIdKeyZoomIn, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 210, 90, 12, 0xFFFF, 0x0082, L"Zoom out");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 208, 70, 14, kIdKeyZoomOut, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 224, 90, 12, 0xFFFF, 0x0082, L"Open file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 222, 70, 14, kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 238, 90, 12, 0xFFFF, 0x0082, L"Exit");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 236, 70, 14, kIdKeyExit, L"msctls_hotkey32", L"");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 258, 40, 14, IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 258, 40, 14, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -1823,7 +1884,14 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF fontColor;
         COLORREF backgroundColor;
         bool wrap;
-    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap };
+        WORD keyNext;
+        WORD keyPrev;
+        WORD keyZoomIn;
+        WORD keyZoomOut;
+        WORD keyOpen;
+        WORD keyExit;
+    } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
+        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
@@ -1839,6 +1907,12 @@ void ShowSettingsDialog(HWND hwnd)
             CheckRadioButton(dlg, 2001, 2003, radioId);
             EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
             CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
+            SendDlgItemMessage(dlg, 2101, HKM_SETHOTKEY, MAKEWORD(dialogState->keyNext, 0), 0);
+            SendDlgItemMessage(dlg, 2102, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
+            SendDlgItemMessage(dlg, 2103, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomIn, 0), 0);
+            SendDlgItemMessage(dlg, 2104, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomOut, 0), 0);
+            SendDlgItemMessage(dlg, 2105, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
+            SendDlgItemMessage(dlg, 2106, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
             return TRUE;
         }
         case WM_COMMAND:
@@ -1903,6 +1977,12 @@ void ShowSettingsDialog(HWND hwnd)
             }
             if (id == IDOK)
             {
+                auto readHotKey = [&](int controlId, WORD fallback)
+                {
+                    DWORD value = static_cast<DWORD>(SendDlgItemMessage(dlg, controlId, HKM_GETHOTKEY, 0, 0));
+                    WORD key = LOBYTE(value);
+                    return key != 0 ? key : fallback;
+                };
                 if (IsDlgButtonChecked(dlg, 2001) == BST_CHECKED)
                 {
                     dialogState->mode = TransparencyMode::Transparent;
@@ -1916,6 +1996,12 @@ void ShowSettingsDialog(HWND hwnd)
                     dialogState->mode = TransparencyMode::SolidColor;
                 }
                 dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
+                dialogState->keyNext = readHotKey(2101, dialogState->keyNext);
+                dialogState->keyPrev = readHotKey(2102, dialogState->keyPrev);
+                dialogState->keyZoomIn = readHotKey(2103, dialogState->keyZoomIn);
+                dialogState->keyZoomOut = readHotKey(2104, dialogState->keyZoomOut);
+                dialogState->keyOpen = readHotKey(2105, dialogState->keyOpen);
+                dialogState->keyExit = readHotKey(2106, dialogState->keyExit);
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
@@ -1947,6 +2033,12 @@ void ShowSettingsDialog(HWND hwnd)
         g_textColor = state.fontColor;
         g_textBackground = state.backgroundColor;
         g_textWrap = state.wrap;
+        g_keyNextFile = state.keyNext;
+        g_keyPrevFile = state.keyPrev;
+        g_keyZoomIn = state.keyZoomIn;
+        g_keyZoomOut = state.keyZoomOut;
+        g_keyOpenFile = state.keyOpen;
+        g_keyExit = state.keyExit;
         SaveSettings();
         ApplyTransparencyMode();
         UpdateTextFormat();
@@ -2209,6 +2301,18 @@ void LoadSettings()
     }
 
     wchar_t buffer[128]{};
+    auto readKeySetting = [&](const wchar_t* keyName, WORD defaultKey)
+    {
+        wchar_t keyBuffer[16]{};
+        _snwprintf_s(keyBuffer, _TRUNCATE, L"%u", static_cast<unsigned int>(defaultKey));
+        GetPrivateProfileStringW(L"KeyConfig", keyName, keyBuffer, buffer, 32, g_iniPath.c_str());
+        int value = _wtoi(buffer);
+        if (value <= 0 || value > 0xFE)
+        {
+            return defaultKey;
+        }
+        return static_cast<WORD>(value);
+    };
     GetPrivateProfileStringW(L"Settings", L"SortMode", L"0", buffer, 32, g_iniPath.c_str());
     int sortValue = _wtoi(buffer);
     if (sortValue < 0 || sortValue > 3)
@@ -2248,6 +2352,13 @@ void LoadSettings()
     g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
     GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
     g_textWrap = (_wtoi(buffer) != 0);
+
+    g_keyNextFile = readKeySetting(L"NextFile", VK_RIGHT);
+    g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
+    g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
+    g_keyZoomOut = readKeySetting(L"ZoomOut", VK_DOWN);
+    g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
+    g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
 }
 
 void SaveSettings()
@@ -2279,6 +2390,19 @@ void SaveSettings()
     WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
     WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
+
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyNextFile));
+    WritePrivateProfileStringW(L"KeyConfig", L"NextFile", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyPrevFile));
+    WritePrivateProfileStringW(L"KeyConfig", L"PrevFile", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyZoomIn));
+    WritePrivateProfileStringW(L"KeyConfig", L"ZoomIn", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyZoomOut));
+    WritePrivateProfileStringW(L"KeyConfig", L"ZoomOut", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyOpenFile));
+    WritePrivateProfileStringW(L"KeyConfig", L"OpenFile", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyExit));
+    WritePrivateProfileStringW(L"KeyConfig", L"Exit", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
@@ -2614,6 +2738,10 @@ int WINAPI wWinMain(
 {
     SetProcessDPIAware();
     CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    INITCOMMONCONTROLSEX icc{};
+    icc.dwSize = sizeof(icc);
+    icc.dwICC = ICC_WIN95_CLASSES;
+    InitCommonControlsEx(&icc);
 
     const wchar_t CLASS_NAME[] = L"FloatVisionWindow";
 
