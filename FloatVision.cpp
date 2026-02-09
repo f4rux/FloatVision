@@ -379,7 +379,9 @@ bool LoadHtmlFromFile(const wchar_t* path);
 bool LoadMarkdownFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
+bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
+std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
@@ -1327,6 +1329,59 @@ bool ReadFileBytes(const wchar_t* path, std::string& bytes)
     return true;
 }
 
+bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes)
+{
+    std::ifstream file(path, std::ios::binary);
+    if (!file)
+    {
+        return false;
+    }
+    bytes.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return true;
+}
+
+bool TryGetIniValueFromContent(const std::wstring& content, const std::wstring& section, const std::wstring& key, std::wstring& value)
+{
+    std::wstringstream stream(content);
+    std::wstring line;
+    bool inSection = false;
+    std::wstring sectionHeader = L"[" + section + L"]";
+    while (std::getline(stream, line))
+    {
+        std::wstring trimmed = TrimString(line);
+        if (trimmed.empty())
+        {
+            continue;
+        }
+        if (trimmed[0] == L';' || trimmed[0] == L'#')
+        {
+            continue;
+        }
+        if (trimmed.front() == L'[' && trimmed.back() == L']')
+        {
+            inSection = (_wcsicmp(trimmed.c_str(), sectionHeader.c_str()) == 0);
+            continue;
+        }
+        if (!inSection)
+        {
+            continue;
+        }
+        size_t eqPos = trimmed.find(L'=');
+        if (eqPos == std::wstring::npos)
+        {
+            continue;
+        }
+        std::wstring foundKey = TrimString(trimmed.substr(0, eqPos));
+        if (_wcsicmp(foundKey.c_str(), key.c_str()) != 0)
+        {
+            continue;
+        }
+        value = TrimString(trimmed.substr(eqPos + 1));
+        return true;
+    }
+    return false;
+}
+
 bool Utf8ToWide(const std::string& bytes, std::wstring& text)
 {
     if (bytes.empty())
@@ -1343,6 +1398,152 @@ bool Utf8ToWide(const std::string& bytes, std::wstring& text)
 
     text.assign(needed, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), needed);
+    return true;
+}
+
+bool AnsiToWide(const std::string& bytes, std::wstring& text)
+{
+    if (bytes.empty())
+    {
+        text.clear();
+        return true;
+    }
+    int needed = MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()), nullptr, 0);
+    if (needed <= 0)
+    {
+        return false;
+    }
+    text.assign(needed, L'\0');
+    MultiByteToWideChar(CP_ACP, 0, bytes.data(), static_cast<int>(bytes.size()), text.data(), needed);
+    return true;
+}
+
+bool WideToUtf8(const std::wstring& text, std::string& bytes)
+{
+    if (text.empty())
+    {
+        bytes.clear();
+        return true;
+    }
+    int needed = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
+    if (needed <= 0)
+    {
+        return false;
+    }
+    bytes.assign(static_cast<size_t>(needed), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), bytes.data(), needed, nullptr, nullptr);
+    return true;
+}
+
+bool UpdateIniValue(std::wstring& content, const std::wstring& section, const std::wstring& key, const std::wstring& value)
+{
+    std::wstringstream stream(content);
+    std::wstring line;
+    std::vector<std::wstring> lines;
+    bool inSection = false;
+    bool sectionFound = false;
+    bool keyWritten = false;
+    std::wstring sectionHeader = L"[" + section + L"]";
+    while (std::getline(stream, line))
+    {
+        std::wstring trimmed = TrimString(line);
+        if (!trimmed.empty() && trimmed.front() == L'[' && trimmed.back() == L']')
+        {
+            if (inSection && sectionFound && !keyWritten)
+            {
+                lines.push_back(key + L"=" + value);
+                keyWritten = true;
+            }
+            inSection = (_wcsicmp(trimmed.c_str(), sectionHeader.c_str()) == 0);
+            if (inSection)
+            {
+                sectionFound = true;
+            }
+            lines.push_back(line);
+            continue;
+        }
+
+        if (inSection)
+        {
+            size_t eqPos = line.find(L'=');
+            if (eqPos != std::wstring::npos)
+            {
+                std::wstring foundKey = TrimString(line.substr(0, eqPos));
+                if (_wcsicmp(foundKey.c_str(), key.c_str()) == 0)
+                {
+                    lines.push_back(key + L"=" + value);
+                    keyWritten = true;
+                    continue;
+                }
+            }
+        }
+
+        lines.push_back(line);
+    }
+
+    if (!sectionFound)
+    {
+        if (!lines.empty() && !lines.back().empty())
+        {
+            lines.push_back(L"");
+        }
+        lines.push_back(sectionHeader);
+        lines.push_back(key + L"=" + value);
+    }
+    else if (!keyWritten)
+    {
+        lines.push_back(key + L"=" + value);
+    }
+
+    std::wstringstream output;
+    for (size_t i = 0; i < lines.size(); ++i)
+    {
+        output << lines[i];
+        if (i + 1 < lines.size())
+        {
+            output << L"\r\n";
+        }
+    }
+    content = output.str();
+    return true;
+}
+
+bool SaveUtf8IniValue(const std::filesystem::path& path, const std::wstring& section, const std::wstring& key, const std::wstring& value)
+{
+    std::string bytes;
+    std::wstring content;
+    if (ReadFileBytesRaw(path.c_str(), bytes) && !bytes.empty())
+    {
+        if (bytes.size() >= 3
+            && static_cast<unsigned char>(bytes[0]) == 0xEF
+            && static_cast<unsigned char>(bytes[1]) == 0xBB
+            && static_cast<unsigned char>(bytes[2]) == 0xBF)
+        {
+            bytes.erase(0, 3);
+            Utf8ToWide(bytes, content);
+        }
+        else if (!Utf8ToWide(bytes, content))
+        {
+            AnsiToWide(bytes, content);
+        }
+    }
+
+    UpdateIniValue(content, section, key, value);
+
+    std::string utf8Content;
+    if (!WideToUtf8(content, utf8Content))
+    {
+        return false;
+    }
+
+    std::ofstream file(path, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        return false;
+    }
+    const unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+    file.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+    file.write(utf8Content.data(), static_cast<std::streamsize>(utf8Content.size()));
     return true;
 }
 
@@ -1403,6 +1604,26 @@ std::wstring TrimString(const std::wstring& value)
     return value.substr(start, end - start);
 }
 
+std::wstring NormalizeFontName(const std::wstring& value)
+{
+    std::wstring trimmed = TrimString(value);
+    size_t commaPos = trimmed.find(L',');
+    if (commaPos != std::wstring::npos)
+    {
+        trimmed = TrimString(trimmed.substr(0, commaPos));
+    }
+    if (trimmed.size() >= 2)
+    {
+        wchar_t first = trimmed.front();
+        wchar_t last = trimmed.back();
+        if ((first == L'"' && last == L'"') || (first == L'\'' && last == L'\''))
+        {
+            trimmed = TrimString(trimmed.substr(1, trimmed.size() - 2));
+        }
+    }
+    return trimmed;
+}
+
 std::wstring NormalizeSettingKey(const std::wstring& key)
 {
     std::wstring result;
@@ -1416,6 +1637,119 @@ std::wstring NormalizeSettingKey(const std::wstring& key)
         result.push_back(static_cast<wchar_t>(towlower(ch)));
     }
     return result;
+}
+
+struct ResolvedFontInfo
+{
+    std::wstring familyName;
+    DWRITE_FONT_WEIGHT weight = DWRITE_FONT_WEIGHT_REGULAR;
+    DWRITE_FONT_STYLE style = DWRITE_FONT_STYLE_NORMAL;
+    DWRITE_FONT_STRETCH stretch = DWRITE_FONT_STRETCH_NORMAL;
+    bool matched = false;
+};
+
+ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
+{
+    ResolvedFontInfo resolved;
+    if (!factory || name.empty())
+    {
+        resolved.familyName = name;
+        return resolved;
+    }
+    IDWriteFontCollection* collection = nullptr;
+    if (FAILED(factory->GetSystemFontCollection(&collection, FALSE)) || !collection)
+    {
+        resolved.familyName = name;
+        return resolved;
+    }
+
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    if (SUCCEEDED(collection->FindFamilyName(name.c_str(), &index, &exists)) && exists)
+    {
+        resolved.familyName = name;
+        resolved.matched = true;
+        collection->Release();
+        return resolved;
+    }
+
+    UINT32 familyCount = collection->GetFontFamilyCount();
+    for (UINT32 familyIndex = 0; familyIndex < familyCount; ++familyIndex)
+    {
+        IDWriteFontFamily* family = nullptr;
+        if (FAILED(collection->GetFontFamily(familyIndex, &family)) || !family)
+        {
+            continue;
+        }
+        UINT32 fontCount = family->GetFontCount();
+        bool match = false;
+        for (UINT32 fontIndex = 0; fontIndex < fontCount && !match; ++fontIndex)
+        {
+            IDWriteFont* font = nullptr;
+            if (FAILED(family->GetFont(fontIndex, &font)) || !font)
+            {
+                continue;
+            }
+            IDWriteLocalizedStrings* faceNames = nullptr;
+            if (SUCCEEDED(font->GetFaceNames(&faceNames)) && faceNames)
+            {
+                UINT32 faceCount = faceNames->GetCount();
+                for (UINT32 faceIndex = 0; faceIndex < faceCount; ++faceIndex)
+                {
+                    UINT32 length = 0;
+                    if (FAILED(faceNames->GetStringLength(faceIndex, &length)) || length == 0)
+                    {
+                        continue;
+                    }
+                    std::wstring faceName(length + 1, L'\0');
+                    if (SUCCEEDED(faceNames->GetString(faceIndex, faceName.data(), length + 1)))
+                    {
+                        faceName.resize(length);
+                        if (_wcsicmp(faceName.c_str(), name.c_str()) == 0)
+                        {
+                            match = true;
+                            resolved.weight = font->GetWeight();
+                            resolved.style = font->GetStyle();
+                            resolved.stretch = font->GetStretch();
+                            break;
+                        }
+                    }
+                }
+                faceNames->Release();
+            }
+            font->Release();
+        }
+        if (match)
+        {
+            IDWriteLocalizedStrings* familyNames = nullptr;
+            if (SUCCEEDED(family->GetFamilyNames(&familyNames)) && familyNames)
+            {
+                UINT32 length = 0;
+                if (SUCCEEDED(familyNames->GetStringLength(0, &length)) && length > 0)
+                {
+                    std::wstring familyName(length + 1, L'\0');
+                    if (SUCCEEDED(familyNames->GetString(0, familyName.data(), length + 1)))
+                    {
+                        familyName.resize(length);
+                        resolved.familyName = std::move(familyName);
+                        resolved.matched = true;
+                    }
+                }
+                familyNames->Release();
+            }
+        }
+        if (match && resolved.matched)
+        {
+            family->Release();
+            collection->Release();
+            return resolved;
+        }
+        family->Release();
+    }
+
+    collection->Release();
+    resolved.familyName = name;
+    return resolved;
 }
 
 bool TryParseMarkdownLine(const std::wstring& line, std::wstring& key, std::wstring& value)
@@ -1564,7 +1898,7 @@ void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
         std::wstring normalized = NormalizeSettingKey(key);
         if (normalized == L"font")
         {
-            std::wstring fontName = TrimString(value);
+            std::wstring fontName = NormalizeFontName(value);
             if (!fontName.empty())
             {
                 g_textFontName = std::move(fontName);
@@ -2147,12 +2481,14 @@ void UpdateTextFormat()
         g_textFormat->Release();
         g_textFormat = nullptr;
     }
+    ResolvedFontInfo resolvedFont = ResolveFontInfo(g_dwriteFactory, g_textFontName);
+    const wchar_t* fontName = resolvedFont.familyName.empty() ? g_textFontName.c_str() : resolvedFont.familyName.c_str();
     g_dwriteFactory->CreateTextFormat(
-        g_textFontName.c_str(),
+        fontName,
         nullptr,
-        DWRITE_FONT_WEIGHT_REGULAR,
-        DWRITE_FONT_STYLE_NORMAL,
-        DWRITE_FONT_STRETCH_NORMAL,
+        resolvedFont.weight,
+        resolvedFont.style,
+        resolvedFont.stretch,
         g_textFontSize,
         L"ja-jp",
         &g_textFormat
@@ -3287,10 +3623,38 @@ void LoadSettings()
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
-    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, 32, g_iniPath.c_str());
-    if (buffer[0] != L'\0')
+    std::wstring normalizedFontName;
+    bool loadedUtf8FontName = false;
+    std::string iniBytes;
+    if (ReadFileBytesRaw(g_iniPath.c_str(), iniBytes) && !iniBytes.empty())
     {
-        g_textFontName = buffer;
+        std::string utf8Bytes = iniBytes;
+        if (utf8Bytes.size() >= 3
+            && static_cast<unsigned char>(utf8Bytes[0]) == 0xEF
+            && static_cast<unsigned char>(utf8Bytes[1]) == 0xBB
+            && static_cast<unsigned char>(utf8Bytes[2]) == 0xBF)
+        {
+            utf8Bytes.erase(0, 3);
+        }
+        std::wstring content;
+        if (Utf8ToWide(utf8Bytes, content))
+        {
+            std::wstring value;
+            if (TryGetIniValueFromContent(content, L"Text", L"FontName", value))
+            {
+                normalizedFontName = NormalizeFontName(value);
+                loadedUtf8FontName = !normalizedFontName.empty();
+            }
+        }
+    }
+    if (!loadedUtf8FontName)
+    {
+        GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, static_cast<DWORD>(std::size(buffer)), g_iniPath.c_str());
+        normalizedFontName = NormalizeFontName(buffer);
+    }
+    if (!normalizedFontName.empty())
+    {
+        g_textFontName = std::move(normalizedFontName);
     }
     GetPrivateProfileStringW(L"Text", L"FontSize", L"18", buffer, 32, g_iniPath.c_str());
     g_textFontSize = static_cast<float>(_wtof(buffer));
@@ -3362,6 +3726,8 @@ void SaveSettings()
     WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
     WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
+
+    SaveUtf8IniValue(g_iniPath, L"Text", L"FontName", g_textFontName);
 
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyNextFile));
     WritePrivateProfileStringW(L"KeyConfig", L"NextFile", buffer, g_iniPath.c_str());
