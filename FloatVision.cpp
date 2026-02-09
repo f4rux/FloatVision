@@ -90,6 +90,7 @@ WORD g_keyZoomIn = VK_UP;
 WORD g_keyZoomOut = VK_DOWN;
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
+WORD g_keyAlwaysOnTop = 'P';
 
 enum class TransparencyMode
 {
@@ -638,6 +639,13 @@ LRESULT CALLBACK WndProc(
         if (key == g_keyExit)
         {
             DestroyWindow(hwnd);
+            return 0;
+        }
+        if (key == g_keyAlwaysOnTop)
+        {
+            g_alwaysOnTop = !g_alwaysOnTop;
+            ApplyAlwaysOnTop();
+            SaveSettings();
             return 0;
         }
         if (key == g_keyOpenFile)
@@ -1754,9 +1762,7 @@ void ScrollTextBy(float delta)
 
 void ShowSettingsDialog(HWND hwnd)
 {
-    const int kIdTransparent = 2001;
-    const int kIdChecker = 2002;
-    const int kIdSolid = 2003;
+    const int kIdTransparencySelect = 2001;
     const int kIdColor = 2004;
     const int kIdFont = 2005;
     const int kIdFontColor = 2006;
@@ -1768,6 +1774,7 @@ void ShowSettingsDialog(HWND hwnd)
     const int kIdKeyZoomOut = 2104;
     const int kIdKeyOpen = 2105;
     const int kIdKeyExit = 2106;
+    const int kIdKeyAlwaysOnTop = 2107;
 
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
@@ -1839,7 +1846,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
     appendWord(tmpl, 220);
-    appendWord(tmpl, 278);
+    appendWord(tmpl, 294);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -1847,9 +1854,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendString(tmpl, L"Segoe UI");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 72, 0xFFFF, 0x0080, L"Background of transparent images");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 14, 18, 190, 12, kIdTransparent, 0x0080, L"Transparent (show desktop)");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 14, 32, 190, 12, kIdChecker, 0x0080, L"Checkerboard");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 14, 46, 190, 12, kIdSolid, 0x0080, L"Solid color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 14, 18, 190, 60, kIdTransparencySelect, 0x0085, L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 62, 80, 14, kIdColor, 0x0080, L"Color...");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 80, 208, 70, 0xFFFF, 0x0080, L"Text");
@@ -1858,7 +1863,7 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 112, 80, 14, kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 130, 80, 12, kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 154, 208, 98, 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 154, 208, 112, 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 168, 90, 12, 0xFFFF, 0x0082, L"Next file");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 166, 70, 14, kIdKeyNext, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 182, 90, 12, 0xFFFF, 0x0082, L"Previous file");
@@ -1871,9 +1876,11 @@ void ShowSettingsDialog(HWND hwnd)
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 222, 70, 14, kIdKeyOpen, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 238, 90, 12, 0xFFFF, 0x0082, L"Exit");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 236, 70, 14, kIdKeyExit, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 252, 90, 12, 0xFFFF, 0x0082, L"Always on Top");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 250, 70, 14, kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 258, 40, 14, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 258, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 272, 40, 14, IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 272, 40, 14, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -1890,8 +1897,9 @@ void ShowSettingsDialog(HWND hwnd)
         WORD keyZoomOut;
         WORD keyOpen;
         WORD keyExit;
+        WORD keyAlwaysOnTop;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
-        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit };
+        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
@@ -1902,10 +1910,13 @@ void ShowSettingsDialog(HWND hwnd)
         {
             SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
             dialogState = reinterpret_cast<DialogState*>(lParam);
-            int radioId = (dialogState->mode == TransparencyMode::Transparent) ? 2001
-                : (dialogState->mode == TransparencyMode::Checkerboard) ? 2002 : 2003;
-            CheckRadioButton(dlg, 2001, 2003, radioId);
-            EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+            SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Transparent (show desktop)"));
+            SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Checkerboard"));
+            SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Solid color"));
+            int selection = (dialogState->mode == TransparencyMode::Transparent) ? 0
+                : (dialogState->mode == TransparencyMode::Checkerboard) ? 1 : 2;
+            SendDlgItemMessage(dlg, kIdTransparencySelect, CB_SETCURSEL, selection, 0);
+            EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
             CheckDlgButton(dlg, 2008, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
             SendDlgItemMessage(dlg, 2101, HKM_SETHOTKEY, MAKEWORD(dialogState->keyNext, 0), 0);
             SendDlgItemMessage(dlg, 2102, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
@@ -1913,17 +1924,18 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, 2104, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomOut, 0), 0);
             SendDlgItemMessage(dlg, 2105, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
             SendDlgItemMessage(dlg, 2106, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
+            SendDlgItemMessage(dlg, 2107, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
             return TRUE;
         }
         case WM_COMMAND:
         {
             int id = LOWORD(wParam);
-            if (id == 2001 || id == 2002 || id == 2003)
+            if (id == kIdTransparencySelect && HIWORD(wParam) == CBN_SELCHANGE)
             {
-                dialogState->mode = (id == 2001) ? TransparencyMode::Transparent
-                    : (id == 2002) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
-                CheckRadioButton(dlg, 2001, 2003, id);
-                EnableWindow(GetDlgItem(dlg, 2004), dialogState->mode == TransparencyMode::SolidColor);
+                int selection = static_cast<int>(SendDlgItemMessage(dlg, kIdTransparencySelect, CB_GETCURSEL, 0, 0));
+                dialogState->mode = (selection == 0) ? TransparencyMode::Transparent
+                    : (selection == 1) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
+                EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
                 return TRUE;
             }
             if (id == 2004 || id == 2006 || id == 2007)
@@ -1983,18 +1995,9 @@ void ShowSettingsDialog(HWND hwnd)
                     WORD key = LOBYTE(value);
                     return key != 0 ? key : fallback;
                 };
-                if (IsDlgButtonChecked(dlg, 2001) == BST_CHECKED)
-                {
-                    dialogState->mode = TransparencyMode::Transparent;
-                }
-                else if (IsDlgButtonChecked(dlg, 2002) == BST_CHECKED)
-                {
-                    dialogState->mode = TransparencyMode::Checkerboard;
-                }
-                else
-                {
-                    dialogState->mode = TransparencyMode::SolidColor;
-                }
+                int selection = static_cast<int>(SendDlgItemMessage(dlg, kIdTransparencySelect, CB_GETCURSEL, 0, 0));
+                dialogState->mode = (selection == 0) ? TransparencyMode::Transparent
+                    : (selection == 1) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
                 dialogState->wrap = (IsDlgButtonChecked(dlg, 2008) == BST_CHECKED);
                 dialogState->keyNext = readHotKey(2101, dialogState->keyNext);
                 dialogState->keyPrev = readHotKey(2102, dialogState->keyPrev);
@@ -2002,6 +2005,7 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->keyZoomOut = readHotKey(2104, dialogState->keyZoomOut);
                 dialogState->keyOpen = readHotKey(2105, dialogState->keyOpen);
                 dialogState->keyExit = readHotKey(2106, dialogState->keyExit);
+                dialogState->keyAlwaysOnTop = readHotKey(2107, dialogState->keyAlwaysOnTop);
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
@@ -2039,6 +2043,7 @@ void ShowSettingsDialog(HWND hwnd)
         g_keyZoomOut = state.keyZoomOut;
         g_keyOpenFile = state.keyOpen;
         g_keyExit = state.keyExit;
+        g_keyAlwaysOnTop = state.keyAlwaysOnTop;
         SaveSettings();
         ApplyTransparencyMode();
         UpdateTextFormat();
@@ -2359,6 +2364,7 @@ void LoadSettings()
     g_keyZoomOut = readKeySetting(L"ZoomOut", VK_DOWN);
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
+    g_keyAlwaysOnTop = readKeySetting(L"AlwaysOnTop", 'P');
 }
 
 void SaveSettings()
@@ -2403,6 +2409,8 @@ void SaveSettings()
     WritePrivateProfileStringW(L"KeyConfig", L"OpenFile", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyExit));
     WritePrivateProfileStringW(L"KeyConfig", L"Exit", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyAlwaysOnTop));
+    WritePrivateProfileStringW(L"KeyConfig", L"AlwaysOnTop", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
