@@ -3311,7 +3311,12 @@ void ShowSettingsDialog(HWND hwnd)
                 cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
                 if (ChooseFont(&cf))
                 {
-                    dialogState->fontName = lf.lfFaceName;
+                    std::wstring familyName = GetFontFamilyNameForSave(lf.lfFaceName);
+                    if (familyName.empty())
+                    {
+                        familyName = lf.lfFaceName;
+                    }
+                    dialogState->fontName = std::move(familyName);
                     dialogState->fontFaceName = lf.lfFaceName;
                     dialogState->fontSize = static_cast<float>(std::abs(lf.lfHeight));
                 }
@@ -3798,8 +3803,7 @@ void SaveSettings()
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
     WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
 
-    std::wstring fontNameSource = g_textFontFaceName.empty() ? g_textFontName : g_textFontFaceName;
-    std::wstring fontNameToSave = GetFontFamilyNameForSave(fontNameSource);
+    std::wstring fontNameToSave = GetFontFamilyNameForSave(g_textFontName);
     WritePrivateProfileStringW(L"Text", L"FontName", fontNameToSave.c_str(), g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%.2f", g_textFontSize);
     WritePrivateProfileStringW(L"Text", L"FontSize", buffer, g_iniPath.c_str());
