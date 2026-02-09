@@ -2927,7 +2927,33 @@ int WINAPI wWinMain(
     }
     if (!loadedImage)
     {
-        // 仮画像表示（g_bitmap が未設定のため Render でプレースホルダ表示）
+        bool loadedSkin = false;
+        std::filesystem::path exeDir;
+        wchar_t modulePath[MAX_PATH]{};
+        if (GetModuleFileNameW(nullptr, modulePath, MAX_PATH) > 0)
+        {
+            exeDir = std::filesystem::path(modulePath).parent_path();
+        }
+        if (!exeDir.empty())
+        {
+            std::filesystem::path skinPath = exeDir / L"skin.png";
+            if (std::filesystem::exists(skinPath))
+            {
+                loadedSkin = LoadImageFromFile(skinPath.c_str());
+                if (loadedSkin)
+                {
+                    UpdateZoomToFitScreen(hwnd);
+                }
+            }
+        }
+        if (loadedSkin)
+        {
+            UpdateLayeredStyle(g_imageHasAlpha);
+        }
+        else
+        {
+            // 仮画像表示（g_bitmap が未設定のため Render でプレースホルダ表示）
+        }
     }
     else
     {
