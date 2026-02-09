@@ -1846,7 +1846,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, 9);
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 72, 0xFFFF, 0x0080, L"Transparency");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 72, 0xFFFF, 0x0080, L"Background of transparent images");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON | WS_GROUP, 14, 18, 190, 12, kIdTransparent, 0x0080, L"Transparent (show desktop)");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 14, 32, 190, 12, kIdChecker, 0x0080, L"Checkerboard");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTORADIOBUTTON, 14, 46, 190, 12, kIdSolid, 0x0080, L"Solid color");
