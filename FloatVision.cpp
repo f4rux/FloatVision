@@ -180,10 +180,6 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
             break;
         }
         SetWindowTheme(child, L"", L"");
-        if (wcscmp(className, L"Edit") == 0)
-        {
-            SendMessage(child, EM_SETBKGNDCOLOR, 0, static_cast<LPARAM>(colors->backgroundColor));
-        }
         auto* childColors = new HotkeyColors{ colors->textColor, colors->backgroundColor,
             CreateSolidBrush(colors->backgroundColor) };
         SetWindowSubclass(child, HotkeySubclassProc, 0, reinterpret_cast<DWORD_PTR>(childColors));
