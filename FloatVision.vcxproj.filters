@@ -32,6 +32,9 @@
     <ClCompile Include="FloatVision.cpp">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
+    <ClCompile Include="third_party\md4c\entity.c">
+      <Filter>ソース ファイル</Filter>
+    </ClCompile>
     <ClCompile Include="third_party\md4c\md4c-html.c">
       <Filter>ソース ファイル</Filter>
     </ClCompile>
