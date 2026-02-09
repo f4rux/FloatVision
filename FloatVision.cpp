@@ -2055,15 +2055,43 @@ void ShowSettingsDialog(HWND hwnd)
             dialogState->dialogBrush = CreateSolidBrush(dialogState->dialogBackgroundColor);
             dialogState->controlBrush = CreateSolidBrush(dialogState->controlBackgroundColor);
             const wchar_t* themeName = darkMode ? L"DarkMode_Explorer" : L"Explorer";
-            const wchar_t* hotkeyTheme = darkMode ? L"" : themeName;
+            auto clearHotkeyTheme = [&](int controlId)
+            {
+                HWND hotkey = GetDlgItem(dlg, controlId);
+                if (!hotkey)
+                {
+                    return;
+                }
+                SetWindowTheme(hotkey, L"", L"");
+                EnumChildWindows(hotkey, [](HWND child, LPARAM) -> BOOL
+                {
+                    SetWindowTheme(child, L"", L"");
+                    return TRUE;
+                }, 0);
+                InvalidateRect(hotkey, nullptr, TRUE);
+                UpdateWindow(hotkey);
+            };
             SetWindowTheme(GetDlgItem(dlg, kIdTransparencySelect), themeName, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyNext), hotkeyTheme, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyPrev), hotkeyTheme, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomIn), hotkeyTheme, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomOut), hotkeyTheme, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), hotkeyTheme, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), hotkeyTheme, nullptr);
-            SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), hotkeyTheme, nullptr);
+            if (darkMode)
+            {
+                clearHotkeyTheme(kIdKeyNext);
+                clearHotkeyTheme(kIdKeyPrev);
+                clearHotkeyTheme(kIdKeyZoomIn);
+                clearHotkeyTheme(kIdKeyZoomOut);
+                clearHotkeyTheme(kIdKeyOpen);
+                clearHotkeyTheme(kIdKeyExit);
+                clearHotkeyTheme(kIdKeyAlwaysOnTop);
+            }
+            else
+            {
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyNext), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyPrev), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomIn), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomOut), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
+            }
             SetWindowTheme(GetDlgItem(dlg, kIdWrap), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdColor), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdFont), themeName, nullptr);
