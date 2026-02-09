@@ -1590,6 +1590,8 @@ bool LoadTextFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     HideWebView();
     ApplyTransparencyMode();
+    UpdateTextFormat();
+    UpdateTextBrush();
     return true;
 }
 
