@@ -2027,41 +2027,41 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(248));
-    appendWord(tmpl, scale(320));
+    appendWord(tmpl, scale(294));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
     appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(232), scale(78), 0xFFFF, 0x0080, L"Background of transparent images");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(232), scale(58), 0xFFFF, 0x0080, L"Background of transparent images");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS, scale(16), scale(22), scale(214), scale(80), kIdTransparencySelect, 0x0085, L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(60), scale(90), scale(16), kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(40), scale(90), scale(16), kIdColor, 0x0080, L"Color...");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(90), scale(232), scale(78), 0xFFFF, 0x0080, L"Text");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(106), scale(90), scale(16), kIdFont, 0x0080, L"Font...");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(106), scale(90), scale(16), kIdFontColor, 0x0080, L"Font color");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(126), scale(90), scale(16), kIdBackColor, 0x0080, L"Background");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(16), scale(128), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(70), scale(232), scale(58), 0xFFFF, 0x0080, L"Text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(86), scale(90), scale(16), kIdFont, 0x0080, L"Font...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(86), scale(90), scale(16), kIdFontColor, 0x0080, L"Font color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(106), scale(90), scale(16), kIdBackColor, 0x0080, L"Background");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(16), scale(108), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(174), scale(232), scale(124), 0xFFFF, 0x0080, L"Key Config");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(190), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(188), scale(88), scale(14), kIdKeyNext, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(206), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(204), scale(88), scale(14), kIdKeyPrev, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(222), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom in");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(220), scale(88), scale(14), kIdKeyZoomIn, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(238), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom out");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(236), scale(88), scale(14), kIdKeyZoomOut, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(254), scale(110), scale(12), 0xFFFF, 0x0082, L"Open file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(252), scale(88), scale(14), kIdKeyOpen, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(270), scale(110), scale(12), 0xFFFF, 0x0082, L"Exit");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(268), scale(88), scale(14), kIdKeyExit, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(286), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(284), scale(88), scale(14), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(134), scale(232), scale(129), 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(150), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(148), scale(88), scale(12), kIdKeyNext, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(166), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(164), scale(88), scale(12), kIdKeyPrev, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(182), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom in");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(180), scale(88), scale(12), kIdKeyZoomIn, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(198), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom out");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(196), scale(88), scale(12), kIdKeyZoomOut, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Open file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(212), scale(88), scale(12), kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(230), scale(110), scale(12), 0xFFFF, 0x0082, L"Exit");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(228), scale(88), scale(12), kIdKeyExit, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(246), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(244), scale(88), scale(12), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(304), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(304), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(270), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(270), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
