@@ -163,6 +163,7 @@ void SaveWindowPlacement();
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
+bool ImageHasTransparency(IWICBitmapSource* source);
 void ApplyTransparencyMode();
 void UpdateCustomColorBrush();
 void ShowSettingsDialog(HWND hwnd);
@@ -1002,6 +1003,11 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
+    if (!g_imageHasAlpha)
+    {
+        g_imageHasAlpha = ImageHasTransparency(converterStraight);
+    }
+
     hr = g_wicFactory->CreateFormatConverter(&converterPremultiplied);
     if (FAILED(hr)) goto cleanup;
 
@@ -1016,12 +1022,12 @@ bool LoadImageFromFile(const wchar_t* path)
     if (FAILED(hr)) goto cleanup;
 
     bitmapProperties = D2D1::BitmapProperties(
-        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT)
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
     );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
         converterPremultiplied,
-        nullptr,
+        &bitmapProperties,
         &g_bitmap
     );
     if (SUCCEEDED(hr))
@@ -1315,6 +1321,46 @@ bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format)
     if (componentInfo) componentInfo->Release();
 
     return hasAlpha;
+}
+
+bool ImageHasTransparency(IWICBitmapSource* source)
+{
+    if (!source)
+    {
+        return false;
+    }
+
+    UINT width = 0;
+    UINT height = 0;
+    HRESULT hr = source->GetSize(&width, &height);
+    if (FAILED(hr) || width == 0 || height == 0)
+    {
+        return false;
+    }
+
+    const UINT stride = width * 4;
+    std::vector<BYTE> row(stride);
+    WICRect rect{ 0, 0, static_cast<INT>(width), 1 };
+
+    for (UINT y = 0; y < height; ++y)
+    {
+        rect.Y = static_cast<INT>(y);
+        hr = source->CopyPixels(&rect, stride, stride, row.data());
+        if (FAILED(hr))
+        {
+            return false;
+        }
+        for (UINT x = 0; x < width; ++x)
+        {
+            BYTE alpha = row[x * 4 + 3];
+            if (alpha < 255)
+            {
+                return true;
+            }
+        }
+    }
+
+    return false;
 }
 
 void ApplyTransparencyMode()
@@ -1969,6 +2015,14 @@ bool LoadImageByIndex(size_t index)
     if (result)
     {
         UpdateZoomToFitScreen(g_hwnd);
+        if (g_hwnd && g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        {
+            UpdateLayeredWindowFromWic(
+                g_hwnd,
+                g_imageWidth * g_zoom,
+                g_imageHeight * g_zoom
+            );
+        }
     }
     return result;
 }
@@ -2391,10 +2445,9 @@ void Render(HWND hwnd)
         }
     }
 
-    g_renderTarget->BeginDraw();
-
     if (g_hasText)
     {
+        g_renderTarget->BeginDraw();
         D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
         if (g_renderTarget && rtSize.width > 0.0f && rtSize.height > 0.0f)
         {
@@ -2426,6 +2479,12 @@ void Render(HWND hwnd)
                 }
             }
         }
+        HRESULT hr = g_renderTarget->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET)
+        {
+            DiscardRenderTarget();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
     }
     else if (g_bitmap)
     {
@@ -2441,6 +2500,7 @@ void Render(HWND hwnd)
             return;
         }
 
+        g_renderTarget->BeginDraw();
         if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
@@ -2490,9 +2550,17 @@ void Render(HWND hwnd)
             1.0f,
             D2D1_BITMAP_INTERPOLATION_MODE_LINEAR
         );
+
+        HRESULT hr = g_renderTarget->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET)
+        {
+            DiscardRenderTarget();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
     }
     else
     {
+        g_renderTarget->BeginDraw();
         g_renderTarget->Clear(D2D1::ColorF(0.121568f, 0.121568f, 0.121568f));
 
         const wchar_t* placeholderText = L"Drop image here";
@@ -2514,13 +2582,12 @@ void Render(HWND hwnd)
                 g_placeholderBrush
             );
         }
-    }
-
-    HRESULT hr = g_renderTarget->EndDraw();
-    if (hr == D2DERR_RECREATE_TARGET)
-    {
-        DiscardRenderTarget();
-        InvalidateRect(hwnd, nullptr, TRUE);
+        HRESULT hr = g_renderTarget->EndDraw();
+        if (hr == D2DERR_RECREATE_TARGET)
+        {
+            DiscardRenderTarget();
+            InvalidateRect(hwnd, nullptr, TRUE);
+        }
     }
 }
 
