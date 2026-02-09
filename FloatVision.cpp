@@ -43,7 +43,8 @@ IWICImagingFactory* g_wicFactory = nullptr;
 IDWriteFactory* g_dwriteFactory = nullptr;
 IDWriteTextFormat* g_placeholderFormat = nullptr;
 IDWriteTextFormat* g_textFormat = nullptr;
-IWICBitmapSource* g_wicSource = nullptr;
+IWICBitmapSource* g_wicSourceStraight = nullptr;
+IWICBitmapSource* g_wicSourcePremultiplied = nullptr;
 Microsoft::WRL::ComPtr<ICoreWebView2Controller> g_webviewController;
 Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
@@ -832,10 +833,15 @@ void DiscardRenderTarget()
         g_renderTarget->Release();
         g_renderTarget = nullptr;
     }
-    if (g_wicSource)
+    if (g_wicSourceStraight)
     {
-        g_wicSource->Release();
-        g_wicSource = nullptr;
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
     }
     g_imageWidth = 0;
     g_imageHeight = 0;
@@ -933,18 +939,25 @@ bool LoadImageFromFile(const wchar_t* path)
 {
     IWICBitmapDecoder* decoder = nullptr;
     IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* converter = nullptr;
+    IWICFormatConverter* converterStraight = nullptr;
+    IWICFormatConverter* converterPremultiplied = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
+    D2D1_BITMAP_PROPERTIES bitmapProperties{};
 
     if (g_bitmap)
     {
         g_bitmap->Release();
         g_bitmap = nullptr;
     }
-    if (g_wicSource)
+    if (g_wicSourceStraight)
     {
-        g_wicSource->Release();
-        g_wicSource = nullptr;
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
     }
     g_imageWidth = 0;
     g_imageHeight = 0;
@@ -976,11 +989,24 @@ bool LoadImageFromFile(const wchar_t* path)
         g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
     }
 
-    hr = g_wicFactory->CreateFormatConverter(&converter);
+    hr = g_wicFactory->CreateFormatConverter(&converterStraight);
     if (FAILED(hr)) goto cleanup;
 
-    hr = converter->Initialize(
+    hr = converterStraight->Initialize(
         frame,
+        GUID_WICPixelFormat32bppBGRA,
+        WICBitmapDitherTypeNone,
+        nullptr,
+        0.0,
+        WICBitmapPaletteTypeCustom
+    );
+    if (FAILED(hr)) goto cleanup;
+
+    hr = g_wicFactory->CreateFormatConverter(&converterPremultiplied);
+    if (FAILED(hr)) goto cleanup;
+
+    hr = converterPremultiplied->Initialize(
+        converterStraight,
         GUID_WICPixelFormat32bppPBGRA,
         WICBitmapDitherTypeNone,
         nullptr,
@@ -989,21 +1015,28 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
+    bitmapProperties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT)
+    );
+
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
-        converter,
-        nullptr,
+        converterStraight,
+        &bitmapProperties,
         &g_bitmap
     );
     if (SUCCEEDED(hr))
     {
-        g_wicSource = converter;
-        g_wicSource->AddRef();
+        g_wicSourceStraight = converterStraight;
+        g_wicSourceStraight->AddRef();
+        g_wicSourcePremultiplied = converterPremultiplied;
+        g_wicSourcePremultiplied->AddRef();
     }
 
 cleanup:
     if (decoder) decoder->Release();
     if (frame) frame->Release();
-    if (converter) converter->Release();
+    if (converterStraight) converterStraight->Release();
+    if (converterPremultiplied) converterPremultiplied->Release();
 
     ApplyTransparencyMode();
     return SUCCEEDED(hr);
@@ -1065,10 +1098,15 @@ bool LoadTextFromFile(const wchar_t* path)
         g_bitmap->Release();
         g_bitmap = nullptr;
     }
-    if (g_wicSource)
+    if (g_wicSourceStraight)
     {
-        g_wicSource->Release();
-        g_wicSource = nullptr;
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
     }
     g_imageWidth = 0;
     g_imageHeight = 0;
@@ -1175,10 +1213,15 @@ bool ApplyHtmlContent(std::wstring html)
         g_bitmap->Release();
         g_bitmap = nullptr;
     }
-    if (g_wicSource)
+    if (g_wicSourceStraight)
     {
-        g_wicSource->Release();
-        g_wicSource = nullptr;
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
     }
     g_imageWidth = 0;
     g_imageHeight = 0;
@@ -2253,7 +2296,7 @@ void UpdateLayeredStyle(bool enable)
 
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight)
 {
-    if (!g_wicSource || drawWidth <= 0.0f || drawHeight <= 0.0f)
+    if (!g_wicSourcePremultiplied || drawWidth <= 0.0f || drawHeight <= 0.0f)
     {
         return false;
     }
@@ -2268,7 +2311,7 @@ bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight)
         return false;
     }
 
-    hr = scaler->Initialize(g_wicSource, width, height, WICBitmapInterpolationModeFant);
+    hr = scaler->Initialize(g_wicSourcePremultiplied, width, height, WICBitmapInterpolationModeFant);
     if (FAILED(hr))
     {
         scaler->Release();
