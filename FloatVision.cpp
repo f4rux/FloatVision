@@ -1628,6 +1628,55 @@ struct ResolvedFontInfo
     bool matched = false;
 };
 
+ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name);
+
+std::wstring GetFontFamilyNameForSave(const std::wstring& fontName)
+{
+    std::wstring normalized = NormalizeFontName(fontName);
+    if (normalized.empty())
+    {
+        return fontName;
+    }
+
+    ResolvedFontInfo resolved = ResolveFontInfo(g_dwriteFactory, normalized);
+    if (!resolved.familyName.empty())
+    {
+        return resolved.familyName;
+    }
+
+    if (!g_dwriteFactory)
+    {
+        return normalized;
+    }
+
+    IDWriteFontCollection* collection = nullptr;
+    if (FAILED(g_dwriteFactory->GetSystemFontCollection(&collection, FALSE)) || !collection)
+    {
+        return normalized;
+    }
+
+    std::wstring candidate = normalized;
+    while (!candidate.empty())
+    {
+        UINT32 index = 0;
+        BOOL exists = FALSE;
+        if (SUCCEEDED(collection->FindFamilyName(candidate.c_str(), &index, &exists)) && exists)
+        {
+            collection->Release();
+            return candidate;
+        }
+        size_t pos = candidate.find_last_of(L' ');
+        if (pos == std::wstring::npos)
+        {
+            break;
+        }
+        candidate = TrimString(candidate.substr(0, pos));
+    }
+
+    collection->Release();
+    return normalized;
+}
+
 ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& name)
 {
     ResolvedFontInfo resolved;
@@ -3730,7 +3779,8 @@ void SaveSettings()
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
     WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
 
-    WritePrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), g_iniPath.c_str());
+    std::wstring fontNameToSave = GetFontFamilyNameForSave(g_textFontName);
+    WritePrivateProfileStringW(L"Text", L"FontName", fontNameToSave.c_str(), g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%.2f", g_textFontSize);
     WritePrivateProfileStringW(L"Text", L"FontSize", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textColor));
@@ -3740,7 +3790,7 @@ void SaveSettings()
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
     WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
 
-    SaveUtf8IniValue(g_iniPath, L"Text", L"FontName", g_textFontName);
+    SaveUtf8IniValue(g_iniPath, L"Text", L"FontName", fontNameToSave);
 
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyNextFile));
     WritePrivateProfileStringW(L"KeyConfig", L"NextFile", buffer, g_iniPath.c_str());
