@@ -163,6 +163,7 @@ void SaveWindowPlacement();
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
+bool ImageHasTransparency(IWICBitmapSource* source);
 void ApplyTransparencyMode();
 void UpdateCustomColorBrush();
 void ShowSettingsDialog(HWND hwnd);
