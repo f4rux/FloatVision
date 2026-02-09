@@ -942,6 +942,7 @@ bool LoadImageFromFile(const wchar_t* path)
     IWICFormatConverter* converterStraight = nullptr;
     IWICFormatConverter* converterPremultiplied = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
+    D2D1_BITMAP_PROPERTIES bitmapProperties{};
 
     if (g_bitmap)
     {
@@ -1013,6 +1014,10 @@ bool LoadImageFromFile(const wchar_t* path)
         WICBitmapPaletteTypeCustom
     );
     if (FAILED(hr)) goto cleanup;
+
+    bitmapProperties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_STRAIGHT)
+    );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
         converterPremultiplied,
