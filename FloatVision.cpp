@@ -1590,6 +1590,8 @@ bool LoadTextFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     HideWebView();
     ApplyTransparencyMode();
+    UpdateTextFormat();
+    UpdateTextBrush();
     return true;
 }
 
@@ -1623,6 +1625,19 @@ std::wstring NormalizeFontName(const std::wstring& value)
         if ((first == L'"' && last == L'"') || (first == L'\'' && last == L'\''))
         {
             trimmed = TrimString(trimmed.substr(1, trimmed.size() - 2));
+        }
+    }
+    size_t dotPos = trimmed.find_last_of(L'.');
+    if (dotPos != std::wstring::npos)
+    {
+        std::wstring ext = trimmed.substr(dotPos);
+        for (auto& ch : ext)
+        {
+            ch = static_cast<wchar_t>(towlower(ch));
+        }
+        if (ext == L".ttf" || ext == L".otf" || ext == L".ttc")
+        {
+            trimmed = TrimString(trimmed.substr(0, dotPos));
         }
     }
     return trimmed;
@@ -1684,6 +1699,39 @@ ResolvedFontInfo ResolveFontInfo(IDWriteFactory* factory, const std::wstring& na
         if (FAILED(collection->GetFontFamily(familyIndex, &family)) || !family)
         {
             continue;
+        }
+        IDWriteLocalizedStrings* familyNames = nullptr;
+        if (SUCCEEDED(family->GetFamilyNames(&familyNames)) && familyNames)
+        {
+            UINT32 familyNameCount = familyNames->GetCount();
+            bool matchedFamilyName = false;
+            for (UINT32 nameIndex = 0; nameIndex < familyNameCount; ++nameIndex)
+            {
+                UINT32 length = 0;
+                if (FAILED(familyNames->GetStringLength(nameIndex, &length)) || length == 0)
+                {
+                    continue;
+                }
+                std::wstring familyName(length + 1, L'\0');
+                if (SUCCEEDED(familyNames->GetString(nameIndex, familyName.data(), length + 1)))
+                {
+                    familyName.resize(length);
+                    if (_wcsicmp(familyName.c_str(), name.c_str()) == 0)
+                    {
+                        resolved.familyName = std::move(familyName);
+                        resolved.matched = true;
+                        matchedFamilyName = true;
+                        break;
+                    }
+                }
+            }
+            familyNames->Release();
+            if (matchedFamilyName)
+            {
+                family->Release();
+                collection->Release();
+                return resolved;
+            }
         }
         UINT32 fontCount = family->GetFontCount();
         bool match = false;
