@@ -7,6 +7,7 @@
 #include <shellapi.h>
 #include <commdlg.h>
 #include <commctrl.h>
+#include <uxtheme.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -26,6 +27,8 @@
 #pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "Comctl32.lib")
+#pragma comment(lib, "UxTheme.lib")
+#pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #ifndef FLOATVISION_GLOBALS_DEFINED
 #define FLOATVISION_GLOBALS_DEFINED
@@ -1860,48 +1863,48 @@ void ShowSettingsDialog(HWND hwnd)
     std::vector<BYTE> tmpl;
     tmpl.reserve(1024);
 
-    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT;
+    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
     appendWord(tmpl, 25);
     appendWord(tmpl, 10);
     appendWord(tmpl, 10);
-    appendWord(tmpl, 220);
-    appendWord(tmpl, 274);
+    appendWord(tmpl, 248);
+    appendWord(tmpl, 320);
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
-    appendWord(tmpl, 9);
+    appendWord(tmpl, 10);
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 4, 208, 54, 0xFFFF, 0x0080, L"Background of transparent images");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 14, 18, 190, 60, kIdTransparencySelect, 0x0085, L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 38, 80, 14, kIdColor, 0x0080, L"Color...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 8, 6, 232, 78, 0xFFFF, 0x0080, L"Background of transparent images");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, 16, 22, 214, 80, kIdTransparencySelect, 0x0085, L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 16, 60, 90, 16, kIdColor, 0x0080, L"Color...");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 62, 208, 68, 0xFFFF, 0x0080, L"Text");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 14, 76, 80, 14, kIdFont, 0x0080, L"Font...");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 76, 80, 14, kIdFontColor, 0x0080, L"Font color");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 100, 94, 80, 14, kIdBackColor, 0x0080, L"Background");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 14, 112, 80, 12, kIdWrap, 0x0080, L"Wrap");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 8, 90, 232, 78, 0xFFFF, 0x0080, L"Text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 16, 106, 90, 16, kIdFont, 0x0080, L"Font...");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 112, 106, 90, 16, kIdFontColor, 0x0080, L"Font color");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 112, 126, 90, 16, kIdBackColor, 0x0080, L"Background");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 16, 128, 80, 12, kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 6, 134, 208, 112, 0xFFFF, 0x0080, L"Key Config");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 148, 90, 12, 0xFFFF, 0x0082, L"Next file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 146, 70, 14, kIdKeyNext, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 162, 90, 12, 0xFFFF, 0x0082, L"Previous file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 160, 70, 14, kIdKeyPrev, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 176, 90, 12, 0xFFFF, 0x0082, L"Zoom in");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 174, 70, 14, kIdKeyZoomIn, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 190, 90, 12, 0xFFFF, 0x0082, L"Zoom out");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 188, 70, 14, kIdKeyZoomOut, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 204, 90, 12, 0xFFFF, 0x0082, L"Open file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 202, 70, 14, kIdKeyOpen, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 218, 90, 12, 0xFFFF, 0x0082, L"Exit");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 216, 70, 14, kIdKeyExit, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, 14, 232, 90, 12, 0xFFFF, 0x0082, L"Always on Top");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 130, 230, 70, 14, kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, 8, 174, 232, 124, 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 190, 110, 12, 0xFFFF, 0x0082, L"Next file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 188, 88, 16, kIdKeyNext, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 206, 110, 12, 0xFFFF, 0x0082, L"Previous file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 204, 88, 16, kIdKeyPrev, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 222, 110, 12, 0xFFFF, 0x0082, L"Zoom in");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 220, 88, 16, kIdKeyZoomIn, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 238, 110, 12, 0xFFFF, 0x0082, L"Zoom out");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 236, 88, 16, kIdKeyZoomOut, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 254, 110, 12, 0xFFFF, 0x0082, L"Open file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 252, 88, 16, kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 270, 110, 12, 0xFFFF, 0x0082, L"Exit");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 268, 88, 16, kIdKeyExit, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, 16, 286, 110, 12, 0xFFFF, 0x0082, L"Always on Top");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, 140, 284, 88, 16, kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 120, 252, 40, 14, IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 165, 252, 40, 14, IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_DEFPUSHBUTTON, 124, 304, 54, 18, IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 184, 304, 54, 18, IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -1922,7 +1925,21 @@ void ShowSettingsDialog(HWND hwnd)
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
         g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop };
 
-    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    auto applyExplorerTheme = [](HWND target)
+    {
+        SetWindowTheme(target, L"Explorer", nullptr);
+        EnumChildWindows(
+            target,
+            [](HWND child, LPARAM) -> BOOL
+            {
+                SetWindowTheme(child, L"Explorer", nullptr);
+                return TRUE;
+            },
+            0
+        );
+    };
+
+    auto dialogProc = [applyExplorerTheme](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
     {
         auto* dialogState = reinterpret_cast<DialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
         switch (msg)
@@ -1931,6 +1948,7 @@ void ShowSettingsDialog(HWND hwnd)
         {
             SetWindowLongPtr(dlg, GWLP_USERDATA, lParam);
             dialogState = reinterpret_cast<DialogState*>(lParam);
+            applyExplorerTheme(dlg);
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Transparent (show desktop)"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Checkerboard"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Solid color"));
