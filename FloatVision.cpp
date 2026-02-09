@@ -2064,6 +2064,12 @@ void ShowSettingsDialog(HWND hwnd)
             SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdWrap), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdFont), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdFontColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdBackColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, IDOK), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, IDCANCEL), themeName, nullptr);
             if (darkMode)
             {
                 EnumChildWindows(dlg, [](HWND hwnd, LPARAM) -> BOOL
