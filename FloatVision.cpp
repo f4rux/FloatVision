@@ -1985,7 +1985,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendString(tmpl, L"Segoe UI");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(232), scale(78), 0xFFFF, 0x0080, L"Background of transparent images");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST, scale(16), scale(22), scale(214), scale(80), kIdTransparencySelect, 0x0085, L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS, scale(16), scale(22), scale(214), scale(80), kIdTransparencySelect, 0x0085, L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(16), scale(60), scale(90), scale(16), kIdColor, 0x0080, L"Color...");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(90), scale(232), scale(78), 0xFFFF, 0x0080, L"Text");
@@ -2154,6 +2154,75 @@ void ShowSettingsDialog(HWND hwnd)
             SetBkColor(hdc, dialogState->controlBackgroundColor);
             SetBkMode(hdc, OPAQUE);
             return reinterpret_cast<INT_PTR>(dialogState->controlBrush);
+        }
+        case WM_MEASUREITEM:
+        {
+            auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
+            if (!measureItem || measureItem->CtlID != kIdTransparencySelect)
+            {
+                break;
+            }
+            HWND combo = GetDlgItem(dlg, kIdTransparencySelect);
+            UINT itemHeight = 16;
+            HFONT font = reinterpret_cast<HFONT>(SendMessage(combo, WM_GETFONT, 0, 0));
+            HDC hdc = GetDC(combo);
+            if (hdc)
+            {
+                HFONT oldFont = reinterpret_cast<HFONT>(SelectObject(hdc, font));
+                TEXTMETRIC tm{};
+                if (GetTextMetrics(hdc, &tm))
+                {
+                    itemHeight = static_cast<UINT>(tm.tmHeight + tm.tmExternalLeading + 6);
+                }
+                SelectObject(hdc, oldFont);
+                ReleaseDC(combo, hdc);
+            }
+            measureItem->itemHeight = itemHeight;
+            return TRUE;
+        }
+        case WM_DRAWITEM:
+        {
+            auto* drawItem = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
+            if (!dialogState || !drawItem || drawItem->CtlID != kIdTransparencySelect)
+            {
+                break;
+            }
+            COLORREF background = dialogState->controlBackgroundColor;
+            COLORREF textColor = dialogState->dialogTextColor;
+            if (drawItem->itemState & ODS_SELECTED)
+            {
+                if (IsDarkModeEnabled())
+                {
+                    background = RGB(64, 64, 64);
+                }
+                else
+                {
+                    background = GetSysColor(COLOR_HIGHLIGHT);
+                    textColor = GetSysColor(COLOR_HIGHLIGHTTEXT);
+                }
+            }
+            HBRUSH brush = CreateSolidBrush(background);
+            FillRect(drawItem->hDC, &drawItem->rcItem, brush);
+            DeleteObject(brush);
+            SetBkMode(drawItem->hDC, TRANSPARENT);
+            SetTextColor(drawItem->hDC, textColor);
+            wchar_t itemText[256]{};
+            if (drawItem->itemID != static_cast<UINT>(-1))
+            {
+                SendMessage(drawItem->hwndItem, CB_GETLBTEXT, drawItem->itemID, reinterpret_cast<LPARAM>(itemText));
+            }
+            else
+            {
+                GetWindowText(drawItem->hwndItem, itemText, static_cast<int>(std::size(itemText)));
+            }
+            RECT textRect = drawItem->rcItem;
+            textRect.left += 6;
+            DrawText(drawItem->hDC, itemText, -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            if (drawItem->itemState & ODS_FOCUS)
+            {
+                DrawFocusRect(drawItem->hDC, &drawItem->rcItem);
+            }
+            return TRUE;
         }
         case WM_DESTROY:
         {
