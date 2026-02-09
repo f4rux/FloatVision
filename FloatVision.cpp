@@ -144,6 +144,14 @@ static LRESULT CALLBACK HotkeySubclassProc(HWND hwnd, UINT msg, WPARAM wParam, L
     };
     switch (msg)
     {
+    case WM_GETDLGCODE:
+    {
+        if (isHotkeyClass())
+        {
+            return DLGC_WANTALLKEYS | DLGC_WANTCHARS;
+        }
+        break;
+    }
     case WM_KEYDOWN:
     {
         if (wParam == VK_ESCAPE)
