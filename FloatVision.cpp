@@ -2026,6 +2026,14 @@ bool LoadImageByIndex(size_t index)
     if (result)
     {
         UpdateZoomToFitScreen(g_hwnd);
+        if (g_hwnd && g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        {
+            UpdateLayeredWindowFromWic(
+                g_hwnd,
+                g_imageWidth * g_zoom,
+                g_imageHeight * g_zoom
+            );
+        }
     }
     return result;
 }
