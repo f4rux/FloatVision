@@ -3287,7 +3287,7 @@ void LoadSettings()
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
-    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, 32, g_iniPath.c_str());
+    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, static_cast<DWORD>(std::size(buffer)), g_iniPath.c_str());
     if (buffer[0] != L'\0')
     {
         g_textFontName = buffer;
