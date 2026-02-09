@@ -1403,6 +1403,21 @@ std::wstring TrimString(const std::wstring& value)
     return value.substr(start, end - start);
 }
 
+std::wstring NormalizeFontName(const std::wstring& value)
+{
+    std::wstring trimmed = TrimString(value);
+    if (trimmed.size() >= 2)
+    {
+        wchar_t first = trimmed.front();
+        wchar_t last = trimmed.back();
+        if ((first == L'"' && last == L'"') || (first == L'\'' && last == L'\''))
+        {
+            trimmed = TrimString(trimmed.substr(1, trimmed.size() - 2));
+        }
+    }
+    return trimmed;
+}
+
 std::wstring NormalizeSettingKey(const std::wstring& key)
 {
     std::wstring result;
@@ -1416,6 +1431,97 @@ std::wstring NormalizeSettingKey(const std::wstring& key)
         result.push_back(static_cast<wchar_t>(towlower(ch)));
     }
     return result;
+}
+
+std::wstring ResolveFontFamilyName(IDWriteFactory* factory, const std::wstring& name)
+{
+    if (!factory || name.empty())
+    {
+        return name;
+    }
+    IDWriteFontCollection* collection = nullptr;
+    if (FAILED(factory->GetSystemFontCollection(&collection, FALSE)) || !collection)
+    {
+        return name;
+    }
+
+    UINT32 index = 0;
+    BOOL exists = FALSE;
+    if (SUCCEEDED(collection->FindFamilyName(name.c_str(), &index, &exists)) && exists)
+    {
+        collection->Release();
+        return name;
+    }
+
+    UINT32 familyCount = collection->GetFontFamilyCount();
+    for (UINT32 familyIndex = 0; familyIndex < familyCount; ++familyIndex)
+    {
+        IDWriteFontFamily* family = nullptr;
+        if (FAILED(collection->GetFontFamily(familyIndex, &family)) || !family)
+        {
+            continue;
+        }
+        UINT32 fontCount = family->GetFontCount();
+        bool match = false;
+        for (UINT32 fontIndex = 0; fontIndex < fontCount && !match; ++fontIndex)
+        {
+            IDWriteFont* font = nullptr;
+            if (FAILED(family->GetFont(fontIndex, &font)) || !font)
+            {
+                continue;
+            }
+            IDWriteLocalizedStrings* faceNames = nullptr;
+            if (SUCCEEDED(font->GetFaceNames(&faceNames)) && faceNames)
+            {
+                UINT32 faceCount = faceNames->GetCount();
+                for (UINT32 faceIndex = 0; faceIndex < faceCount; ++faceIndex)
+                {
+                    UINT32 length = 0;
+                    if (FAILED(faceNames->GetStringLength(faceIndex, &length)) || length == 0)
+                    {
+                        continue;
+                    }
+                    std::wstring faceName(length + 1, L'\0');
+                    if (SUCCEEDED(faceNames->GetString(faceIndex, faceName.data(), length + 1)))
+                    {
+                        faceName.resize(length);
+                        if (_wcsicmp(faceName.c_str(), name.c_str()) == 0)
+                        {
+                            match = true;
+                            break;
+                        }
+                    }
+                }
+                faceNames->Release();
+            }
+            font->Release();
+        }
+        if (match)
+        {
+            IDWriteLocalizedStrings* familyNames = nullptr;
+            if (SUCCEEDED(family->GetFamilyNames(&familyNames)) && familyNames)
+            {
+                UINT32 length = 0;
+                if (SUCCEEDED(familyNames->GetStringLength(0, &length)) && length > 0)
+                {
+                    std::wstring familyName(length + 1, L'\0');
+                    if (SUCCEEDED(familyNames->GetString(0, familyName.data(), length + 1)))
+                    {
+                        familyName.resize(length);
+                        familyNames->Release();
+                        family->Release();
+                        collection->Release();
+                        return familyName;
+                    }
+                }
+                familyNames->Release();
+            }
+        }
+        family->Release();
+    }
+
+    collection->Release();
+    return name;
 }
 
 bool TryParseMarkdownLine(const std::wstring& line, std::wstring& key, std::wstring& value)
@@ -1564,7 +1670,7 @@ void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
         std::wstring normalized = NormalizeSettingKey(key);
         if (normalized == L"font")
         {
-            std::wstring fontName = TrimString(value);
+            std::wstring fontName = NormalizeFontName(value);
             if (!fontName.empty())
             {
                 g_textFontName = std::move(fontName);
@@ -2147,8 +2253,9 @@ void UpdateTextFormat()
         g_textFormat->Release();
         g_textFormat = nullptr;
     }
+    std::wstring resolvedFontName = ResolveFontFamilyName(g_dwriteFactory, g_textFontName);
     g_dwriteFactory->CreateTextFormat(
-        g_textFontName.c_str(),
+        resolvedFontName.c_str(),
         nullptr,
         DWRITE_FONT_WEIGHT_REGULAR,
         DWRITE_FONT_STYLE_NORMAL,
@@ -3287,10 +3394,11 @@ void LoadSettings()
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
-    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, 32, g_iniPath.c_str());
-    if (buffer[0] != L'\0')
+    GetPrivateProfileStringW(L"Text", L"FontName", g_textFontName.c_str(), buffer, static_cast<DWORD>(std::size(buffer)), g_iniPath.c_str());
+    std::wstring normalizedFontName = NormalizeFontName(buffer);
+    if (!normalizedFontName.empty())
     {
-        g_textFontName = buffer;
+        g_textFontName = std::move(normalizedFontName);
     }
     GetPrivateProfileStringW(L"Text", L"FontSize", L"18", buffer, 32, g_iniPath.c_str());
     g_textFontSize = static_cast<float>(_wtof(buffer));
