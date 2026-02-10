@@ -768,14 +768,14 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenu(menu, MF_STRING, kMenuSettings, L"Settings...");
-        AppendMenu(menu, MF_STRING, kMenuAbout, L"About");
-        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeAsc, L"Sort: Modified (Old-New)");
         AppendMenu(menu, MF_STRING, kMenuSortTimeDesc, L"Sort: Modified (New-Old)");
         AppendMenu(menu, MF_STRING, kMenuSortImageOnly, L"Sort: Image only");
+        AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuSettings, L"Settings");
+        AppendMenu(menu, MF_STRING, kMenuAbout, L"About");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuExit, L"Exit");
 
