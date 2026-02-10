@@ -85,6 +85,8 @@ bool g_textWrap = true;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
+bool g_webviewPendingShow = false;
+EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
 {
@@ -1232,6 +1234,7 @@ bool LoadImageFromFile(const wchar_t* path)
     g_textContent.clear();
     g_hasHtml = false;
     g_pendingHtmlContent.clear();
+    g_webviewPendingShow = false;
     HideWebView();
 
     HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
@@ -2177,6 +2180,11 @@ bool ApplyHtmlContent(std::wstring html)
     g_zoom = 1.0f;
     g_hasHtml = true;
     g_pendingHtmlContent = std::move(html);
+    g_webviewPendingShow = true;
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
     ApplyTransparencyMode();
 
     if (!EnsureWebView2(g_hwnd))
@@ -2444,13 +2452,18 @@ bool EnsureWebView2(HWND hwnd)
 
     if (g_webviewController && g_webview)
     {
-        g_webviewController->put_IsVisible(TRUE);
+        if (!g_webviewPendingShow)
+        {
+            g_webviewController->put_IsVisible(TRUE);
+        }
         UpdateWebViewWindowHandle();
         UpdateWebViewInputState();
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
         if (!g_pendingHtmlContent.empty())
         {
+            g_webviewPendingShow = true;
+            g_webviewController->put_IsVisible(FALSE);
             g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             g_pendingHtmlContent.clear();
         }
@@ -2501,13 +2514,26 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
-                            g_webviewController->put_IsVisible(TRUE);
+                            g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->add_NavigationCompleted(
+                                Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
+                                    {
+                                        if (g_webviewController && g_webviewPendingShow)
+                                        {
+                                            g_webviewController->put_IsVisible(TRUE);
+                                            g_webviewPendingShow = false;
+                                        }
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewNavigationToken);
                             if (g_webview && !g_pendingHtmlContent.empty())
                             {
+                                g_webviewPendingShow = true;
                                 g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 g_pendingHtmlContent.clear();
                             }
