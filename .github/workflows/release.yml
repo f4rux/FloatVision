@@ -1,4 +1,4 @@
-name: Build and Release (.slnx)
+name: Build and Release
 
 on:
   push:
@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest # VS2026環境を含むランナー
+    runs-on: windows-2025 # VS2026環境
     permissions:
       contents: write
 
@@ -15,32 +15,28 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. .slnx を理解できる最新の .NET SDK をセットアップ
-      - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '9.0.x' # または 10.x (VS2026対応バージョン)
+      # 1. MSBuildのセットアップ (C++にはこれが必須です)
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
 
-      # 2. 依存関係の復元 (slnx対応)
-      - name: Restore dependencies
-        run: dotnet restore FloatVision.slnx
-
-      # 3. ビルド実行 (--output を削除し、MSBuildプロパティで出力先を指定)
+      # 2. ビルド実行 (dotnetではなくmsbuildを直接使う)
+      # .slnx は最新の MSBuild なら解釈可能です
       - name: Build app
         run: |
-          dotnet build FloatVision.slnx --configuration Release /p:OutDir=../publish/
+          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64
 
-      # 4. 成果物をZIPにまとめる (パスを修正)
+      # 3. 成果物をZIPにまとめる
+      # MSBuildの場合、通常はプロジェクトフォルダ内の x64/Release に出力されます
       - name: Archive build artifacts
         shell: pwsh
         run: |
-          # フォルダが存在することを確認してから圧縮
-          Compress-Archive -Path ./publish/* -DestinationPath MyApp-v${{ github.ref_name }}.zip
+          # 出力先パスが異なる場合はここを調整してください
+          Compress-Archive -Path FloatVision/x64/Release/* -DestinationPath FloatVision-v${{ github.ref_name }}.zip
 
-      # 5. リリース作成
+      # 4. リリース作成
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: MyApp-v${{ github.ref_name }}.zip
+          files: FloatVision-v${{ github.ref_name }}.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
