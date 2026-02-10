@@ -2813,6 +2813,24 @@ static void ApplyExplorerTheme(HWND target)
     );
 }
 
+static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
+{
+    if (msg == WM_INITDIALOG)
+    {
+        const int controlIds[] = { stc2, cmb2, stc3, cmb3 };
+        for (int controlId : controlIds)
+        {
+            HWND control = GetDlgItem(dlg, controlId);
+            if (control)
+            {
+                ShowWindow(control, SW_HIDE);
+            }
+        }
+    }
+
+    return 0;
+}
+
 void ShowSettingsDialog(HWND hwnd)
 {
 
@@ -3383,7 +3401,8 @@ void ShowSettingsDialog(HWND hwnd)
                 cf.lStructSize = sizeof(cf);
                 cf.hwndOwner = dlg;
                 cf.lpLogFont = &lf;
-                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOSTYLESEL | CF_NOSIZESEL;
+                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOSTYLESEL | CF_NOSIZESEL | CF_ENABLEHOOK;
+                cf.lpfnHook = FontChooserHookProc;
                 if (ChooseFont(&cf))
                 {
                     std::wstring familyName = GetFontFamilyNameForSave(lf.lfFaceName);
