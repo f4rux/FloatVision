@@ -25,16 +25,16 @@ jobs:
       - name: Restore dependencies
         run: dotnet restore FloatVision.slnx
 
-      # 3. ビルド実行 (Release構成)
-      # dotnet build は内部で MSBuild を呼び出しますが、.slnx を正しく解釈できます
+      # 3. ビルド実行 (--output を削除し、MSBuildプロパティで出力先を指定)
       - name: Build app
         run: |
-          dotnet build FloatVision.slnx --configuration Release --output ./publish
+          dotnet build FloatVision.slnx --configuration Release /p:OutDir=../publish/
 
-      # 4. 成果物をZIP化
+      # 4. 成果物をZIPにまとめる (パスを修正)
       - name: Archive build artifacts
         shell: pwsh
         run: |
+          # フォルダが存在することを確認してから圧縮
           Compress-Archive -Path ./publish/* -DestinationPath MyApp-v${{ github.ref_name }}.zip
 
       # 5. リリース作成
