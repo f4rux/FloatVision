@@ -501,21 +501,6 @@ LRESULT CALLBACK WndProc(
 {
     switch (msg)
     {
-    case WM_ERASEBKGND:
-    {
-        if (g_hasText || g_hasHtml)
-        {
-            HDC hdc = reinterpret_cast<HDC>(wParam);
-            RECT rc{};
-            GetClientRect(hwnd, &rc);
-            HBRUSH brush = CreateSolidBrush(g_textBackground);
-            FillRect(hdc, &rc, brush);
-            DeleteObject(brush);
-            return 1;
-        }
-        return 1;
-    }
-
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
