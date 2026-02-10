@@ -2832,6 +2832,83 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
             }
         }
 
+        auto toClientRect = [dlg](HWND control) -> RECT
+        {
+            RECT rect{};
+            GetWindowRect(control, &rect);
+            POINT topLeft{ rect.left, rect.top };
+            POINT bottomRight{ rect.right, rect.bottom };
+            ScreenToClient(dlg, &topLeft);
+            ScreenToClient(dlg, &bottomRight);
+            rect.left = topLeft.x;
+            rect.top = topLeft.y;
+            rect.right = bottomRight.x;
+            rect.bottom = bottomRight.y;
+            return rect;
+        };
+
+        HWND fontLabel = GetDlgItem(dlg, stc1);
+        HWND fontList = GetDlgItem(dlg, cmb1);
+        HWND scriptList = GetDlgItem(dlg, cmb5);
+        HWND okButton = GetDlgItem(dlg, IDOK);
+        HWND cancelButton = GetDlgItem(dlg, IDCANCEL);
+
+        if (fontLabel && fontList && okButton && cancelButton)
+        {
+            RECT fontRect = toClientRect(fontList);
+            RECT okRect = toClientRect(okButton);
+            RECT cancelRect = toClientRect(cancelButton);
+
+            int contentRight = fontRect.right;
+            if (scriptList)
+            {
+                RECT scriptRect = toClientRect(scriptList);
+                contentRight = std::max(contentRight, scriptRect.right);
+            }
+
+            constexpr int kHorizontalPadding = 10;
+            constexpr int kVerticalGap = 10;
+            constexpr int kBottomPadding = 10;
+            constexpr int kButtonGap = 6;
+
+            int fontWidth = std::max(120, contentRight - fontRect.left);
+            RECT labelRect = toClientRect(fontLabel);
+            MoveWindow(fontList, fontRect.left, fontRect.top, fontWidth, fontRect.bottom - fontRect.top, TRUE);
+            MoveWindow(fontLabel, fontRect.left, labelRect.top, fontWidth, labelRect.bottom - labelRect.top, TRUE);
+
+            RECT resizedFontRect = toClientRect(fontList);
+            int buttonHeight = okRect.bottom - okRect.top;
+            int okWidth = okRect.right - okRect.left;
+            int cancelWidth = cancelRect.right - cancelRect.left;
+
+            int buttonY = resizedFontRect.bottom + kVerticalGap;
+            int contentWidth = std::max(resizedFontRect.right + kHorizontalPadding,
+                                        resizedFontRect.left + okWidth + cancelWidth + kButtonGap + kHorizontalPadding);
+            int cancelX = contentWidth - kHorizontalPadding - cancelWidth;
+            int okX = cancelX - kButtonGap - okWidth;
+
+            MoveWindow(okButton, okX, buttonY, okWidth, buttonHeight, TRUE);
+            MoveWindow(cancelButton, cancelX, buttonY, cancelWidth, buttonHeight, TRUE);
+
+            int newClientWidth = contentWidth;
+            int newClientHeight = buttonY + buttonHeight + kBottomPadding;
+
+            RECT windowRect{ 0, 0, newClientWidth, newClientHeight };
+            DWORD style = static_cast<DWORD>(GetWindowLongPtrW(dlg, GWL_STYLE));
+            DWORD exStyle = static_cast<DWORD>(GetWindowLongPtrW(dlg, GWL_EXSTYLE));
+            AdjustWindowRectEx(&windowRect, style, FALSE, exStyle);
+
+            SetWindowPos(
+                dlg,
+                nullptr,
+                0,
+                0,
+                windowRect.right - windowRect.left,
+                windowRect.bottom - windowRect.top,
+                SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        }
+
         EnumChildWindows(
             dlg,
             [](HWND child, LPARAM) -> BOOL
