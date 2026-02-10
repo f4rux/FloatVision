@@ -30,7 +30,7 @@ jobs:
       # .slnx は最新の MSBuild なら解釈可能です
       - name: Build app
         run: |
-          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64
+          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=Default
 
       # 3. 成果物をZIPにまとめる
       # MSBuildの場合、通常はプロジェクトフォルダ内の x64/Release に出力されます
