@@ -895,6 +895,16 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         }
+        if (key == g_keyNextFile && !g_imageList.empty())
+        {
+            NavigateImage(1);
+            return 0;
+        }
+        if (key == g_keyPrevFile && !g_imageList.empty())
+        {
+            NavigateImage(-1);
+            return 0;
+        }
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
@@ -909,16 +919,6 @@ LRESULT CALLBACK WndProc(
             float delta = (key == g_keyZoomIn) ? -40.0f : 40.0f;
             ScrollTextBy(delta);
             InvalidateRect(hwnd, nullptr, TRUE);
-            return 0;
-        }
-        if (key == g_keyNextFile && !g_imageList.empty())
-        {
-            NavigateImage(1);
-            return 0;
-        }
-        if (key == g_keyPrevFile && !g_imageList.empty())
-        {
-            NavigateImage(-1);
             return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_bitmap)
@@ -3575,6 +3575,8 @@ void RefreshImageList(const std::filesystem::path& imagePath)
     }
 
     std::error_code ec;
+    bool filterImageOnly = g_sortImageOnly && IsImageFile(g_currentImagePath);
+
     for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
     {
         if (ec)
@@ -3586,7 +3588,7 @@ void RefreshImageList(const std::filesystem::path& imagePath)
             continue;
         }
         std::filesystem::path filePath = entry.path();
-        bool shouldInclude = g_sortImageOnly ? IsImageFile(filePath) : IsSupportedFile(filePath);
+        bool shouldInclude = filterImageOnly ? IsImageFile(filePath) : IsSupportedFile(filePath);
         if (!shouldInclude)
         {
             continue;
