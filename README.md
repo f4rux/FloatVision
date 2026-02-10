@@ -1,12 +1,10 @@
-<img title="" src="res/FloatVision.png" alt="" data-align="center" width="95">
+<img title="" src="res/FloatVision.png" alt="" data-align="center" width="102">
 
 # FloatVision
 
 **FloatVision** is a minimalist, frameless viewer for images, text, Markdown, and HTML.
 
 By keeping your images or notes pinned to the top of your screen, it serves as a powerful reference tool for any workflow.
-
-
 
 ![](res/ss1.png)
 
@@ -98,7 +96,25 @@ Right-click the window to open the **Context Menu**, then select **Settings**.
 
 If a file named `skin.png` is placed in the same directory as `FloatVision.exe`, it will be displayed as the default background upon startup.
 
+---
 
+### Third-Party Libraries
+
+This project uses the following third-party library:
+
+- **md4c**  
+  A fast and compliant Markdown parser written in C.  
+  Copyright © 2016–2024 Martin Mitáš  
+  Licensed under the **MIT License**.  
+  https://github.com/mity/md4c
+
+---
+
+### License
+
+FloatVision is released under the **MIT License**.
+
+See the `LICENSE` file for details.
 
 ---
 
