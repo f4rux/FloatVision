@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-2025 # VS2026環境を含む最新ランナー
+    runs-on: windows-latest # VS2026環境を含む最新ランナー
     permissions:
       contents: write
 
@@ -29,10 +29,11 @@ jobs:
         run: nuget restore FloatVision.slnx
 
       # 3. ビルド実行
-      # ツールセットの不整合を避けるため、環境のデフォルト(v143互換等)でビルド
+      # /p:PlatformToolset を空にするか、環境のデフォルト(v143)を明示して、
+      # VS2022のディレクトリ内に存在しない v145 を探しに行くのを防ぎます。
       - name: Build app
         run: |
-          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64
+          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:TargetPlatformVersion=10.0
 
       # 4. 成果物の抽出 (中間ファイルを除去し、完成品だけをピックアップ)
       - name: Collect artifacts
