@@ -86,6 +86,7 @@ float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
 bool g_webviewPendingShow = false;
+bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
@@ -1235,6 +1236,7 @@ bool LoadImageFromFile(const wchar_t* path)
     g_hasHtml = false;
     g_pendingHtmlContent.clear();
     g_webviewPendingShow = false;
+    g_keepLayeredWhileHtmlPending = false;
     HideWebView();
 
     HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
@@ -2155,6 +2157,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
 
 bool ApplyHtmlContent(std::wstring html)
 {
+    bool keepLayered = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
     if (g_bitmap)
     {
         g_bitmap->Release();
@@ -2181,6 +2184,7 @@ bool ApplyHtmlContent(std::wstring html)
     g_hasHtml = true;
     g_pendingHtmlContent = std::move(html);
     g_webviewPendingShow = true;
+    g_keepLayeredWhileHtmlPending = keepLayered;
     if (g_webviewController)
     {
         g_webviewController->put_IsVisible(FALSE);
@@ -2191,6 +2195,7 @@ bool ApplyHtmlContent(std::wstring html)
     {
         g_hasHtml = false;
         g_pendingHtmlContent.clear();
+        g_keepLayeredWhileHtmlPending = false;
         return false;
     }
 
@@ -2311,7 +2316,8 @@ bool ImageHasTransparency(IWICBitmapSource* source)
 
 void ApplyTransparencyMode()
 {
-    if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+    if ((g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        || (g_hasHtml && g_webviewPendingShow && g_keepLayeredWhileHtmlPending))
     {
         UpdateLayeredStyle(true);
     }
@@ -2525,8 +2531,10 @@ bool EnsureWebView2(HWND hwnd)
                                     {
                                         if (g_webviewController && g_webviewPendingShow)
                                         {
-                                            g_webviewController->put_IsVisible(TRUE);
                                             g_webviewPendingShow = false;
+                                            g_keepLayeredWhileHtmlPending = false;
+                                            ApplyTransparencyMode();
+                                            g_webviewController->put_IsVisible(TRUE);
                                         }
                                         return S_OK;
                                     }).Get(),
