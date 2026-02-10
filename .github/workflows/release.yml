@@ -1,13 +1,13 @@
-name: Build and Release
+name: Build and Release FloatVision
 
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*' # v1.0.0 などのタグがプッシュされたら実行
 
 jobs:
   build:
-    runs-on: windows-2025 # VS2026環境
+    runs-on: windows-2025 # VS2026環境を含む最新ランナー
     permissions:
       contents: write
 
@@ -15,33 +15,59 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # 1. MSBuildのセットアップ (VS2026/v145対応のため最新を指定)
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
           vs-version: 'latest'
 
+      # 2. NuGetのセットアップと復元 (WebView2等のパッケージ取得)
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
 
       - name: Restore NuGet packages
         run: nuget restore FloatVision.slnx
 
+      # 3. ビルド実行
+      # ツールセットの不整合を避けるため、環境のデフォルト(v143互換等)でビルド
       - name: Build app
         run: |
-          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143
+          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64
 
-      # 3. 成果物をZIPにまとめる
-      # MSBuildの場合、通常はプロジェクトフォルダ内の x64/Release に出力されます
-      - name: Archive build artifacts
+      # 4. 成果物の抽出 (中間ファイルを除去し、完成品だけをピックアップ)
+      - name: Collect artifacts
         shell: pwsh
         run: |
-          # 出力先パスが異なる場合はここを調整してください
-          Compress-Archive -Path FloatVision/x64/Release/* -DestinationPath FloatVision-v${{ github.ref_name }}.zip
+          # 出力用フォルダの作成
+          New-Item -ItemType Directory -Path ./publish_dist -Force
 
-      # 4. リリース作成
-      - name: Create Release
+          # 1. FloatVision.exe を全階層から探してコピー (中間フォルダ obj は除外)
+          Get-ChildItem -Path . -Filter "FloatVision.exe" -Recurse | Where-Object { $_.FullName -notmatch "obj" -and $_.FullName -notmatch "publish_dist" } | ForEach-Object {
+              Copy-Item $_.FullName -Destination ./publish_dist/
+              Write-Host "Found EXE: $($_.FullName)"
+          }
+
+          # 2. 実行に必要な DLL (WebView2Loader.dll 等) をコピー
+          Get-ChildItem -Path . -Filter "*.dll" -Recurse | Where-Object { $_.FullName -notmatch "obj" -and $_.FullName -notmatch "publish_dist" } | ForEach-Object {
+              Copy-Item $_.FullName -Destination ./publish_dist/
+              Write-Host "Found DLL: $($_.FullName)"
+          }
+
+          # 抽出結果をログで確認
+          Write-Host "--- Files to be zipped ---"
+          ls ./publish_dist
+
+      # 5. ZIP圧縮
+      - name: Archive Release
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ./publish_dist/* -DestinationPath FloatVision-v${{ github.ref_name }}.zip
+
+      # 6. GitHub Release 作成とアップロード
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: FloatVision-v${{ github.ref_name }}.zip
+          generate_release_notes: true # コミットログからリリースノートを自動生成
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
