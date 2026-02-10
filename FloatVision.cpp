@@ -100,6 +100,7 @@ WORD g_keyNextFile = VK_RIGHT;
 WORD g_keyPrevFile = VK_LEFT;
 WORD g_keyZoomIn = VK_UP;
 WORD g_keyZoomOut = VK_DOWN;
+WORD g_keyOriginalSize = 0;
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
 WORD g_keyAlwaysOnTop = 'P';
@@ -926,6 +927,14 @@ LRESULT CALLBACK WndProc(
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(factor, pt);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
+        if (key == g_keyOriginalSize && g_bitmap)
+        {
+            g_fitToWindow = false;
+            g_zoom = 1.0f;
+            UpdateWindowToZoomedImage();
             InvalidateRect(hwnd, nullptr, TRUE);
             return 0;
         }
@@ -2705,6 +2714,7 @@ namespace
     constexpr int kIdKeyPrev = 2102;
     constexpr int kIdKeyZoomIn = 2103;
     constexpr int kIdKeyZoomOut = 2104;
+    constexpr int kIdKeyOriginalSize = 2109;
     constexpr int kIdKeyOpen = 2105;
     constexpr int kIdKeyExit = 2106;
     constexpr int kIdKeyAlwaysOnTop = 2107;
@@ -2882,7 +2892,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(248));
-    appendWord(tmpl, scale(310));
+    appendWord(tmpl, scale(326));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -2899,7 +2909,7 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(112), scale(106), scale(90), scale(16), kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(16), scale(108), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(134), scale(232), scale(145), 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(134), scale(232), scale(161), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(150), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(148), scale(88), scale(12), kIdKeyNext, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(166), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
@@ -2908,18 +2918,20 @@ void ShowSettingsDialog(HWND hwnd)
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(180), scale(88), scale(12), kIdKeyZoomIn, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(198), scale(110), scale(12), 0xFFFF, 0x0082, L"Zoom out");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(196), scale(88), scale(12), kIdKeyZoomOut, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Open file");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(212), scale(88), scale(12), kIdKeyOpen, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(230), scale(110), scale(12), 0xFFFF, 0x0082, L"Exit");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(228), scale(88), scale(12), kIdKeyExit, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(246), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(244), scale(88), scale(12), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Original size");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(212), scale(88), scale(12), kIdKeyOriginalSize, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(230), scale(110), scale(12), 0xFFFF, 0x0082, L"Open file");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(228), scale(88), scale(12), kIdKeyOpen, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(246), scale(110), scale(12), 0xFFFF, 0x0082, L"Exit");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(244), scale(88), scale(12), kIdKeyExit, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(262), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(260), scale(88), scale(12), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(262), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(260), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(278), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(276), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(286), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(286), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(302), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(302), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -2935,6 +2947,7 @@ void ShowSettingsDialog(HWND hwnd)
         WORD keyPrev;
         WORD keyZoomIn;
         WORD keyZoomOut;
+        WORD keyOriginalSize;
         WORD keyOpen;
         WORD keyExit;
         WORD keyAlwaysOnTop;
@@ -2945,7 +2958,7 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF controlBackgroundColor;
         COLORREF dialogTextColor;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontFaceName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
-        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyReload,
+        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOriginalSize, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyReload,
         nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
@@ -3045,6 +3058,7 @@ void ShowSettingsDialog(HWND hwnd)
                 clearHotkeyTheme(kIdKeyPrev);
                 clearHotkeyTheme(kIdKeyZoomIn);
                 clearHotkeyTheme(kIdKeyZoomOut);
+                clearHotkeyTheme(kIdKeyOriginalSize);
                 clearHotkeyTheme(kIdKeyOpen);
                 clearHotkeyTheme(kIdKeyExit);
                 clearHotkeyTheme(kIdKeyAlwaysOnTop);
@@ -3056,6 +3070,7 @@ void ShowSettingsDialog(HWND hwnd)
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyPrev), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomIn), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyZoomOut), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyOriginalSize), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
@@ -3065,6 +3080,7 @@ void ShowSettingsDialog(HWND hwnd)
             subclassHotkey(GetDlgItem(dlg, kIdKeyPrev));
             subclassHotkey(GetDlgItem(dlg, kIdKeyZoomIn));
             subclassHotkey(GetDlgItem(dlg, kIdKeyZoomOut));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyOriginalSize));
             subclassHotkey(GetDlgItem(dlg, kIdKeyOpen));
             subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
             subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
@@ -3137,6 +3153,7 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdKeyPrev, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyZoomIn, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomIn, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyZoomOut, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomOut, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyOriginalSize, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOriginalSize, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyOpen, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyExit, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyAlwaysOnTop, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
@@ -3388,11 +3405,11 @@ void ShowSettingsDialog(HWND hwnd)
             }
             if (id == IDOK)
             {
-                auto readHotKey = [&](int controlId, WORD fallback)
+                auto readHotKey = [&](int controlId, WORD fallback, bool allowEmpty = false)
                 {
                     DWORD value = static_cast<DWORD>(SendDlgItemMessage(dlg, controlId, HKM_GETHOTKEY, 0, 0));
                     WORD key = LOBYTE(value);
-                    return key != 0 ? key : fallback;
+                    return (key != 0 || allowEmpty) ? key : fallback;
                 };
                 int selection = static_cast<int>(SendDlgItemMessage(dlg, kIdTransparencySelect, CB_GETCURSEL, 0, 0));
                 dialogState->mode = (selection == 0) ? TransparencyMode::Transparent
@@ -3402,6 +3419,7 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->keyPrev = readHotKey(kIdKeyPrev, dialogState->keyPrev);
                 dialogState->keyZoomIn = readHotKey(kIdKeyZoomIn, dialogState->keyZoomIn);
                 dialogState->keyZoomOut = readHotKey(kIdKeyZoomOut, dialogState->keyZoomOut);
+                dialogState->keyOriginalSize = readHotKey(kIdKeyOriginalSize, dialogState->keyOriginalSize, true);
                 dialogState->keyOpen = readHotKey(kIdKeyOpen, dialogState->keyOpen);
                 dialogState->keyExit = readHotKey(kIdKeyExit, dialogState->keyExit);
                 dialogState->keyAlwaysOnTop = readHotKey(kIdKeyAlwaysOnTop, dialogState->keyAlwaysOnTop);
@@ -3446,6 +3464,7 @@ void ShowSettingsDialog(HWND hwnd)
         g_keyPrevFile = state.keyPrev;
         g_keyZoomIn = state.keyZoomIn;
         g_keyZoomOut = state.keyZoomOut;
+        g_keyOriginalSize = state.keyOriginalSize;
         g_keyOpenFile = state.keyOpen;
         g_keyExit = state.keyExit;
         g_keyAlwaysOnTop = state.keyAlwaysOnTop;
@@ -3907,6 +3926,7 @@ void LoadSettings()
     g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
     g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
     g_keyZoomOut = readKeySetting(L"ZoomOut", VK_DOWN);
+    g_keyOriginalSize = readKeySetting(L"OriginalSize", 0);
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
     g_keyAlwaysOnTop = readKeySetting(L"AlwaysOnTop", 'P');
@@ -3957,6 +3977,8 @@ void SaveSettings()
     WritePrivateProfileStringW(L"KeyConfig", L"ZoomIn", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyZoomOut));
     WritePrivateProfileStringW(L"KeyConfig", L"ZoomOut", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyOriginalSize));
+    WritePrivateProfileStringW(L"KeyConfig", L"OriginalSize", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyOpenFile));
     WritePrivateProfileStringW(L"KeyConfig", L"OpenFile", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyExit));
