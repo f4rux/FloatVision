@@ -36,24 +36,21 @@ jobs:
         run: |
           msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 
-      # 4. 成果物の抽出 (中間ファイルを除去し、完成品だけをピックアップ)
       - name: Collect artifacts
         shell: pwsh
         run: |
-          # 出力用フォルダの作成
           New-Item -ItemType Directory -Path ./publish_dist -Force
 
-          # 1. FloatVision.exe を全階層から探してコピー (中間フォルダ obj は除外)
-          Get-ChildItem -Path . -Filter "FloatVision.exe" -Recurse | Where-Object { $_.FullName -notmatch "obj" -and $_.FullName -notmatch "publish_dist" } | ForEach-Object {
+          # 1. EXE本体のみをコピー
+          Get-ChildItem -Path . -Filter "FloatVision.exe" -Recurse | Where-Object { $_.FullName -notmatch "obj" -and $_.FullName -notmatch "publish_dist" } | Select-Object -First 1 | ForEach-Object {
               Copy-Item $_.FullName -Destination ./publish_dist/
-              Write-Host "Found EXE: $($_.FullName)"
           }
 
-          # 2. 実行に必要な DLL (WebView2Loader.dll 等) をコピー
-          Get-ChildItem -Path . -Filter "*.dll" -Recurse | Where-Object { $_.FullName -notmatch "obj" -and $_.FullName -notmatch "publish_dist" } | ForEach-Object {
-              Copy-Item $_.FullName -Destination ./publish_dist/
-              Write-Host "Found DLL: $($_.FullName)"
-          }
+          # 2. もし Microsoft.Web.WebView2.*.dll も不要（静的リンク）ならここも空にできますが
+          # 念のためこれらが本当に不要か、一度手動で消して確認してみてください。
+          
+          Write-Host "--- Final Package Contents ---"
+          ls ./publish_dist
 
           # 抽出結果をログで確認
           Write-Host "--- Files to be zipped ---"
