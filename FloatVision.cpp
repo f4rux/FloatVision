@@ -403,14 +403,24 @@ void CloseWebView();
 void RefreshMenuTheme();
 void ReloadCurrentFile(bool reloadSettings);
 void ShowAboutDialog(HWND hwnd);
+static void ApplyExplorerTheme(HWND target);
 #endif
 
 HRESULT CALLBACK AboutDialogCallback(HWND hwnd, UINT msg, WPARAM, LPARAM lParam, LONG_PTR)
 {
-    if (msg == TDN_HYPERLINK_CLICKED)
+    switch (msg)
+    {
+    case TDN_CREATED:
+        ApplyExplorerTheme(hwnd);
+        break;
+    case TDN_HYPERLINK_CLICKED:
     {
         const auto* url = reinterpret_cast<LPCWSTR>(lParam);
         ShellExecuteW(hwnd, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
+        break;
+    }
+    default:
+        break;
     }
     return S_OK;
 }
