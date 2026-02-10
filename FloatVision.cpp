@@ -3484,6 +3484,21 @@ void NavigateImage(int delta)
     }
 
     size_t count = g_imageList.size();
+    auto currentIt = std::find_if(g_imageList.begin(), g_imageList.end(), [](const ImageEntry& entry)
+    {
+        return entry.path == g_currentImagePath;
+    });
+    if (currentIt == g_imageList.end())
+    {
+        size_t fallbackIndex = (delta >= 0) ? 0 : (count - 1);
+        if (LoadImageByIndex(fallbackIndex) && g_hwnd)
+        {
+            InvalidateRect(g_hwnd, nullptr, TRUE);
+        }
+        return;
+    }
+
+    g_currentIndex = static_cast<size_t>(std::distance(g_imageList.begin(), currentIt));
     size_t index = (g_currentIndex + count + (delta % static_cast<int>(count))) % count;
     if (LoadImageByIndex(index) && g_hwnd)
     {
@@ -3575,7 +3590,7 @@ void RefreshImageList(const std::filesystem::path& imagePath)
     }
 
     std::error_code ec;
-    bool filterImageOnly = g_sortImageOnly && IsImageFile(g_currentImagePath);
+    bool filterImageOnly = g_sortImageOnly;
 
     for (const auto& entry : std::filesystem::directory_iterator(dir, ec))
     {
