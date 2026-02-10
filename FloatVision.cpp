@@ -4095,8 +4095,7 @@ void SaveSettings()
 
     std::wstring fontNameToSave = GetFontFamilyNameForSave(g_textFontName);
     WritePrivateProfileStringW(L"Text", L"FontName", fontNameToSave.c_str(), g_iniPath.c_str());
-    _snwprintf_s(buffer, _TRUNCATE, L"%.2f", g_textFontSize);
-    WritePrivateProfileStringW(L"Text", L"FontSize", buffer, g_iniPath.c_str());
+    WritePrivateProfileStringW(L"Text", L"FontSize", nullptr, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textColor));
     WritePrivateProfileStringW(L"Text", L"FontColor", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_textBackground));
