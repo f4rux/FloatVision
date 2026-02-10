@@ -6,6 +6,12 @@
 
 By keeping your images or notes pinned to the top of your screen, it serves as a powerful reference tool for any workflow.
 
+
+
+![](res/ss1.png)
+
+![](res/ss2.png)
+
 ---
 
 ### Key Features
@@ -74,19 +80,25 @@ To interact with document content, hold the **Alt** key:
 
 - **Zoom**: `Alt` + `Ctrl` + `Mouse Wheel`
 
-#### Custom Skins
-
-If a file named `skin.png` is placed in the same directory as `FloatVision.exe`, it will be displayed as the default background upon startup.
-
 ---
 
 ### Settings
+
+![](res/ss3.png)
 
 Right-click the window to open the **Context Menu**, then select **Settings**.
 
 - Here you can customize keybindings and other preferences.
 
 - Settings are automatically saved to an `.ini` file in the application folder.
+
+---
+
+### Custom Skins
+
+If a file named `skin.png` is placed in the same directory as `FloatVision.exe`, it will be displayed as the default background upon startup.
+
+
 
 ---
 
