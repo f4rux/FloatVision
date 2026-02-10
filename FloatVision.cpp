@@ -3455,7 +3455,10 @@ void ShowSettingsDialog(HWND hwnd)
                 if (GetComboBoxInfo(GetDlgItem(dlg, kIdTransparencySelect), &comboInfo))
                 {
                     const wchar_t* themeName = IsDarkModeEnabled() ? L"DarkMode_Explorer" : L"Explorer";
-                    SetWindowTheme(comboInfo.hwndList, themeName, nullptr);
+                    if (comboInfo.hwndList != nullptr)
+                    {
+                        SetWindowTheme(comboInfo.hwndList, themeName, nullptr);
+                    }
                 }
                 return TRUE;
             }
@@ -4237,9 +4240,38 @@ bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight)
 
     void* bits = nullptr;
     HDC screenDc = GetDC(nullptr);
+    if (screenDc == nullptr)
+    {
+        scaler->Release();
+        return false;
+    }
+
     HBITMAP dib = CreateDIBSection(screenDc, &bmi, DIB_RGB_COLORS, &bits, nullptr, 0);
     HDC memDc = CreateCompatibleDC(screenDc);
+    if (dib == nullptr || memDc == nullptr)
+    {
+        if (memDc != nullptr)
+        {
+            DeleteDC(memDc);
+        }
+        if (dib != nullptr)
+        {
+            DeleteObject(dib);
+        }
+        ReleaseDC(nullptr, screenDc);
+        scaler->Release();
+        return false;
+    }
+
     HGDIOBJ oldBmp = SelectObject(memDc, dib);
+    if (oldBmp == nullptr)
+    {
+        DeleteDC(memDc);
+        DeleteObject(dib);
+        ReleaseDC(nullptr, screenDc);
+        scaler->Release();
+        return false;
+    }
 
     WICRect rect{ 0, 0, static_cast<INT>(width), static_cast<INT>(height) };
     UINT stride = width * 4;
@@ -4461,14 +4493,19 @@ void Render(HWND hwnd)
 // エントリポイント
 // =====================
 int WINAPI wWinMain(
-    HINSTANCE hInstance,
-    HINSTANCE,
-    PWSTR,
-    int nCmdShow
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE,
+    _In_ PWSTR,
+    _In_ int nCmdShow
 )
 {
     SetProcessDPIAware();
-    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    HRESULT coInitResult = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(coInitResult) && coInitResult != RPC_E_CHANGED_MODE)
+    {
+        return 0;
+    }
+    bool shouldCoUninitialize = (coInitResult != RPC_E_CHANGED_MODE);
     INITCOMMONCONTROLSEX icc{};
     icc.dwSize = sizeof(icc);
     icc.dwICC = ICC_WIN95_CLASSES;
@@ -4646,6 +4683,9 @@ int WINAPI wWinMain(
     }
 
     CleanupResources();
-    CoUninitialize();
+    if (shouldCoUninitialize)
+    {
+        CoUninitialize();
+    }
     return 0;
 }
