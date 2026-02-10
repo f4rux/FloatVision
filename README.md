@@ -1,3 +1,5 @@
+<img title="" src="res/FloatVision.png" alt="" data-align="center" width="95">
+
 # FloatVision
 
 **FloatVision** is a minimalist, frameless viewer for images, text, Markdown, and HTML.
@@ -9,33 +11,30 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
 ### Key Features
 
 - **Frameless UI**: Focus entirely on your content without window clutter.
-  
+
 - **Always on Top**: Perfect for checking reference materials while working in other apps.
-  
+
 - **Broad Format Support**:
   
   - **Images**: `.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`, `.tif`, `.tiff`, `.webp`
-    
+  
   - **Documents**: `.md`, `.markdown`, `.txt`, `.html`, `.htm`
-    
 
 ---
 
 ### Prerequisites
 
 - **OS**: Windows 10 20H2 or later.
-  
+
 - **WebView2 Runtime**: Required for rendering Markdown and HTML (typically pre-installed on modern Windows).
-  
 
 ---
 
 ### Installation & Uninstallation
 
 - **Install**: Simply extract the downloaded folder to any location. This app is portable and does not touch the Windows Registry.
-  
+
 - **Uninstall**: Delete the entire folder.
-  
 
 ---
 
@@ -44,11 +43,10 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
 You can open files in three ways:
 
 1. **Drag & Drop**: Launch `FloatVision.exe` and drop a file onto the window.
-  
+
 2. **In-App Context Menu**: Right-click on the window and select **Open** to choose a file.
-  
+
 3. **Command Line**: Run `FloatVision.exe "path/to/file"`.
-  
 
 ---
 
@@ -57,11 +55,10 @@ You can open files in three ways:
 #### General
 
 - **Move**: Click and drag anywhere on the window.
-  
+
 - **Resize**: Drag the window edges.
-  
+
 - **Advanced**: Check the **Key Config** in Settings for customizable keyboard shortcuts.
-  
 
 #### Image Viewer
 
@@ -72,11 +69,10 @@ You can open files in three ways:
 To interact with document content, hold the **Alt** key:
 
 - **Vertical Scroll**: `Alt` + `Mouse Wheel`
-  
+
 - **Horizontal Scroll**: `Alt` + `Shift` + `Mouse Wheel`
-  
+
 - **Zoom**: `Alt` + `Ctrl` + `Mouse Wheel`
-  
 
 #### Custom Skins
 
@@ -89,9 +85,8 @@ If a file named `skin.png` is placed in the same directory as `FloatVision.exe`,
 Right-click the window to open the **Context Menu**, then select **Settings**.
 
 - Here you can customize keybindings and other preferences.
-  
+
 - Settings are automatically saved to an `.ini` file in the application folder.
-  
 
 ---
 
