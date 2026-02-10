@@ -19,6 +19,13 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
+      # 1.5. NuGetのセットアップとパッケージ復元
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore FloatVision.slnx
+
       # 2. ビルド実行 (dotnetではなくmsbuildを直接使う)
       # .slnx は最新の MSBuild なら解釈可能です
       - name: Build app
