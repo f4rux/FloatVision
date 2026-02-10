@@ -413,8 +413,6 @@ constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
 void ShowAboutDialog(HWND hwnd)
 {
     constexpr int kIdAboutOpenLink = 2201;
-    constexpr int kIdAboutUrl = 2202;
-
     auto alignDword = [](std::vector<BYTE>& buffer)
     {
         while (buffer.size() % 4 != 0)
@@ -486,7 +484,7 @@ void ShowAboutDialog(HWND hwnd)
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision ver 1.0.0");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(28), scale(250), scale(12), 0xFFFF, 0x0082, L"Author: f4rux");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | SS_NOTIFY, scale(12), scale(44), scale(250), scale(12), kIdAboutUrl, 0x0082, kAboutProjectUrl);
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(44), scale(250), scale(12), 0xFFFF, 0x0082, L"https://github.com/f4rux/FloatVision");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, scale(12), scale(62), scale(98), scale(18), kIdAboutOpenLink, 0x0080, L"Open project page");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, scale(214), scale(62), scale(54), scale(18), IDOK, 0x0080, L"OK");
 
@@ -532,7 +530,6 @@ void ShowAboutDialog(HWND hwnd)
             switch (LOWORD(wParam))
             {
             case kIdAboutOpenLink:
-            case kIdAboutUrl:
                 ShellExecuteW(dlg, L"open", kAboutProjectUrl, nullptr, nullptr, SW_SHOWNORMAL);
                 return TRUE;
             case IDOK:
