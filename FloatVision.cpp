@@ -2863,7 +2863,7 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
             if (scriptList)
             {
                 RECT scriptRect = toClientRect(scriptList);
-                contentRight = std::max(contentRight, scriptRect.right);
+                contentRight = (contentRight > static_cast<int>(scriptRect.right)) ? contentRight : static_cast<int>(scriptRect.right);
             }
 
             constexpr int kHorizontalPadding = 10;
@@ -2871,7 +2871,7 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
             constexpr int kBottomPadding = 10;
             constexpr int kButtonGap = 6;
 
-            int fontWidth = std::max(120, contentRight - fontRect.left);
+            int fontWidth = (120 > (contentRight - static_cast<int>(fontRect.left))) ? 120 : (contentRight - static_cast<int>(fontRect.left));
             RECT labelRect = toClientRect(fontLabel);
             MoveWindow(fontList, fontRect.left, fontRect.top, fontWidth, fontRect.bottom - fontRect.top, TRUE);
             MoveWindow(fontLabel, fontRect.left, labelRect.top, fontWidth, labelRect.bottom - labelRect.top, TRUE);
@@ -2882,8 +2882,9 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
             int cancelWidth = cancelRect.right - cancelRect.left;
 
             int buttonY = resizedFontRect.bottom + kVerticalGap;
-            int contentWidth = std::max(resizedFontRect.right + kHorizontalPadding,
-                                        resizedFontRect.left + okWidth + cancelWidth + kButtonGap + kHorizontalPadding);
+            int contentWidthCandidateA = static_cast<int>(resizedFontRect.right) + kHorizontalPadding;
+            int contentWidthCandidateB = static_cast<int>(resizedFontRect.left) + okWidth + cancelWidth + kButtonGap + kHorizontalPadding;
+            int contentWidth = (contentWidthCandidateA > contentWidthCandidateB) ? contentWidthCandidateA : contentWidthCandidateB;
             int cancelX = contentWidth - kHorizontalPadding - cancelWidth;
             int okX = cancelX - kButtonGap - okWidth;
 
