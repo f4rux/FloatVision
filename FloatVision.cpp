@@ -337,6 +337,7 @@ constexpr int kMenuAlwaysOnTop = 1008;
 constexpr int kMenuExit = 1009;
 constexpr int kMenuSettings = 1010;
 constexpr int kMenuReload = 1011;
+constexpr int kMenuAbout = 1012;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -401,7 +402,58 @@ void HideWebView();
 void CloseWebView();
 void RefreshMenuTheme();
 void ReloadCurrentFile(bool reloadSettings);
+void ShowAboutDialog(HWND hwnd);
+static void ApplyExplorerTheme(HWND target);
 #endif
+
+HRESULT CALLBACK AboutDialogCallback(HWND hwnd, UINT msg, WPARAM, LPARAM lParam, LONG_PTR)
+{
+    switch (msg)
+    {
+    case TDN_CREATED:
+        ApplyExplorerTheme(hwnd);
+        break;
+    case TDN_HYPERLINK_CLICKED:
+    {
+        const auto* url = reinterpret_cast<LPCWSTR>(lParam);
+        ShellExecuteW(hwnd, L"open", url, nullptr, nullptr, SW_SHOWNORMAL);
+        break;
+    }
+    default:
+        break;
+    }
+    return S_OK;
+}
+
+void ShowAboutDialog(HWND hwnd)
+{
+    constexpr wchar_t kProjectUrl[] = L"https://github.com/f4rux/FloatVision";
+
+    TASKDIALOGCONFIG dialog{};
+    dialog.cbSize = sizeof(dialog);
+    dialog.hwndParent = hwnd;
+    dialog.dwFlags = TDF_ENABLE_HYPERLINKS | TDF_ALLOW_DIALOG_CANCELLATION;
+    dialog.dwCommonButtons = TDCBF_OK_BUTTON;
+    dialog.pszWindowTitle = L"About FloatVision";
+    dialog.pszMainInstruction = L"FloatVision ver 1.0.0";
+    dialog.pszContent =
+        L"Author: f4rux\n\n"
+        L"<a href=\"https://github.com/f4rux/FloatVision\">https://github.com/f4rux/FloatVision</a>";
+    dialog.pfCallback = AboutDialogCallback;
+
+    if (TaskDialogIndirect(&dialog, nullptr, nullptr, nullptr) != S_OK)
+    {
+        std::wstring fallback =
+            L"FloatVision ver 1.0.0\n"
+            L"Author: f4rux\n"
+            + std::wstring(kProjectUrl)
+            + L"\n\nOpen the project page in your browser?";
+        if (MessageBoxW(hwnd, fallback.c_str(), L"About FloatVision", MB_ICONINFORMATION | MB_YESNO) == IDYES)
+        {
+            ShellExecuteW(hwnd, L"open", kProjectUrl, nullptr, nullptr, SW_SHOWNORMAL);
+        }
+    }
+}
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -599,6 +651,7 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSettings, L"Settings...");
+        AppendMenu(menu, MF_STRING, kMenuAbout, L"About");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
@@ -677,6 +730,9 @@ LRESULT CALLBACK WndProc(
             return 0;
         case kMenuSettings:
             ShowSettingsDialog(hwnd);
+            return 0;
+        case kMenuAbout:
+            ShowAboutDialog(hwnd);
             return 0;
         case kMenuReload:
             ReloadCurrentFile(true);
