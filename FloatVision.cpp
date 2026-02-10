@@ -2888,7 +2888,7 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 28);
+    appendWord(tmpl, 29);
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(248));
