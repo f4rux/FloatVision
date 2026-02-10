@@ -29,11 +29,12 @@ jobs:
         run: nuget restore FloatVision.slnx
 
       # 3. ビルド実行
-      # /p:PlatformToolset を空にするか、環境のデフォルト(v143)を明示して、
-      # VS2022のディレクトリ内に存在しない v145 を探しに行くのを防ぎます。
+      # PlatformToolsetをv143(VS2022互換)にし、
+      # WindowsTargetPlatformVersionを最新(10.0)に、
+      # さらに TargetGenerateFullPaths を追加してパス解決を確実にします。
       - name: Build app
         run: |
-          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:TargetPlatformVersion=10.0
+          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
 
       # 4. 成果物の抽出 (中間ファイルを除去し、完成品だけをピックアップ)
       - name: Collect artifacts
