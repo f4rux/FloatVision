@@ -2813,6 +2813,49 @@ static void ApplyExplorerTheme(HWND target)
     );
 }
 
+static void HideFontDialogStyleAndSizeControls(HWND target)
+{
+    if (!target)
+    {
+        return;
+    }
+
+    const int controlIds[] = { stc2, cmb2, stc3, cmb3 };
+    for (int controlId : controlIds)
+    {
+        HWND control = GetDlgItem(target, controlId);
+        if (control)
+        {
+            ShowWindow(control, SW_HIDE);
+        }
+    }
+
+    EnumChildWindows(
+        target,
+        [](HWND child, LPARAM) -> BOOL
+        {
+            int id = GetDlgCtrlID(child);
+            if (id == stc2 || id == cmb2 || id == stc3 || id == cmb3)
+            {
+                ShowWindow(child, SW_HIDE);
+            }
+            return TRUE;
+        },
+        0
+    );
+}
+
+static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
+{
+    if (msg == WM_INITDIALOG || msg == WM_SHOWWINDOW)
+    {
+        HideFontDialogStyleAndSizeControls(dlg);
+        HideFontDialogStyleAndSizeControls(GetParent(dlg));
+    }
+
+    return 0;
+}
+
 void ShowSettingsDialog(HWND hwnd)
 {
 
@@ -3383,7 +3426,8 @@ void ShowSettingsDialog(HWND hwnd)
                 cf.lStructSize = sizeof(cf);
                 cf.hwndOwner = dlg;
                 cf.lpLogFont = &lf;
-                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
+                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOSTYLESEL | CF_NOSIZESEL | CF_ENABLEHOOK;
+                cf.lpfnHook = FontChooserHookProc;
                 if (ChooseFont(&cf))
                 {
                     std::wstring familyName = GetFontFamilyNameForSave(lf.lfFaceName);
