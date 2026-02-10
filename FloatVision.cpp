@@ -337,6 +337,7 @@ constexpr int kMenuAlwaysOnTop = 1008;
 constexpr int kMenuExit = 1009;
 constexpr int kMenuSettings = 1010;
 constexpr int kMenuReload = 1011;
+constexpr int kMenuAbout = 1012;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -401,7 +402,179 @@ void HideWebView();
 void CloseWebView();
 void RefreshMenuTheme();
 void ReloadCurrentFile(bool reloadSettings);
+void ShowAboutDialog(HWND hwnd);
+bool IsDarkModeEnabled();
+void ApplyImmersiveDarkMode(HWND target, bool enabled);
+static void ApplyExplorerTheme(HWND target);
 #endif
+
+constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
+
+void ShowAboutDialog(HWND hwnd)
+{
+    constexpr int kIdAboutOpenLink = 2201;
+    constexpr int kIdAboutUrl = 2202;
+
+    auto alignDword = [](std::vector<BYTE>& buffer)
+    {
+        while (buffer.size() % 4 != 0)
+        {
+            buffer.push_back(0);
+        }
+    };
+
+    auto appendWord = [](std::vector<BYTE>& buffer, WORD value)
+    {
+        buffer.push_back(static_cast<BYTE>(value & 0xFF));
+        buffer.push_back(static_cast<BYTE>((value >> 8) & 0xFF));
+    };
+
+    auto appendDword = [&](std::vector<BYTE>& buffer, DWORD value)
+    {
+        appendWord(buffer, static_cast<WORD>(value & 0xFFFF));
+        appendWord(buffer, static_cast<WORD>((value >> 16) & 0xFFFF));
+    };
+
+    auto appendString = [&](std::vector<BYTE>& buffer, const wchar_t* text)
+    {
+        while (*text)
+        {
+            appendWord(buffer, static_cast<WORD>(*text));
+            ++text;
+        }
+        appendWord(buffer, 0);
+    };
+
+    auto addControl = [&](std::vector<BYTE>& buffer, DWORD style, short x, short y, short cx, short cy, WORD id, WORD classAtom, const wchar_t* text)
+    {
+        alignDword(buffer);
+        appendDword(buffer, style);
+        appendDword(buffer, 0);
+        appendWord(buffer, static_cast<WORD>(x));
+        appendWord(buffer, static_cast<WORD>(y));
+        appendWord(buffer, static_cast<WORD>(cx));
+        appendWord(buffer, static_cast<WORD>(cy));
+        appendWord(buffer, id);
+        appendWord(buffer, 0xFFFF);
+        appendWord(buffer, classAtom);
+        appendString(buffer, text);
+        appendWord(buffer, 0);
+    };
+
+    std::vector<BYTE> tmpl;
+    tmpl.reserve(512);
+
+    constexpr float kDialogScale = 0.9f;
+    auto scale = [=](short value)
+    {
+        return static_cast<short>(std::lround(value * kDialogScale));
+    };
+
+    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
+    appendDword(tmpl, dialogStyle);
+    appendDword(tmpl, 0);
+    appendWord(tmpl, 5);
+    appendWord(tmpl, scale(10));
+    appendWord(tmpl, scale(10));
+    appendWord(tmpl, scale(280));
+    appendWord(tmpl, scale(92));
+    appendWord(tmpl, 0);
+    appendWord(tmpl, 0);
+    appendString(tmpl, L"About FloatVision");
+    appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
+    appendString(tmpl, L"Segoe UI");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision ver 1.0.0");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(28), scale(250), scale(12), 0xFFFF, 0x0082, L"Author: f4rux");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | SS_NOTIFY, scale(12), scale(44), scale(250), scale(12), kIdAboutUrl, 0x0082, kAboutProjectUrl);
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, scale(12), scale(62), scale(98), scale(18), kIdAboutOpenLink, 0x0080, L"Open project page");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, scale(214), scale(62), scale(54), scale(18), IDOK, 0x0080, L"OK");
+
+    struct AboutDialogState
+    {
+        HBRUSH dialogBrush;
+        COLORREF dialogBackgroundColor;
+        COLORREF dialogTextColor;
+    } state{ nullptr, RGB(255, 255, 255), RGB(0, 0, 0) };
+
+    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    {
+        auto* dialogState = reinterpret_cast<AboutDialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
+        switch (msg)
+        {
+        case WM_INITDIALOG:
+        {
+            dialogState = reinterpret_cast<AboutDialogState*>(lParam);
+            SetWindowLongPtr(dlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialogState));
+
+            bool darkMode = IsDarkModeEnabled();
+            dialogState->dialogBackgroundColor = darkMode ? RGB(32, 32, 32) : RGB(255, 255, 255);
+            dialogState->dialogTextColor = darkMode ? RGB(240, 240, 240) : RGB(0, 0, 0);
+            dialogState->dialogBrush = CreateSolidBrush(dialogState->dialogBackgroundColor);
+
+            const wchar_t* themeName = darkMode ? L"DarkMode_Explorer" : L"Explorer";
+            ApplyImmersiveDarkMode(dlg, darkMode);
+            SetWindowTheme(dlg, themeName, nullptr);
+            EnumChildWindows(
+                dlg,
+                [](HWND child, LPARAM param) -> BOOL
+                {
+                    const auto* themeName = reinterpret_cast<const wchar_t*>(param);
+                    SetWindowTheme(child, themeName, nullptr);
+                    return TRUE;
+                },
+                reinterpret_cast<LPARAM>(themeName)
+            );
+            return TRUE;
+        }
+        case WM_COMMAND:
+        {
+            switch (LOWORD(wParam))
+            {
+            case kIdAboutOpenLink:
+            case kIdAboutUrl:
+                ShellExecuteW(dlg, L"open", kAboutProjectUrl, nullptr, nullptr, SW_SHOWNORMAL);
+                return TRUE;
+            case IDOK:
+            case IDCANCEL:
+                EndDialog(dlg, IDOK);
+                return TRUE;
+            }
+            break;
+        }
+        case WM_CTLCOLORDLG:
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN:
+        {
+            if (!dialogState)
+            {
+                break;
+            }
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            SetTextColor(hdc, dialogState->dialogTextColor);
+            SetBkColor(hdc, dialogState->dialogBackgroundColor);
+            SetBkMode(hdc, TRANSPARENT);
+            return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
+        }
+        case WM_DESTROY:
+            if (dialogState && dialogState->dialogBrush)
+            {
+                DeleteObject(dialogState->dialogBrush);
+                dialogState->dialogBrush = nullptr;
+            }
+            break;
+        }
+        return FALSE;
+    };
+
+    DialogBoxIndirectParamW(
+        GetModuleHandle(nullptr),
+        reinterpret_cast<DLGTEMPLATE*>(tmpl.data()),
+        hwnd,
+        dialogProc,
+        reinterpret_cast<LPARAM>(&state)
+    );
+}
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -599,6 +772,7 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSettings, L"Settings...");
+        AppendMenu(menu, MF_STRING, kMenuAbout, L"About");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
         AppendMenu(menu, MF_STRING, kMenuSortNameDesc, L"Sort: Name (Z-A)");
@@ -677,6 +851,9 @@ LRESULT CALLBACK WndProc(
             return 0;
         case kMenuSettings:
             ShowSettingsDialog(hwnd);
+            return 0;
+        case kMenuAbout:
+            ShowAboutDialog(hwnd);
             return 0;
         case kMenuReload:
             ReloadCurrentFile(true);
