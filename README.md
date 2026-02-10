@@ -10,7 +10,7 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
 
 ![](res/ss2.png)
 
-### Key Features
+## Key Features
 
 - **Frameless UI**: Focus entirely on your content without window clutter.
 
@@ -22,19 +22,19 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
   
   - **Documents**: `.md`, `.markdown`, `.txt`, `.html`, `.htm`
 
-### Prerequisites
+## Prerequisites
 
 - **OS**: Windows 10 20H2 or later.
 
 - **WebView2 Runtime**: Required for rendering Markdown and HTML (typically pre-installed on modern Windows).
 
-### Installation & Uninstallation
+## Installation & Uninstallation
 
 - **Install**: Simply extract the downloaded folder to any location. This app is portable and does not touch the Windows Registry.
 
 - **Uninstall**: Delete the entire folder.
 
-### How to Use
+## How to Use
 
 You can open files in three ways:
 
@@ -44,9 +44,9 @@ You can open files in three ways:
 
 3. **Command Line**: Run `FloatVision.exe "path/to/file"`.
 
-### Controls
+## Controls
 
-#### General
+### General
 
 - **Move**: Click and drag anywhere on the window.
 
@@ -54,11 +54,11 @@ You can open files in three ways:
 
 - **Advanced**: Check the **Key Config** in Settings for customizable keyboard shortcuts.
 
-#### Image Viewer
+### Image Viewer
 
 - **Zoom**: Use the **Mouse Wheel** (Up/Down).
 
-#### Text, Markdown, & HTML
+### Text, Markdown, & HTML
 
 To interact with document content, hold the **Alt** key:
 
@@ -68,7 +68,7 @@ To interact with document content, hold the **Alt** key:
 
 - **Zoom**: `Alt` + `Ctrl` + `Mouse Wheel`
 
-### Settings
+## Settings
 
 ![](res/ss3.png)
 
@@ -78,11 +78,11 @@ Right-click the window to open the **Context Menu**, then select **Settings**.
 
 - Settings are automatically saved to an `.ini` file in the application folder.
 
-### Custom Skins
+## Custom Skins
 
 If a file named `skin.png` is placed in the same directory as `FloatVision.exe`, it will be displayed as the default background upon startup.
 
-### Third-Party Libraries
+## Third-Party Libraries
 
 This project uses the following third-party library:
 
@@ -92,12 +92,12 @@ This project uses the following third-party library:
   Licensed under the **MIT License**.  
   https://github.com/mity/md4c
 
-### License
+## License
 
 FloatVision is released under the **MIT License**.
 
 See the `LICENSE` file for details.
 
-### Support & Disclaimer
+## Support & Disclaimer
 
 This project is provided "as-is" without any warranty or formal support. Please note that there are no planned updates for bug fixes or new features. What you see is the final version.
