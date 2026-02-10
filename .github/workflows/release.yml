@@ -1,0 +1,46 @@
+name: Build and Release (.slnx)
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: windows-latest # VS2026環境を含むランナー
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # 1. .slnx を理解できる最新の .NET SDK をセットアップ
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '9.0.x' # または 10.x (VS2026対応バージョン)
+
+      # 2. 依存関係の復元 (slnx対応)
+      - name: Restore dependencies
+        run: dotnet restore FloatVision.slnx
+
+      # 3. ビルド実行 (Release構成)
+      # dotnet build は内部で MSBuild を呼び出しますが、.slnx を正しく解釈できます
+      - name: Build app
+        run: |
+          dotnet build FloatVision.slnx --configuration Release --output ./publish
+
+      # 4. 成果物をZIP化
+      - name: Archive build artifacts
+        shell: pwsh
+        run: |
+          Compress-Archive -Path ./publish/* -DestinationPath MyApp-v${{ github.ref_name }}.zip
+
+      # 5. リリース作成
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: MyApp-v${{ github.ref_name }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
