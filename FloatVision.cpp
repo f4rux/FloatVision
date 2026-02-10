@@ -2831,6 +2831,25 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
                 ShowWindow(control, SW_HIDE);
             }
         }
+
+        EnumChildWindows(
+            dlg,
+            [](HWND child, LPARAM) -> BOOL
+            {
+                wchar_t className[32]{};
+                if (GetClassNameW(child, className, static_cast<int>(std::size(className))) > 0
+                    && _wcsicmp(className, L"Button") == 0)
+                {
+                    LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
+                    if ((style & BS_GROUPBOX) == BS_GROUPBOX)
+                    {
+                        ShowWindow(child, SW_HIDE);
+                    }
+                }
+                return TRUE;
+            },
+            0
+        );
     }
 
     return 0;
