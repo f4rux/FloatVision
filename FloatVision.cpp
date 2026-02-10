@@ -2190,6 +2190,10 @@ bool ApplyHtmlContent(std::wstring html)
         g_webviewController->put_IsVisible(FALSE);
     }
     ApplyTransparencyMode();
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
 
     if (!EnsureWebView2(g_hwnd))
     {
@@ -4126,6 +4130,17 @@ void Render(HWND hwnd)
 {
     if (g_hasHtml)
     {
+        if (g_webviewPendingShow)
+        {
+            HDC hdc = GetDC(hwnd);
+            if (hdc)
+            {
+                RECT rc{};
+                GetClientRect(hwnd, &rc);
+                FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+                ReleaseDC(hwnd, hdc);
+            }
+        }
         UpdateWebViewBounds();
         return;
     }
