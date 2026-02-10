@@ -2817,7 +2817,12 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
 {
     if (msg == WM_INITDIALOG)
     {
-        const int controlIds[] = { stc2, cmb2, stc3, cmb3 };
+        const int controlIds[] = {
+            stc2, cmb2, stc3, cmb3, // style/size
+            stc5,                   // sample section frame
+            stc6, stc7,             // sample label/preview
+            stc8, cmb5              // script (charset)
+        };
         for (int controlId : controlIds)
         {
             HWND control = GetDlgItem(dlg, controlId);
@@ -2826,6 +2831,25 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
                 ShowWindow(control, SW_HIDE);
             }
         }
+
+        EnumChildWindows(
+            dlg,
+            [](HWND child, LPARAM) -> BOOL
+            {
+                wchar_t className[32]{};
+                if (GetClassNameW(child, className, static_cast<int>(std::size(className))) > 0
+                    && _wcsicmp(className, L"Button") == 0)
+                {
+                    LONG_PTR style = GetWindowLongPtrW(child, GWL_STYLE);
+                    if ((style & BS_GROUPBOX) == BS_GROUPBOX)
+                    {
+                        ShowWindow(child, SW_HIDE);
+                    }
+                }
+                return TRUE;
+            },
+            0
+        );
     }
 
     return 0;
