@@ -3383,7 +3383,7 @@ void ShowSettingsDialog(HWND hwnd)
                 cf.lStructSize = sizeof(cf);
                 cf.hwndOwner = dlg;
                 cf.lpLogFont = &lf;
-                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT;
+                cf.Flags = CF_SCREENFONTS | CF_INITTOLOGFONTSTRUCT | CF_NOSTYLESEL | CF_NOSIZESEL;
                 if (ChooseFont(&cf))
                 {
                     std::wstring familyName = GetFontFamilyNameForSave(lf.lfFaceName);
