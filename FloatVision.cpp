@@ -2817,7 +2817,11 @@ static UINT_PTR CALLBACK FontChooserHookProc(HWND dlg, UINT msg, WPARAM, LPARAM)
 {
     if (msg == WM_INITDIALOG)
     {
-        const int controlIds[] = { stc2, cmb2, stc3, cmb3 };
+        const int controlIds[] = {
+            stc2, cmb2, stc3, cmb3, // style/size
+            stc6, stc7,             // sample label/preview
+            stc8, cmb5              // script (charset)
+        };
         for (int controlId : controlIds)
         {
             HWND control = GetDlgItem(dlg, controlId);
