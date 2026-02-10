@@ -100,7 +100,7 @@ WORD g_keyNextFile = VK_RIGHT;
 WORD g_keyPrevFile = VK_LEFT;
 WORD g_keyZoomIn = VK_UP;
 WORD g_keyZoomOut = VK_DOWN;
-WORD g_keyOriginalSize = 0;
+WORD g_keyOriginalSize = '0';
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
 WORD g_keyAlwaysOnTop = 'P';
@@ -2892,7 +2892,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(248));
-    appendWord(tmpl, scale(326));
+    appendWord(tmpl, scale(342));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -2930,8 +2930,8 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(278), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(140), scale(276), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(302), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(302), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(124), scale(318), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(184), scale(318), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -3926,7 +3926,7 @@ void LoadSettings()
     g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
     g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
     g_keyZoomOut = readKeySetting(L"ZoomOut", VK_DOWN);
-    g_keyOriginalSize = readKeySetting(L"OriginalSize", 0);
+    g_keyOriginalSize = readKeySetting(L"OriginalSize", '0');
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
     g_keyAlwaysOnTop = readKeySetting(L"AlwaysOnTop", 'P');
