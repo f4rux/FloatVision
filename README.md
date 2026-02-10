@@ -10,8 +10,6 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
 
 ![](res/ss2.png)
 
----
-
 ### Key Features
 
 - **Frameless UI**: Focus entirely on your content without window clutter.
@@ -24,23 +22,17 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
   
   - **Documents**: `.md`, `.markdown`, `.txt`, `.html`, `.htm`
 
----
-
 ### Prerequisites
 
 - **OS**: Windows 10 20H2 or later.
 
 - **WebView2 Runtime**: Required for rendering Markdown and HTML (typically pre-installed on modern Windows).
 
----
-
 ### Installation & Uninstallation
 
 - **Install**: Simply extract the downloaded folder to any location. This app is portable and does not touch the Windows Registry.
 
 - **Uninstall**: Delete the entire folder.
-
----
 
 ### How to Use
 
@@ -51,8 +43,6 @@ You can open files in three ways:
 2. **In-App Context Menu**: Right-click on the window and select **Open** to choose a file.
 
 3. **Command Line**: Run `FloatVision.exe "path/to/file"`.
-
----
 
 ### Controls
 
@@ -78,8 +68,6 @@ To interact with document content, hold the **Alt** key:
 
 - **Zoom**: `Alt` + `Ctrl` + `Mouse Wheel`
 
----
-
 ### Settings
 
 ![](res/ss3.png)
@@ -90,13 +78,9 @@ Right-click the window to open the **Context Menu**, then select **Settings**.
 
 - Settings are automatically saved to an `.ini` file in the application folder.
 
----
-
 ### Custom Skins
 
 If a file named `skin.png` is placed in the same directory as `FloatVision.exe`, it will be displayed as the default background upon startup.
-
----
 
 ### Third-Party Libraries
 
@@ -108,15 +92,11 @@ This project uses the following third-party library:
   Licensed under the **MIT License**.  
   https://github.com/mity/md4c
 
----
-
 ### License
 
 FloatVision is released under the **MIT License**.
 
 See the `LICENSE` file for details.
-
----
 
 ### Support & Disclaimer
 
