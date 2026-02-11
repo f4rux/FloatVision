@@ -827,6 +827,11 @@ LRESULT CALLBACK WndProc(
             return 0;
         case kMenuZoomIn:
         {
+            if (g_hasHtml)
+            {
+                HandleHtmlOverlayShortcutKeyDown(g_keyZoomIn);
+                return 0;
+            }
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(1.1f, pt);
@@ -835,6 +840,11 @@ LRESULT CALLBACK WndProc(
         }
         case kMenuZoomOut:
         {
+            if (g_hasHtml)
+            {
+                HandleHtmlOverlayShortcutKeyDown(g_keyZoomOut);
+                return 0;
+            }
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(1.0f / 1.1f, pt);
@@ -842,6 +852,11 @@ LRESULT CALLBACK WndProc(
             return 0;
         }
         case kMenuOriginalSize:
+            if (g_hasHtml)
+            {
+                HandleHtmlOverlayShortcutKeyDown(g_keyOriginalSize);
+                return 0;
+            }
             g_fitToWindow = false;
             g_zoom = 1.0f;
             UpdateWindowToZoomedImage();
