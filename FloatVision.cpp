@@ -82,6 +82,8 @@ float g_textFontSize = 18.0f;
 COLORREF g_textColor = RGB(240, 240, 240);
 COLORREF g_textBackground = RGB(20, 20, 20);
 bool g_textWrap = true;
+UINT g_textWindowWidth = 800;
+UINT g_textWindowHeight = 600;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
@@ -97,15 +99,19 @@ enum class HtmlInputKey
     Alt = 2
 };
 HtmlInputKey g_htmlInputKey = HtmlInputKey::Alt;
-WORD g_keyNextFile = VK_RIGHT;
-WORD g_keyPrevFile = VK_LEFT;
-WORD g_keyZoomIn = VK_UP;
-WORD g_keyZoomOut = VK_DOWN;
+WORD g_keyNextFile = 'J';
+WORD g_keyPrevFile = 'K';
+WORD g_keyZoomIn = VK_OEM_PLUS;
+WORD g_keyZoomOut = VK_OEM_MINUS;
 WORD g_keyOriginalSize = '0';
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
 WORD g_keyAlwaysOnTop = 'P';
 WORD g_keyReload = 'R';
+WORD g_keyScrollUp = VK_UP;
+WORD g_keyScrollDown = VK_DOWN;
+WORD g_keyScrollLeft = VK_LEFT;
+WORD g_keyScrollRight = VK_RIGHT;
 
 enum class TransparencyMode
 {
@@ -384,6 +390,7 @@ void UpdateTextFormat();
 void UpdateTextBrush();
 void ResizeWindowByFactor(HWND hwnd, float factor);
 void ScrollTextBy(float delta);
+void ApplyDocumentWindowSize(HWND hwnd);
 bool LoadHtmlFromFile(const wchar_t* path);
 bool LoadMarkdownFromFile(const wchar_t* path);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
@@ -2443,6 +2450,7 @@ bool ApplyHtmlContent(std::wstring html)
         return false;
     }
 
+    ApplyDocumentWindowSize(g_hwnd);
     return true;
 }
 
@@ -2718,16 +2726,26 @@ bool ExecuteWebViewScript(const wchar_t* script)
 bool HandleHtmlOverlayKeyDown(WPARAM wParam)
 {
     bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    WORD key = static_cast<WORD>(wParam);
+    if (key == g_keyScrollUp)
+    {
+        return ExecuteWebViewScript(L"window.scrollBy(0, -60);");
+    }
+    if (key == g_keyScrollDown)
+    {
+        return ExecuteWebViewScript(L"window.scrollBy(0, 60);");
+    }
+    if (key == g_keyScrollLeft)
+    {
+        return ExecuteWebViewScript(L"window.scrollBy(-60, 0);");
+    }
+    if (key == g_keyScrollRight)
+    {
+        return ExecuteWebViewScript(L"window.scrollBy(60, 0);");
+    }
+
     switch (wParam)
     {
-    case VK_UP:
-        return ExecuteWebViewScript(L"window.scrollBy(0, -60);");
-    case VK_DOWN:
-        return ExecuteWebViewScript(L"window.scrollBy(0, 60);");
-    case VK_LEFT:
-        return ExecuteWebViewScript(L"window.scrollBy(-60, 0);");
-    case VK_RIGHT:
-        return ExecuteWebViewScript(L"window.scrollBy(60, 0);");
     case VK_PRIOR:
         return ExecuteWebViewScript(L"window.scrollBy(0, -window.innerHeight * 0.9);");
     case VK_NEXT:
@@ -3060,6 +3078,8 @@ namespace
     constexpr int kIdFontColor = 2006;
     constexpr int kIdBackColor = 2007;
     constexpr int kIdWrap = 2008;
+    constexpr int kIdTextWindowWidth = 2010;
+    constexpr int kIdTextWindowHeight = 2011;
     constexpr int kIdKeyNext = 2101;
     constexpr int kIdKeyPrev = 2102;
     constexpr int kIdKeyZoomIn = 2103;
@@ -3069,6 +3089,10 @@ namespace
     constexpr int kIdKeyExit = 2106;
     constexpr int kIdKeyAlwaysOnTop = 2107;
     constexpr int kIdKeyReload = 2108;
+    constexpr int kIdKeyScrollUp = 2110;
+    constexpr int kIdKeyScrollDown = 2111;
+    constexpr int kIdKeyScrollLeft = 2112;
+    constexpr int kIdKeyScrollRight = 2113;
 }
 
 enum class PreferredAppMode
@@ -3358,11 +3382,11 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 29);
+    appendWord(tmpl, 41);
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(460));
-    appendWord(tmpl, scale(174));
+    appendWord(tmpl, scale(236));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -3373,13 +3397,19 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS, scale(228), scale(22), scale(214), scale(80), kIdTransparencySelect, 0x0085, L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(228), scale(40), scale(65), scale(16), kIdColor, 0x0080, L"Color...");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(220), scale(70), scale(232), scale(58), 0xFFFF, 0x0080, L"Text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(220), scale(70), scale(232), scale(84), 0xFFFF, 0x0080, L"Text");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(228), scale(86), scale(65), scale(16), kIdFont, 0x0080, L"Font...");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(301), scale(86), scale(65), scale(16), kIdFontColor, 0x0080, L"Font color");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(374), scale(86), scale(65), scale(16), kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(228), scale(108), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(286), scale(108), scale(40), scale(12), 0xFFFF, 0x0082, L"Width");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
+        scale(326), scale(106), scale(36), scale(14), kIdTextWindowWidth, 0x0081, L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(366), scale(108), scale(36), scale(12), 0xFFFF, 0x0082, L"Height");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
+        scale(402), scale(106), scale(36), scale(14), kIdTextWindowHeight, 0x0081, L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(202), scale(161), 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(202), scale(223), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(22), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(20), scale(88), scale(12), kIdKeyNext, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(38), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
@@ -3398,9 +3428,17 @@ void ShowSettingsDialog(HWND hwnd)
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(132), scale(88), scale(12), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(150), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(148), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(166), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll up");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(164), scale(88), scale(12), kIdKeyScrollUp, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(182), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll down");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(180), scale(88), scale(12), kIdKeyScrollDown, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(198), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll left");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(196), scale(88), scale(12), kIdKeyScrollLeft, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll right");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(212), scale(88), scale(12), kIdKeyScrollRight, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(143), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(143), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(205), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(205), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -3412,6 +3450,8 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF fontColor;
         COLORREF backgroundColor;
         bool wrap;
+        UINT textWindowWidth;
+        UINT textWindowHeight;
         WORD keyNext;
         WORD keyPrev;
         WORD keyZoomIn;
@@ -3421,13 +3461,19 @@ void ShowSettingsDialog(HWND hwnd)
         WORD keyExit;
         WORD keyAlwaysOnTop;
         WORD keyReload;
+        WORD keyScrollUp;
+        WORD keyScrollDown;
+        WORD keyScrollLeft;
+        WORD keyScrollRight;
         HBRUSH dialogBrush;
         HBRUSH controlBrush;
         COLORREF dialogBackgroundColor;
         COLORREF controlBackgroundColor;
         COLORREF dialogTextColor;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontFaceName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
+        g_textWindowWidth, g_textWindowHeight,
         g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOriginalSize, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyReload,
+        g_keyScrollUp, g_keyScrollDown, g_keyScrollLeft, g_keyScrollRight,
         nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
 
     auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
@@ -3532,6 +3578,10 @@ void ShowSettingsDialog(HWND hwnd)
                 clearHotkeyTheme(kIdKeyExit);
                 clearHotkeyTheme(kIdKeyAlwaysOnTop);
                 clearHotkeyTheme(kIdKeyReload);
+                clearHotkeyTheme(kIdKeyScrollUp);
+                clearHotkeyTheme(kIdKeyScrollDown);
+                clearHotkeyTheme(kIdKeyScrollLeft);
+                clearHotkeyTheme(kIdKeyScrollRight);
             }
             else
             {
@@ -3544,6 +3594,10 @@ void ShowSettingsDialog(HWND hwnd)
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyReload), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyScrollUp), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyScrollDown), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyScrollLeft), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyScrollRight), themeName, nullptr);
             }
             subclassHotkey(GetDlgItem(dlg, kIdKeyNext));
             subclassHotkey(GetDlgItem(dlg, kIdKeyPrev));
@@ -3554,6 +3608,10 @@ void ShowSettingsDialog(HWND hwnd)
             subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
             subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
             subclassHotkey(GetDlgItem(dlg, kIdKeyReload));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyScrollUp));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyScrollDown));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyScrollLeft));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyScrollRight));
             EnumChildWindows(dlg, [](HWND hwnd, LPARAM refData) -> BOOL
             {
                 auto* state = reinterpret_cast<DialogState*>(refData);
@@ -3588,6 +3646,8 @@ void ShowSettingsDialog(HWND hwnd)
             SetWindowTheme(GetDlgItem(dlg, kIdFont), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdFontColor), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdBackColor), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdTextWindowWidth), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdTextWindowHeight), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, IDOK), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, IDCANCEL), themeName, nullptr);
             if (darkMode)
@@ -3618,6 +3678,8 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_SETCURSEL, selection, 0);
             EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
             CheckDlgButton(dlg, kIdWrap, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
+            SetDlgItemInt(dlg, kIdTextWindowWidth, dialogState->textWindowWidth, FALSE);
+            SetDlgItemInt(dlg, kIdTextWindowHeight, dialogState->textWindowHeight, FALSE);
             SendDlgItemMessage(dlg, kIdKeyNext, HKM_SETHOTKEY, MAKEWORD(dialogState->keyNext, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyPrev, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyZoomIn, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomIn, 0), 0);
@@ -3627,6 +3689,10 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdKeyExit, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyAlwaysOnTop, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyReload, HKM_SETHOTKEY, MAKEWORD(dialogState->keyReload, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyScrollUp, HKM_SETHOTKEY, MAKEWORD(dialogState->keyScrollUp, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyScrollDown, HKM_SETHOTKEY, MAKEWORD(dialogState->keyScrollDown, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyScrollLeft, HKM_SETHOTKEY, MAKEWORD(dialogState->keyScrollLeft, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyScrollRight, HKM_SETHOTKEY, MAKEWORD(dialogState->keyScrollRight, 0), 0);
             return TRUE;
         }
         case WM_CTLCOLORDLG:
@@ -3888,6 +3954,20 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->mode = (selection == 0) ? TransparencyMode::Transparent
                     : (selection == 1) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
                 dialogState->wrap = (IsDlgButtonChecked(dlg, kIdWrap) == BST_CHECKED);
+                {
+                    BOOL parsedWidth = FALSE;
+                    UINT width = GetDlgItemInt(dlg, kIdTextWindowWidth, &parsedWidth, FALSE);
+                    if (parsedWidth)
+                    {
+                        dialogState->textWindowWidth = (std::max)(200u, width);
+                    }
+                    BOOL parsedHeight = FALSE;
+                    UINT height = GetDlgItemInt(dlg, kIdTextWindowHeight, &parsedHeight, FALSE);
+                    if (parsedHeight)
+                    {
+                        dialogState->textWindowHeight = (std::max)(200u, height);
+                    }
+                }
                 dialogState->keyNext = readHotKey(kIdKeyNext, dialogState->keyNext);
                 dialogState->keyPrev = readHotKey(kIdKeyPrev, dialogState->keyPrev);
                 dialogState->keyZoomIn = readHotKey(kIdKeyZoomIn, dialogState->keyZoomIn);
@@ -3897,6 +3977,10 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->keyExit = readHotKey(kIdKeyExit, dialogState->keyExit);
                 dialogState->keyAlwaysOnTop = readHotKey(kIdKeyAlwaysOnTop, dialogState->keyAlwaysOnTop);
                 dialogState->keyReload = readHotKey(kIdKeyReload, dialogState->keyReload);
+                dialogState->keyScrollUp = readHotKey(kIdKeyScrollUp, dialogState->keyScrollUp);
+                dialogState->keyScrollDown = readHotKey(kIdKeyScrollDown, dialogState->keyScrollDown);
+                dialogState->keyScrollLeft = readHotKey(kIdKeyScrollLeft, dialogState->keyScrollLeft);
+                dialogState->keyScrollRight = readHotKey(kIdKeyScrollRight, dialogState->keyScrollRight);
                 EndDialog(dlg, IDOK);
                 return TRUE;
             }
@@ -3933,6 +4017,8 @@ void ShowSettingsDialog(HWND hwnd)
         g_textColor = state.fontColor;
         g_textBackground = state.backgroundColor;
         g_textWrap = state.wrap;
+        g_textWindowWidth = state.textWindowWidth;
+        g_textWindowHeight = state.textWindowHeight;
         g_keyNextFile = state.keyNext;
         g_keyPrevFile = state.keyPrev;
         g_keyZoomIn = state.keyZoomIn;
@@ -3942,6 +4028,10 @@ void ShowSettingsDialog(HWND hwnd)
         g_keyExit = state.keyExit;
         g_keyAlwaysOnTop = state.keyAlwaysOnTop;
         g_keyReload = state.keyReload;
+        g_keyScrollUp = state.keyScrollUp;
+        g_keyScrollDown = state.keyScrollDown;
+        g_keyScrollLeft = state.keyScrollLeft;
+        g_keyScrollRight = state.keyScrollRight;
         SaveSettings();
         ApplyTransparencyMode();
         UpdateTextFormat();
@@ -4396,6 +4486,10 @@ void LoadSettings()
     g_textBackground = static_cast<COLORREF>(_wtoi(buffer));
     GetPrivateProfileStringW(L"Text", L"Wrap", L"1", buffer, 32, g_iniPath.c_str());
     g_textWrap = (_wtoi(buffer) != 0);
+    GetPrivateProfileStringW(L"Text", L"Width", L"800", buffer, 32, g_iniPath.c_str());
+    g_textWindowWidth = static_cast<UINT>((std::max)(200, _wtoi(buffer)));
+    GetPrivateProfileStringW(L"Text", L"Height", L"600", buffer, 32, g_iniPath.c_str());
+    g_textWindowHeight = static_cast<UINT>((std::max)(200, _wtoi(buffer)));
 
     std::filesystem::path markdownPath(g_iniPath);
     markdownPath.replace_extension(L".md");
@@ -4412,15 +4506,19 @@ void LoadSettings()
             LoadTextSettingsFromMarkdown(markdownPath);
         }
     }
-    g_keyNextFile = readKeySetting(L"NextFile", VK_RIGHT);
-    g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
-    g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
-    g_keyZoomOut = readKeySetting(L"ZoomOut", VK_DOWN);
+    g_keyNextFile = readKeySetting(L"NextFile", 'J');
+    g_keyPrevFile = readKeySetting(L"PrevFile", 'K');
+    g_keyZoomIn = readKeySetting(L"ZoomIn", VK_OEM_PLUS);
+    g_keyZoomOut = readKeySetting(L"ZoomOut", VK_OEM_MINUS);
     g_keyOriginalSize = readKeySetting(L"OriginalSize", '0');
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
     g_keyAlwaysOnTop = readKeySetting(L"AlwaysOnTop", 'P');
     g_keyReload = readKeySetting(L"Reload", 'R');
+    g_keyScrollUp = readKeySetting(L"ScrollUp", VK_UP);
+    g_keyScrollDown = readKeySetting(L"ScrollDown", VK_DOWN);
+    g_keyScrollLeft = readKeySetting(L"ScrollLeft", VK_LEFT);
+    g_keyScrollRight = readKeySetting(L"ScrollRight", VK_RIGHT);
 }
 
 void SaveSettings()
@@ -4455,6 +4553,10 @@ void SaveSettings()
     WritePrivateProfileStringW(L"Text", L"BackgroundColor", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_textWrap ? 1 : 0);
     WritePrivateProfileStringW(L"Text", L"Wrap", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", (std::max)(200u, g_textWindowWidth));
+    WritePrivateProfileStringW(L"Text", L"Width", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", (std::max)(200u, g_textWindowHeight));
+    WritePrivateProfileStringW(L"Text", L"Height", buffer, g_iniPath.c_str());
 
     SaveUtf8IniValue(g_iniPath, L"Text", L"FontName", fontNameToSave);
 
@@ -4476,6 +4578,14 @@ void SaveSettings()
     WritePrivateProfileStringW(L"KeyConfig", L"AlwaysOnTop", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyReload));
     WritePrivateProfileStringW(L"KeyConfig", L"Reload", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyScrollUp));
+    WritePrivateProfileStringW(L"KeyConfig", L"ScrollUp", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyScrollDown));
+    WritePrivateProfileStringW(L"KeyConfig", L"ScrollDown", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyScrollLeft));
+    WritePrivateProfileStringW(L"KeyConfig", L"ScrollLeft", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyScrollRight));
+    WritePrivateProfileStringW(L"KeyConfig", L"ScrollRight", buffer, g_iniPath.c_str());
 }
 
 void ApplyAlwaysOnTop()
@@ -4493,6 +4603,19 @@ void ApplyAlwaysOnTop()
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE
     );
+}
+
+void ApplyDocumentWindowSize(HWND hwnd)
+{
+    if (!hwnd)
+    {
+        return;
+    }
+
+    UINT width = (std::max)(200u, g_textWindowWidth);
+    UINT height = (std::max)(200u, g_textWindowHeight);
+    SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(width), static_cast<int>(height),
+        SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
 }
 
 void LoadWindowPlacement()
