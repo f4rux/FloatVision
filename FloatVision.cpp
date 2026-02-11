@@ -2692,6 +2692,36 @@ void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
     {
         targetWindow = focused;
     }
+    else
+    {
+        HWND renderWidget = nullptr;
+        EnumChildWindows(
+            g_webviewWindow,
+            [](HWND child, LPARAM lParam) -> BOOL
+            {
+                wchar_t className[128] = {};
+                GetClassNameW(child, className, static_cast<int>(std::size(className)));
+                if (wcsncmp(className, L"Chrome_RenderWidgetHostHWND", 27) == 0)
+                {
+                    *reinterpret_cast<HWND*>(lParam) = child;
+                    return FALSE;
+                }
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&renderWidget));
+        if (renderWidget && IsWindow(renderWidget))
+        {
+            targetWindow = renderWidget;
+        }
+        else
+        {
+            HWND firstChild = GetWindow(g_webviewWindow, GW_CHILD);
+            if (firstChild && IsWindow(firstChild))
+            {
+                targetWindow = firstChild;
+            }
+        }
+    }
 
     SendMessageW(targetWindow, msg, wParam, lParam);
 
