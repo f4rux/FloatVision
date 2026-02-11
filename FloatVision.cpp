@@ -2691,6 +2691,9 @@ void ApplyMouseTransparentStyleRecursive(HWND root, bool transparent)
 
 void UpdateWebViewMouseGateStyles()
 {
+    WORD inputKey = GetHtmlInputVirtualKey();
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+
     if (!g_webviewWindow)
     {
         return;
