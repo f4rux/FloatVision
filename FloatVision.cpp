@@ -2637,18 +2637,10 @@ void UpdateWebViewInputState()
     if (allowMouseInput)
     {
         exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
-        if (!IsWindowEnabled(g_webviewWindow))
-        {
-            EnableWindow(g_webviewWindow, TRUE);
-        }
     }
     else
     {
         exStyle |= WS_EX_TRANSPARENT;
-        if (IsWindowEnabled(g_webviewWindow))
-        {
-            EnableWindow(g_webviewWindow, FALSE);
-        }
 
         HWND focused = GetFocus();
         if (focused == g_webviewWindow || IsChild(g_webviewWindow, focused))
