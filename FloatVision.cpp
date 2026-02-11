@@ -97,10 +97,10 @@ enum class HtmlInputKey
     Alt = 2
 };
 HtmlInputKey g_htmlInputKey = HtmlInputKey::Alt;
-WORD g_keyNextFile = VK_RIGHT;
-WORD g_keyPrevFile = VK_LEFT;
-WORD g_keyZoomIn = VK_UP;
-WORD g_keyZoomOut = VK_DOWN;
+WORD g_keyNextFile = 'J';
+WORD g_keyPrevFile = 'K';
+WORD g_keyZoomIn = VK_OEM_PLUS;
+WORD g_keyZoomOut = VK_OEM_MINUS;
 WORD g_keyOriginalSize = '0';
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
@@ -4467,10 +4467,10 @@ void LoadSettings()
             LoadTextSettingsFromMarkdown(markdownPath);
         }
     }
-    g_keyNextFile = readKeySetting(L"NextFile", VK_RIGHT);
-    g_keyPrevFile = readKeySetting(L"PrevFile", VK_LEFT);
-    g_keyZoomIn = readKeySetting(L"ZoomIn", VK_UP);
-    g_keyZoomOut = readKeySetting(L"ZoomOut", VK_DOWN);
+    g_keyNextFile = readKeySetting(L"NextFile", 'J');
+    g_keyPrevFile = readKeySetting(L"PrevFile", 'K');
+    g_keyZoomIn = readKeySetting(L"ZoomIn", VK_OEM_PLUS);
+    g_keyZoomOut = readKeySetting(L"ZoomOut", VK_OEM_MINUS);
     g_keyOriginalSize = readKeySetting(L"OriginalSize", '0');
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
