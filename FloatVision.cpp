@@ -60,6 +60,9 @@ Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
 HWND g_webviewWindow = nullptr;
+HWND g_webviewSubclassTarget = nullptr;
+HWND g_webviewOverlayWindow = nullptr;
+bool g_forwardingWebViewKeyToHost = false;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -89,13 +92,6 @@ bool g_webviewPendingShow = false;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
-enum class HtmlInputKey
-{
-    Shift = 0,
-    Ctrl = 1,
-    Alt = 2
-};
-HtmlInputKey g_htmlInputKey = HtmlInputKey::Alt;
 WORD g_keyNextFile = VK_RIGHT;
 WORD g_keyPrevFile = VK_LEFT;
 WORD g_keyZoomIn = VK_UP;
@@ -345,6 +341,8 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kWebViewMouseBlockSubclassId = 3001;
+constexpr wchar_t kWebViewOverlayClassName[] = L"FloatVisionWebViewOverlay";
 
 // =====================
 // 前方宣言
@@ -392,12 +390,18 @@ bool Utf8ToWide(const std::string& bytes, std::wstring& text);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
+bool HandleDroppedFiles(HWND hwnd, HDROP drop);
 void UpdateWebViewInputTimer();
-WORD GetHtmlInputVirtualKey();
+static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR);
+WORD GetHtmlMouseBypassVirtualKey();
 void UpdateWebViewInputState();
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
+void UpdateWebViewOverlayBounds();
+void UpdateWebViewOverlayState();
+bool EnsureWebViewOverlayWindow();
+static LRESULT CALLBACK WebViewOverlayProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void HideWebView();
 void CloseWebView();
 void RefreshMenuTheme();
@@ -663,6 +667,55 @@ void SortImageList()
     }
 }
 
+bool HandleDroppedFiles(HWND hwnd, HDROP drop)
+{
+    if (!drop)
+    {
+        return false;
+    }
+
+    bool loaded = false;
+    UINT fileCount = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+    if (fileCount > 0)
+    {
+        UINT pathLength = DragQueryFileW(drop, 0, nullptr, 0);
+        if (pathLength > 0)
+        {
+            std::wstring path(pathLength + 1, L'\0');
+            DragQueryFileW(drop, 0, path.data(), pathLength + 1);
+            path.resize(pathLength);
+            if (IsMarkdownFile(path))
+            {
+                loaded = LoadMarkdownFromFile(path.c_str());
+            }
+            else if (IsHtmlFile(path))
+            {
+                loaded = LoadHtmlFromFile(path.c_str());
+            }
+            else if (IsTextFile(path))
+            {
+                loaded = LoadTextFromFile(path.c_str());
+            }
+            else
+            {
+                loaded = LoadImageFromFile(path.c_str());
+                if (loaded)
+                {
+                    UpdateZoomToFitScreen(hwnd);
+                }
+            }
+            if (loaded)
+            {
+                RefreshImageList(path);
+                InvalidateRect(hwnd, nullptr, TRUE);
+            }
+        }
+    }
+
+    DragFinish(drop);
+    return loaded;
+}
+
 // =====================
 // ウィンドウプロシージャ
 // =====================
@@ -689,6 +742,7 @@ LRESULT CALLBACK WndProc(
         if (g_webviewController)
         {
             UpdateWebViewBounds();
+            UpdateWebViewOverlayBounds();
         }
         if (g_renderTarget)
         {
@@ -703,53 +757,9 @@ LRESULT CALLBACK WndProc(
         }
         return 0;
     }
-
     case WM_DROPFILES:
     {
-        HDROP drop = reinterpret_cast<HDROP>(wParam);
-        UINT fileCount = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
-        if (fileCount > 0)
-        {
-            // 複数ファイルは先頭のみ読み込む（必要なら後で拡張）
-            UINT pathLength = DragQueryFileW(drop, 0, nullptr, 0);
-            if (pathLength > 0)
-            {
-                std::wstring path(pathLength + 1, L'\0');
-                DragQueryFileW(drop, 0, path.data(), pathLength + 1);
-                path.resize(pathLength);
-                if (IsMarkdownFile(path))
-                {
-                    if (LoadMarkdownFromFile(path.c_str()))
-                    {
-                        RefreshImageList(path);
-                        InvalidateRect(hwnd, nullptr, TRUE);
-                    }
-                }
-                else if (IsHtmlFile(path))
-                {
-                    if (LoadHtmlFromFile(path.c_str()))
-                    {
-                        RefreshImageList(path);
-                        InvalidateRect(hwnd, nullptr, TRUE);
-                    }
-                }
-                else if (IsTextFile(path))
-                {
-                    if (LoadTextFromFile(path.c_str()))
-                    {
-                        RefreshImageList(path);
-                        InvalidateRect(hwnd, nullptr, TRUE);
-                    }
-                }
-                else if (LoadImageFromFile(path.c_str()))
-                {
-                    RefreshImageList(path);
-                    UpdateZoomToFitScreen(hwnd);
-                    InvalidateRect(hwnd, nullptr, TRUE);
-                }
-            }
-        }
-        DragFinish(drop);
+        HandleDroppedFiles(hwnd, reinterpret_cast<HDROP>(wParam));
         return 0;
     }
 
@@ -911,20 +921,14 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
-            WORD inputKey = GetHtmlInputVirtualKey();
-            bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
+            bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
             if (keyDown && g_webviewWindow)
             {
-                WPARAM adjustedWParam = wParam;
-                if (inputKey == VK_SHIFT)
-                {
-                    WORD keyState = GET_KEYSTATE_WPARAM(wParam);
-                    adjustedWParam = MAKEWPARAM(keyState & ~MK_SHIFT, GET_WHEEL_DELTA_WPARAM(wParam));
-                }
-                SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, adjustedWParam, lParam);
+                SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, wParam, lParam);
                 return 0;
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return 0;
         }
         if (!g_bitmap && !g_hasText)
         {
@@ -1038,6 +1042,7 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
     {
         WORD key = static_cast<WORD>(wParam);
         if (key == g_keyExit)
@@ -1079,14 +1084,19 @@ LRESULT CALLBACK WndProc(
             NavigateImage(-1);
             return 0;
         }
+
         if (g_hasHtml)
         {
-            WORD inputKey = GetHtmlInputVirtualKey();
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
@@ -1145,17 +1155,36 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYUP:
+    case WM_SYSKEYUP:
     {
         if (g_hasHtml)
         {
-            WORD inputKey = GetHtmlInputVirtualKey();
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
         }
         return 0;
+    }
+
+    case WM_CHAR:
+    case WM_SYSCHAR:
+    {
+        if (g_hasHtml)
+        {
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
+        }
+        return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
     case WM_TIMER:
@@ -2526,6 +2555,10 @@ void HideWebView()
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
     }
+    if (g_webviewOverlayWindow && IsWindow(g_webviewOverlayWindow))
+    {
+        ShowWindow(g_webviewOverlayWindow, SW_HIDE);
+    }
 }
 
 void UpdateWebViewBounds()
@@ -2537,6 +2570,169 @@ void UpdateWebViewBounds()
     RECT bounds{};
     GetClientRect(g_hwnd, &bounds);
     g_webviewController->put_Bounds(bounds);
+}
+
+void UpdateWebViewOverlayBounds()
+{
+    if (!g_webviewOverlayWindow || !g_hwnd)
+    {
+        return;
+    }
+
+    RECT rc{};
+    GetClientRect(g_hwnd, &rc);
+    SetWindowPos(
+        g_webviewOverlayWindow,
+        HWND_TOP,
+        rc.left,
+        rc.top,
+        rc.right - rc.left,
+        rc.bottom - rc.top,
+        SWP_NOACTIVATE | SWP_SHOWWINDOW);
+}
+
+static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+    if (!g_hasHtml)
+    {
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+
+    switch (msg)
+    {
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    {
+        if (wParam == GetHtmlMouseBypassVirtualKey())
+        {
+            UpdateWebViewInputState();
+        }
+        if (!g_forwardingWebViewKeyToHost && g_hwnd)
+        {
+            g_forwardingWebViewKeyToHost = true;
+            SendMessageW(g_hwnd, msg, wParam, lParam);
+            g_forwardingWebViewKeyToHost = false;
+        }
+        break;
+    }
+    }
+
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
+static LRESULT CALLBACK WebViewOverlayProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_DROPFILES:
+        HandleDroppedFiles(g_hwnd ? g_hwnd : hwnd, reinterpret_cast<HDROP>(wParam));
+        return 0;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+    case WM_XBUTTONDBLCLK:
+    case WM_NCHITTEST:
+        return 0;
+    }
+
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+bool EnsureWebViewOverlayWindow()
+{
+    if (!g_hwnd)
+    {
+        return false;
+    }
+    if (g_webviewOverlayWindow && IsWindow(g_webviewOverlayWindow))
+    {
+        return true;
+    }
+
+    static bool registered = false;
+    if (!registered)
+    {
+        WNDCLASSW wc{};
+        wc.lpfnWndProc = WebViewOverlayProc;
+        wc.hInstance = GetModuleHandleW(nullptr);
+        wc.lpszClassName = kWebViewOverlayClassName;
+        wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+        if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS)
+        {
+            return false;
+        }
+        registered = true;
+    }
+
+    g_webviewOverlayWindow = CreateWindowExW(
+        WS_EX_ACCEPTFILES,
+        kWebViewOverlayClassName,
+        nullptr,
+        WS_CHILD | WS_CLIPSIBLINGS,
+        0,
+        0,
+        0,
+        0,
+        g_hwnd,
+        nullptr,
+        GetModuleHandleW(nullptr),
+        nullptr);
+    if (!g_webviewOverlayWindow)
+    {
+        return false;
+    }
+
+    DragAcceptFiles(g_webviewOverlayWindow, TRUE);
+    return true;
+}
+
+void UpdateWebViewOverlayState()
+{
+    if (!g_hasHtml)
+    {
+        if (g_webviewOverlayWindow && IsWindow(g_webviewOverlayWindow))
+        {
+            ShowWindow(g_webviewOverlayWindow, SW_HIDE);
+        }
+        return;
+    }
+
+    if (!EnsureWebViewOverlayWindow())
+    {
+        return;
+    }
+
+    WORD inputKey = GetHtmlMouseBypassVirtualKey();
+    bool allowMouseInput = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+    if (allowMouseInput)
+    {
+        ShowWindow(g_webviewOverlayWindow, SW_HIDE);
+        return;
+    }
+
+    UpdateWebViewOverlayBounds();
+    ShowWindow(g_webviewOverlayWindow, SW_SHOWNA);
+    SetWindowPos(
+        g_webviewOverlayWindow,
+        HWND_TOP,
+        0,
+        0,
+        0,
+        0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_SHOWWINDOW);
 }
 
 void UpdateWebViewWindowHandle()
@@ -2567,7 +2763,22 @@ void UpdateWebViewWindowHandle()
     {
         found = GetWindow(g_hwnd, GW_CHILD);
     }
+
+    if (g_webviewSubclassTarget && g_webviewSubclassTarget != found)
+    {
+        RemoveWindowSubclass(g_webviewSubclassTarget, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId);
+        g_webviewSubclassTarget = nullptr;
+    }
+
     g_webviewWindow = found;
+
+    if (g_webviewWindow)
+    {
+        SetWindowSubclass(g_webviewWindow, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId, 0);
+        g_webviewSubclassTarget = g_webviewWindow;
+    }
+
+    UpdateWebViewOverlayState();
 }
 
 void UpdateWebViewInputTimer()
@@ -2591,40 +2802,21 @@ void UpdateWebViewInputTimer()
     }
 }
 
-WORD GetHtmlInputVirtualKey()
+WORD GetHtmlMouseBypassVirtualKey()
 {
-    switch (g_htmlInputKey)
-    {
-    case HtmlInputKey::Ctrl:
-        return VK_CONTROL;
-    case HtmlInputKey::Alt:
-        return VK_MENU;
-    case HtmlInputKey::Shift:
-    default:
-        return VK_SHIFT;
-    }
+    return VK_MENU;
 }
 
 void UpdateWebViewInputState()
 {
     if (!g_webviewWindow)
     {
+        UpdateWebViewOverlayState();
         return;
     }
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    WORD inputKey = GetHtmlInputVirtualKey();
-    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
-    if (g_hasHtml && !keyDown)
-    {
-        exStyle |= WS_EX_TRANSPARENT;
-        EnableWindow(g_webviewWindow, FALSE);
-    }
-    else
-    {
-        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
-        EnableWindow(g_webviewWindow, TRUE);
-    }
+    exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
     SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
     SetWindowPos(
         g_webviewWindow,
@@ -2634,6 +2826,8 @@ void UpdateWebViewInputState()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    UpdateWebViewOverlayState();
 }
 
 bool EnsureWebView2(HWND hwnd)
@@ -2753,6 +2947,16 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    if (g_webviewSubclassTarget)
+    {
+        RemoveWindowSubclass(g_webviewSubclassTarget, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId);
+        g_webviewSubclassTarget = nullptr;
+    }
+    if (g_webviewOverlayWindow && IsWindow(g_webviewOverlayWindow))
+    {
+        DestroyWindow(g_webviewOverlayWindow);
+        g_webviewOverlayWindow = nullptr;
+    }
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
