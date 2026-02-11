@@ -2716,6 +2716,9 @@ LRESULT CALLBACK WebViewMouseGateProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
 void UpdateWebViewInputState()
 {
+    WORD inputKey = GetHtmlInputVirtualKey();
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+
     if (!g_webviewWindow)
     {
         return;
@@ -2732,6 +2735,43 @@ void HandleWebViewInputModifierState(HWND hwnd)
 {
     (void)hwnd;
     UpdateWebViewInputState();
+}
+
+void AdjustWebViewZoomFactor(double factor)
+{
+    if (!g_webviewController)
+    {
+        return;
+    }
+    double zoomFactor = 1.0;
+    if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoomFactor)))
+    {
+        zoomFactor *= factor;
+        zoomFactor = (std::max)(0.25, (std::min)(zoomFactor, 5.0));
+        g_webviewController->put_ZoomFactor(zoomFactor);
+    }
+}
+
+void HandleWebViewInputModifierState(HWND hwnd)
+{
+    if (!g_hasHtml)
+    {
+        return;
+    }
+
+    (void)hwnd;
+    UpdateWebViewInputState();
+
+    if (!g_webviewWindow)
+    {
+        return;
+    }
+
+    HWND focus = GetFocus();
+    if (focus != g_webviewWindow && !IsChild(g_webviewWindow, focus))
+    {
+        SetFocus(g_webviewWindow);
+    }
 }
 
 void AdjustWebViewZoomFactor(double factor)
