@@ -3,70 +3,159 @@ name: Build and Release FloatVision
 on:
   push:
     tags:
-      - 'v*' # v1.0.0 などのタグがプッシュされたら実行
+      - 'v*'
 
 jobs:
   build:
-    runs-on: windows-latest # VS2026環境を含む最新ランナー
+    runs-on: windows-latest
     permissions:
       contents: write
 
     steps:
+      # -------------------------------------------------
+      # Checkout
+      # -------------------------------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # 1. MSBuildのセットアップ (VS2026/v145対応のため最新を指定)
+      # -------------------------------------------------
+      # Toolchain
+      # -------------------------------------------------
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
           vs-version: 'latest'
 
-      # 2. NuGetのセットアップと復元 (WebView2等のパッケージ取得)
       - name: Setup NuGet
         uses: NuGet/setup-nuget@v2
 
       - name: Restore NuGet packages
         run: nuget restore FloatVision.slnx
 
-      # 3. ビルド実行
-      # PlatformToolsetをv143(VS2022互換)にし、
-      # WindowsTargetPlatformVersionを最新(10.0)に、
-      # さらに TargetGenerateFullPaths を追加してパス解決を確実にします。
-      - name: Build app
+      # =================================================
+      # x86 BUILD
+      # =================================================
+      - name: Build x86
         run: |
-          msbuild FloatVision.slnx /p:Configuration=Release /p:Platform=x64 /p:PlatformToolset=v143 /p:WindowsTargetPlatformVersion=10.0
+          msbuild FloatVision.slnx `
+            /p:Configuration=Release `
+            /p:Platform=x86 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0
 
-      - name: Collect artifacts
+      - name: Collect x86 artifacts
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Path ./publish_dist -Force
+          $dist = "publish_dist/x86/FloatVision"
+          New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
 
-          # 1. EXE本体のみをコピー
-          Get-ChildItem -Path . -Filter "FloatVision.exe" -Recurse | Where-Object { $_.FullName -notmatch "obj" -and $_.FullName -notmatch "publish_dist" } | Select-Object -First 1 | ForEach-Object {
-              Copy-Item $_.FullName -Destination ./publish_dist/
-          }
+          Get-ChildItem -Recurse -Filter "FloatVision.exe" |
+            Where-Object { $_.FullName -match "\\x86\\Release\\" } |
+            Select-Object -First 1 |
+            Copy-Item -Destination $dist
 
-          # 2. もし Microsoft.Web.WebView2.*.dll も不要（静的リンク）ならここも空にできますが
-          # 念のためこれらが本当に不要か、一度手動で消して確認してみてください。
-          
-          Write-Host "--- Final Package Contents ---"
-          ls ./publish_dist
+          Copy-Item res/*.png $dist/res/
+          Copy-Item README.md $dist/
 
-          # 抽出結果をログで確認
-          Write-Host "--- Files to be zipped ---"
-          ls ./publish_dist
-
-      # 5. ZIP圧縮
-      - name: Archive Release
+      - name: Archive x86
         shell: pwsh
         run: |
-          Compress-Archive -Path ./publish_dist/* -DestinationPath FloatVision-v${{ github.ref_name }}.zip
+          Compress-Archive `
+            -Path publish_dist/x86/FloatVision `
+            -DestinationPath FloatVision-x86-v${{ github.ref_name }}.zip
 
-      # 6. GitHub Release 作成とアップロード
+      # =================================================
+      # x64 BUILD
+      # =================================================
+      - name: Build x64
+        run: |
+          msbuild FloatVision.slnx `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0
+
+      - name: Collect x64 artifacts
+        shell: pwsh
+        run: |
+          $dist = "publish_dist/x64/FloatVision"
+          New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
+
+          Get-ChildItem -Recurse -Filter "FloatVision.exe" |
+            Where-Object { $_.FullName -match "\\x64\\Release\\" } |
+            Select-Object -First 1 |
+            Copy-Item -Destination $dist
+
+          Copy-Item res/*.png $dist/res/
+          Copy-Item README.md $dist/
+
+      - name: Archive x64
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path publish_dist/x64/FloatVision `
+            -DestinationPath FloatVision-x64-v${{ github.ref_name }}.zip
+
+      # =================================================
+      # ARM64 BUILD (Windows on ARM)
+      # =================================================
+      - name: Build ARM64
+        run: |
+          msbuild FloatVision.slnx `
+            /p:Configuration=Release `
+            /p:Platform=ARM64 `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0
+
+      - name: Collect ARM64 artifacts
+        shell: pwsh
+        run: |
+          $dist = "publish_dist/arm64/FloatVision"
+          New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
+
+          Get-ChildItem -Recurse -Filter "FloatVision.exe" |
+            Where-Object { $_.FullName -match "\\ARM64\\Release\\" } |
+            Select-Object -First 1 |
+            Copy-Item -Destination $dist
+
+          Copy-Item res/*.png $dist/res/
+          Copy-Item README.md $dist/
+
+      - name: Archive ARM64
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path publish_dist/arm64/FloatVision `
+            -DestinationPath FloatVision-arm64-v${{ github.ref_name }}.zip
+
+      # =================================================
+      # GitHub Release (latest auto-updated)
+      # =================================================
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: FloatVision-v${{ github.ref_name }}.zip
-          generate_release_notes: true # コミットログからリリースノートを自動生成
+          files: |
+            FloatVision-x86-v${{ github.ref_name }}.zip
+            FloatVision-x64-v${{ github.ref_name }}.zip
+            FloatVision-arm64-v${{ github.ref_name }}.zip
+          generate_release_notes: true
+          body: |
+            ## Downloads
+
+            - **FloatVision x64**  
+              64-bit build.  
+              Recommended for most users on Windows 10 / 11.
+
+            - **FloatVision ARM64**  
+              Native build for Windows on ARM devices  
+              (Surface Pro X, Snapdragon X Elite, etc.).
+
+            - **FloatVision x86**  
+              32-bit build.  
+              Provided for legacy or compatibility purposes only.
+
+            ---
+
+            All binaries are built from the same source code and differ only by target architecture.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
