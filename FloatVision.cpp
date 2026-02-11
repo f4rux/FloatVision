@@ -2681,6 +2681,25 @@ void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
         EnableWindow(g_webviewWindow, TRUE);
     }
 
+    bool isKeyMessage = (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP);
+    if (isKeyMessage)
+    {
+        HWND focused = GetFocus();
+        bool focusInWebView = focused && (focused == g_webviewWindow || IsChild(g_webviewWindow, focused));
+        if (!focusInWebView)
+        {
+            SetFocus(g_webviewWindow);
+            if (g_webviewController2)
+            {
+                g_webviewController2->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+            }
+            else if (g_webviewController)
+            {
+                g_webviewController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
+            }
+        }
+    }
+
     SendMessageW(g_webviewWindow, msg, wParam, lParam);
 
     if (!wasEnabled)
