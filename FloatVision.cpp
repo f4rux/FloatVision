@@ -2632,14 +2632,31 @@ void UpdateWebViewInputState()
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
     WORD inputKey = GetHtmlMouseBypassVirtualKey();
     bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
-    if (g_hasHtml && !keyDown)
+    bool allowMouseInput = g_hasHtml && keyDown;
+
+    if (allowMouseInput)
     {
-        exStyle |= WS_EX_TRANSPARENT;
+        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+        if (!IsWindowEnabled(g_webviewWindow))
+        {
+            EnableWindow(g_webviewWindow, TRUE);
+        }
     }
     else
     {
-        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+        exStyle |= WS_EX_TRANSPARENT;
+        if (IsWindowEnabled(g_webviewWindow))
+        {
+            EnableWindow(g_webviewWindow, FALSE);
+        }
+
+        HWND focused = GetFocus();
+        if (focused == g_webviewWindow || IsChild(g_webviewWindow, focused))
+        {
+            SetFocus(g_hwnd);
+        }
     }
+
     SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
     SetWindowPos(
         g_webviewWindow,
