@@ -395,6 +395,8 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
+void ForwardKeyInputToWebView(UINT msg, WPARAM wParam, LPARAM lParam);
+void RestoreLayerFocus();
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -1038,7 +1040,19 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
     {
+        if (g_hasHtml)
+        {
+            ForwardKeyInputToWebView(msg, wParam, lParam);
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+
         WORD key = static_cast<WORD>(wParam);
         if (key == g_keyExit)
         {
@@ -1078,15 +1092,6 @@ LRESULT CALLBACK WndProc(
         {
             NavigateImage(-1);
             return 0;
-        }
-        if (g_hasHtml)
-        {
-            WORD inputKey = GetHtmlInputVirtualKey();
-            if (wParam == inputKey)
-            {
-                UpdateWebViewInputState();
-            }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
@@ -1145,9 +1150,11 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYUP:
+    case WM_SYSKEYUP:
     {
         if (g_hasHtml)
         {
+            ForwardKeyInputToWebView(msg, wParam, lParam);
             WORD inputKey = GetHtmlInputVirtualKey();
             if (wParam == inputKey)
             {
@@ -2619,6 +2626,7 @@ void UpdateWebViewInputState()
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
+        RestoreLayerFocus();
     }
     else
     {
@@ -2634,6 +2642,28 @@ void UpdateWebViewInputState()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+void ForwardKeyInputToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (!g_hasHtml || !g_webviewWindow)
+    {
+        return;
+    }
+    PostMessageW(g_webviewWindow, msg, wParam, lParam);
+}
+
+void RestoreLayerFocus()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    HWND focus = GetFocus();
+    if (focus != g_hwnd)
+    {
+        SetFocus(g_hwnd);
+    }
 }
 
 bool EnsureWebView2(HWND hwnd)
