@@ -3397,17 +3397,17 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS, scale(228), scale(22), scale(214), scale(80), kIdTransparencySelect, 0x0085, L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(228), scale(40), scale(65), scale(16), kIdColor, 0x0080, L"Color...");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(220), scale(70), scale(232), scale(84), 0xFFFF, 0x0080, L"Text");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(220), scale(70), scale(232), scale(64), 0xFFFF, 0x0080, L"Documents");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(228), scale(86), scale(65), scale(16), kIdFont, 0x0080, L"Font...");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(301), scale(86), scale(65), scale(16), kIdFontColor, 0x0080, L"Font color");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(374), scale(86), scale(65), scale(16), kIdBackColor, 0x0080, L"Background");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, scale(228), scale(108), scale(80), scale(12), kIdWrap, 0x0080, L"Wrap");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(286), scale(108), scale(40), scale(12), 0xFFFF, 0x0082, L"Width");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(299), scale(110), scale(40), scale(12), 0xFFFF, 0x0082, L"Width");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
-        scale(326), scale(106), scale(36), scale(14), kIdTextWindowWidth, 0x0081, L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(366), scale(108), scale(36), scale(12), 0xFFFF, 0x0082, L"Height");
+        scale(326), scale(108), scale(36), scale(12), kIdTextWindowWidth, 0x0081, L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(376), scale(110), scale(36), scale(12), 0xFFFF, 0x0082, L"Height");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
-        scale(402), scale(106), scale(36), scale(14), kIdTextWindowHeight, 0x0081, L"");
+        scale(403), scale(108), scale(36), scale(12), kIdTextWindowHeight, 0x0081, L"");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(202), scale(223), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(22), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
