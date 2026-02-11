@@ -1042,6 +1042,17 @@ LRESULT CALLBACK WndProc(
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
     {
+        if (g_hasHtml)
+        {
+            ForwardKeyInputToWebView(msg, wParam, lParam);
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            return DefWindowProc(hwnd, msg, wParam, lParam);
+        }
+
         WORD key = static_cast<WORD>(wParam);
         bool handled = false;
         if (key == g_keyExit)
