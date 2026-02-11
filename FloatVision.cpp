@@ -1169,6 +1169,17 @@ LRESULT CALLBACK WndProc(
         return 0;
     }
 
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    {
+        if (g_hasHtml)
+        {
+            ForwardKeyMessageToWebView(msg, wParam, lParam);
+            return 0;
+        }
+        break;
+    }
+
     case WM_TIMER:
     {
         if (wParam == kWebViewInputTimerId)
@@ -2659,9 +2670,22 @@ void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
         UpdateWebViewWindowHandle();
     }
 
-    if (g_webviewWindow && IsWindow(g_webviewWindow))
+    if (!g_webviewWindow || !IsWindow(g_webviewWindow))
     {
-        SendMessageW(g_webviewWindow, msg, wParam, lParam);
+        return;
+    }
+
+    BOOL wasEnabled = IsWindowEnabled(g_webviewWindow);
+    if (!wasEnabled)
+    {
+        EnableWindow(g_webviewWindow, TRUE);
+    }
+
+    SendMessageW(g_webviewWindow, msg, wParam, lParam);
+
+    if (!wasEnabled)
+    {
+        EnableWindow(g_webviewWindow, FALSE);
     }
 }
 
