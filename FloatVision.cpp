@@ -396,6 +396,7 @@ void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 void HandleWebViewInputModifierState(HWND hwnd);
+bool IsFocusInWebViewSubtree(HWND focus);
 void AdjustWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
@@ -2672,6 +2673,15 @@ void UpdateWebViewInputState()
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
+bool IsFocusInWebViewSubtree(HWND focus)
+{
+    if (!focus || !g_webviewWindow)
+    {
+        return false;
+    }
+    return focus == g_webviewWindow || IsChild(g_webviewWindow, focus);
+}
+
 void HandleWebViewInputModifierState(HWND hwnd)
 {
     if (!g_hasHtml)
@@ -2691,12 +2701,12 @@ void HandleWebViewInputModifierState(HWND hwnd)
     HWND focus = GetFocus();
     if (keyDown)
     {
-        if (focus != g_webviewWindow)
+        if (!IsFocusInWebViewSubtree(focus))
         {
             SetFocus(g_webviewWindow);
         }
     }
-    else if (focus == g_webviewWindow)
+    else if (IsFocusInWebViewSubtree(focus))
     {
         SetFocus(hwnd);
     }
