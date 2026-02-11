@@ -60,6 +60,7 @@ Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
 HWND g_webviewWindow = nullptr;
+WNDPROC g_webviewWindowProc = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -394,6 +395,8 @@ bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
+bool ShouldGateWebViewMouseInput();
+LRESULT CALLBACK WebViewMouseGateProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 void UpdateWebViewInputState();
 void HandleWebViewInputModifierState(HWND hwnd);
 void AdjustWebViewZoomFactor(double factor);
@@ -2602,7 +2605,20 @@ void UpdateWebViewWindowHandle()
     {
         found = GetWindow(g_hwnd, GW_CHILD);
     }
+
+    if (g_webviewWindow && g_webviewWindow != found && g_webviewWindowProc)
+    {
+        SetWindowLongPtrW(g_webviewWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_webviewWindowProc));
+        g_webviewWindowProc = nullptr;
+    }
+
     g_webviewWindow = found;
+
+    if (g_webviewWindow && !g_webviewWindowProc)
+    {
+        g_webviewWindowProc = reinterpret_cast<WNDPROC>(
+            SetWindowLongPtrW(g_webviewWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(WebViewMouseGateProc)));
+    }
 }
 
 void UpdateWebViewInputTimer()
@@ -2640,6 +2656,64 @@ WORD GetHtmlInputVirtualKey()
     }
 }
 
+bool ShouldGateWebViewMouseInput()
+{
+    if (!g_hasHtml)
+    {
+        return false;
+    }
+    WORD inputKey = GetHtmlInputVirtualKey();
+    return (GetAsyncKeyState(inputKey) & 0x8000) == 0;
+}
+
+LRESULT CALLBACK WebViewMouseGateProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    switch (msg)
+    {
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+    case WM_XBUTTONDBLCLK:
+    {
+        if (ShouldGateWebViewMouseInput() && g_hwnd)
+        {
+            POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ClientToScreen(hwnd, &pt);
+            ScreenToClient(g_hwnd, &pt);
+            LPARAM translated = MAKELPARAM(pt.x, pt.y);
+            SendMessageW(g_hwnd, msg, wParam, translated);
+            return 0;
+        }
+        break;
+    }
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+        if (ShouldGateWebViewMouseInput() && g_hwnd)
+        {
+            SendMessageW(g_hwnd, msg, wParam, lParam);
+            return 0;
+        }
+        break;
+    default:
+        break;
+    }
+
+    if (g_webviewWindowProc)
+    {
+        return CallWindowProcW(g_webviewWindowProc, hwnd, msg, wParam, lParam);
+    }
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
 void UpdateWebViewInputState()
 {
     WORD inputKey = GetHtmlInputVirtualKey();
@@ -2650,24 +2724,32 @@ void UpdateWebViewInputState()
         return;
     }
 
-    LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    if (g_hasHtml && !keyDown)
+    HWND focus = GetFocus();
+    if (focus != g_webviewWindow && !IsChild(g_webviewWindow, focus))
     {
-        exStyle |= WS_EX_TRANSPARENT;
+        SetFocus(g_webviewWindow);
     }
-    else
+}
+
+void HandleWebViewInputModifierState(HWND hwnd)
+{
+    (void)hwnd;
+    UpdateWebViewInputState();
+}
+
+void AdjustWebViewZoomFactor(double factor)
+{
+    if (!g_webviewController)
     {
-        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
+        return;
     }
-    SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
-    SetWindowPos(
-        g_webviewWindow,
-        nullptr,
-        0,
-        0,
-        0,
-        0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    double zoomFactor = 1.0;
+    if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoomFactor)))
+    {
+        zoomFactor *= factor;
+        zoomFactor = (std::max)(0.25, (std::min)(zoomFactor, 5.0));
+        g_webviewController->put_ZoomFactor(zoomFactor);
+    }
 }
 
 void HandleWebViewInputModifierState(HWND hwnd)
@@ -2824,6 +2906,11 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    if (g_webviewWindow && g_webviewWindowProc)
+    {
+        SetWindowLongPtrW(g_webviewWindow, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(g_webviewWindowProc));
+        g_webviewWindowProc = nullptr;
+    }
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
