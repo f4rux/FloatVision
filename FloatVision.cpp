@@ -60,6 +60,8 @@ Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
 HWND g_webviewWindow = nullptr;
+HWND g_webviewSubclassTarget = nullptr;
+bool g_forwardingWebViewKeyToHost = false;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -89,13 +91,6 @@ bool g_webviewPendingShow = false;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
-enum class HtmlInputKey
-{
-    Shift = 0,
-    Ctrl = 1,
-    Alt = 2
-};
-HtmlInputKey g_htmlInputKey = HtmlInputKey::Alt;
 WORD g_keyNextFile = VK_RIGHT;
 WORD g_keyPrevFile = VK_LEFT;
 WORD g_keyZoomIn = VK_UP;
@@ -345,6 +340,7 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kWebViewMouseBlockSubclassId = 3001;
 
 // =====================
 // 前方宣言
@@ -393,7 +389,8 @@ std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
-WORD GetHtmlInputVirtualKey();
+static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR subclassId, DWORD_PTR refData);
+WORD GetHtmlMouseBypassVirtualKey();
 void UpdateWebViewInputState();
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
@@ -911,20 +908,14 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
-            WORD inputKey = GetHtmlInputVirtualKey();
-            bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
+            bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
             if (keyDown && g_webviewWindow)
             {
-                WPARAM adjustedWParam = wParam;
-                if (inputKey == VK_SHIFT)
-                {
-                    WORD keyState = GET_KEYSTATE_WPARAM(wParam);
-                    adjustedWParam = MAKEWPARAM(keyState & ~MK_SHIFT, GET_WHEEL_DELTA_WPARAM(wParam));
-                }
-                SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, adjustedWParam, lParam);
+                SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, wParam, lParam);
                 return 0;
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return 0;
         }
         if (!g_bitmap && !g_hasText)
         {
@@ -1038,6 +1029,7 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
     {
         WORD key = static_cast<WORD>(wParam);
         if (key == g_keyExit)
@@ -1079,14 +1071,19 @@ LRESULT CALLBACK WndProc(
             NavigateImage(-1);
             return 0;
         }
+
         if (g_hasHtml)
         {
-            WORD inputKey = GetHtmlInputVirtualKey();
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
@@ -1145,17 +1142,36 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYUP:
+    case WM_SYSKEYUP:
     {
         if (g_hasHtml)
         {
-            WORD inputKey = GetHtmlInputVirtualKey();
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
         }
         return 0;
+    }
+
+    case WM_CHAR:
+    case WM_SYSCHAR:
+    {
+        if (g_hasHtml)
+        {
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
+        }
+        return DefWindowProc(hwnd, msg, wParam, lParam);
     }
 
     case WM_TIMER:
@@ -2539,6 +2555,79 @@ void UpdateWebViewBounds()
     g_webviewController->put_Bounds(bounds);
 }
 
+static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+    if (!g_hasHtml)
+    {
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+
+    WORD inputKey = GetHtmlMouseBypassVirtualKey();
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+
+    switch (msg)
+    {
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    {
+        if (wParam == GetHtmlMouseBypassVirtualKey())
+        {
+            UpdateWebViewInputState();
+        }
+        if (!g_forwardingWebViewKeyToHost && g_hwnd)
+        {
+            g_forwardingWebViewKeyToHost = true;
+            SendMessageW(g_hwnd, msg, wParam, lParam);
+            g_forwardingWebViewKeyToHost = false;
+        }
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+    case WM_NCHITTEST:
+        if (keyDown)
+        {
+            return DefSubclassProc(hwnd, msg, wParam, lParam);
+        }
+        return HTTRANSPARENT;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+    case WM_XBUTTONDBLCLK:
+    case WM_NCMOUSEMOVE:
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONUP:
+    case WM_NCLBUTTONDBLCLK:
+    case WM_NCRBUTTONDOWN:
+    case WM_NCRBUTTONUP:
+    case WM_NCRBUTTONDBLCLK:
+    case WM_NCMBUTTONDOWN:
+    case WM_NCMBUTTONUP:
+    case WM_NCMBUTTONDBLCLK:
+    case WM_NCXBUTTONDOWN:
+    case WM_NCXBUTTONUP:
+    case WM_NCXBUTTONDBLCLK:
+        if (keyDown)
+        {
+            return DefSubclassProc(hwnd, msg, wParam, lParam);
+        }
+        return 0;
+    }
+
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 void UpdateWebViewWindowHandle()
 {
     if (!g_hwnd)
@@ -2567,7 +2656,20 @@ void UpdateWebViewWindowHandle()
     {
         found = GetWindow(g_hwnd, GW_CHILD);
     }
+
+    if (g_webviewSubclassTarget && g_webviewSubclassTarget != found)
+    {
+        RemoveWindowSubclass(g_webviewSubclassTarget, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId);
+        g_webviewSubclassTarget = nullptr;
+    }
+
     g_webviewWindow = found;
+
+    if (g_webviewWindow)
+    {
+        SetWindowSubclass(g_webviewWindow, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId, 0);
+        g_webviewSubclassTarget = g_webviewWindow;
+    }
 }
 
 void UpdateWebViewInputTimer()
@@ -2591,18 +2693,9 @@ void UpdateWebViewInputTimer()
     }
 }
 
-WORD GetHtmlInputVirtualKey()
+WORD GetHtmlMouseBypassVirtualKey()
 {
-    switch (g_htmlInputKey)
-    {
-    case HtmlInputKey::Ctrl:
-        return VK_CONTROL;
-    case HtmlInputKey::Alt:
-        return VK_MENU;
-    case HtmlInputKey::Shift:
-    default:
-        return VK_SHIFT;
-    }
+    return VK_MENU;
 }
 
 void UpdateWebViewInputState()
@@ -2613,18 +2706,19 @@ void UpdateWebViewInputState()
     }
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    WORD inputKey = GetHtmlInputVirtualKey();
-    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
-    if (g_hasHtml && !keyDown)
+    WORD inputKey = GetHtmlMouseBypassVirtualKey();
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+    bool allowMouseInput = g_hasHtml && keyDown;
+
+    if (allowMouseInput)
     {
-        exStyle |= WS_EX_TRANSPARENT;
-        EnableWindow(g_webviewWindow, FALSE);
+        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
     }
     else
     {
-        exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
-        EnableWindow(g_webviewWindow, TRUE);
+        exStyle |= WS_EX_TRANSPARENT;
     }
+
     SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
     SetWindowPos(
         g_webviewWindow,
@@ -2753,6 +2847,11 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    if (g_webviewSubclassTarget)
+    {
+        RemoveWindowSubclass(g_webviewSubclassTarget, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId);
+        g_webviewSubclassTarget = nullptr;
+    }
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
