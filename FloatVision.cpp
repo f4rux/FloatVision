@@ -1030,6 +1030,20 @@ LRESULT CALLBACK WndProc(
     case WM_KEYDOWN:
     case WM_SYSKEYDOWN:
     {
+        if (g_hasHtml)
+        {
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            if (g_webviewWindow)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
+            return 0;
+        }
+
         WORD key = static_cast<WORD>(wParam);
         if (key == g_keyExit)
         {
