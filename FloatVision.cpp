@@ -395,6 +395,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
+void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -1040,24 +1041,26 @@ LRESULT CALLBACK WndProc(
     case WM_KEYDOWN:
     {
         WORD key = static_cast<WORD>(wParam);
+        bool handled = false;
+
         if (key == g_keyExit)
         {
             DestroyWindow(hwnd);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyAlwaysOnTop)
+        else if (key == g_keyAlwaysOnTop)
         {
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
-            return 0;
+            handled = true;
         }
-        if (key == g_keyReload)
+        else if (key == g_keyReload)
         {
             ReloadCurrentFile(true);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyOpenFile)
+        else if (key == g_keyOpenFile)
         {
             if (ShowOpenImageDialog(hwnd))
             {
@@ -1067,18 +1070,19 @@ LRESULT CALLBACK WndProc(
                 }
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
-            return 0;
+            handled = true;
         }
-        if (key == g_keyNextFile && !g_imageList.empty())
+        else if (key == g_keyNextFile && !g_imageList.empty())
         {
             NavigateImage(1);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyPrevFile && !g_imageList.empty())
+        else if (key == g_keyPrevFile && !g_imageList.empty())
         {
             NavigateImage(-1);
-            return 0;
+            handled = true;
         }
+
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
@@ -1086,7 +1090,13 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            ForwardKeyMessageToWebView(msg, wParam, lParam);
+            return 0;
+        }
+
+        if (handled)
+        {
+            return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
@@ -1153,7 +1163,8 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            ForwardKeyMessageToWebView(msg, wParam, lParam);
+            return 0;
         }
         return 0;
     }
@@ -2634,6 +2645,24 @@ void UpdateWebViewInputState()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (!g_hasHtml)
+    {
+        return;
+    }
+
+    if (!g_webviewWindow || !IsWindow(g_webviewWindow))
+    {
+        UpdateWebViewWindowHandle();
+    }
+
+    if (g_webviewWindow && IsWindow(g_webviewWindow))
+    {
+        SendMessageW(g_webviewWindow, msg, wParam, lParam);
+    }
 }
 
 bool EnsureWebView2(HWND hwnd)
