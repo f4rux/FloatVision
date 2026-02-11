@@ -911,7 +911,7 @@ LRESULT CALLBACK WndProc(
                 SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, wParam, lParam);
                 return 0;
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return 0;
         }
         if (!g_bitmap && !g_hasText)
         {
@@ -1079,6 +1079,20 @@ LRESULT CALLBACK WndProc(
         if (key == g_keyPrevFile && !g_imageList.empty())
         {
             NavigateImage(-1);
+            return 0;
+        }
+
+        if (g_hasHtml)
+        {
+            WORD inputKey = GetHtmlMouseBypassVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            if (g_webviewWindow)
+            {
+                SendMessageW(g_webviewWindow, msg, wParam, lParam);
+            }
             return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
