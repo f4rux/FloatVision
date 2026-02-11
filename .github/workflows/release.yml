@@ -109,8 +109,8 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            FloatVision-x86-v${{ github.ref_name }}.zip
-            FloatVision-x64-v${{ github.ref_name }}.zip
+            FloatVision-x86-${{ github.ref_name }}.zip
+            FloatVision-x64-${{ github.ref_name }}.zip
           generate_release_notes: true
           body: |
             ## Downloads
@@ -123,7 +123,6 @@ jobs:
               32-bit build.  
               Use this only if you are on a 32-bit Windows environment or need legacy compatibility.
 
-            ---
 
             Both builds are generated from the same source code and differ only in target architecture.
         env:
