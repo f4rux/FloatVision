@@ -86,6 +86,7 @@ float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
 bool g_webviewPendingShow = false;
+double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
@@ -395,6 +396,11 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
+bool ExecuteWebViewScript(const wchar_t* script);
+bool HandleHtmlOverlayKeyDown(WPARAM wParam);
+bool HandleHtmlOverlayShortcutKeyDown(WORD key);
+bool GetWebViewZoomFactor(double& factor);
+bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -821,6 +827,11 @@ LRESULT CALLBACK WndProc(
             return 0;
         case kMenuZoomIn:
         {
+            if (g_hasHtml)
+            {
+                HandleHtmlOverlayShortcutKeyDown(g_keyZoomIn);
+                return 0;
+            }
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(1.1f, pt);
@@ -829,6 +840,11 @@ LRESULT CALLBACK WndProc(
         }
         case kMenuZoomOut:
         {
+            if (g_hasHtml)
+            {
+                HandleHtmlOverlayShortcutKeyDown(g_keyZoomOut);
+                return 0;
+            }
             POINT pt{};
             GetCursorPos(&pt);
             AdjustZoom(1.0f / 1.1f, pt);
@@ -836,6 +852,11 @@ LRESULT CALLBACK WndProc(
             return 0;
         }
         case kMenuOriginalSize:
+            if (g_hasHtml)
+            {
+                HandleHtmlOverlayShortcutKeyDown(g_keyOriginalSize);
+                return 0;
+            }
             g_fitToWindow = false;
             g_zoom = 1.0f;
             UpdateWindowToZoomedImage();
@@ -1040,24 +1061,26 @@ LRESULT CALLBACK WndProc(
     case WM_KEYDOWN:
     {
         WORD key = static_cast<WORD>(wParam);
+        bool handled = false;
+
         if (key == g_keyExit)
         {
             DestroyWindow(hwnd);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyAlwaysOnTop)
+        else if (key == g_keyAlwaysOnTop)
         {
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
-            return 0;
+            handled = true;
         }
-        if (key == g_keyReload)
+        else if (key == g_keyReload)
         {
             ReloadCurrentFile(true);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyOpenFile)
+        else if (key == g_keyOpenFile)
         {
             if (ShowOpenImageDialog(hwnd))
             {
@@ -1067,26 +1090,45 @@ LRESULT CALLBACK WndProc(
                 }
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
-            return 0;
+            handled = true;
         }
-        if (key == g_keyNextFile && !g_imageList.empty())
+        else if (key == g_keyNextFile && !g_imageList.empty())
         {
             NavigateImage(1);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyPrevFile && !g_imageList.empty())
+        else if (key == g_keyPrevFile && !g_imageList.empty())
         {
             NavigateImage(-1);
-            return 0;
+            handled = true;
         }
+
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
+                return 0;
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+
+            if (handled)
+            {
+                return 0;
+            }
+
+            if (HandleHtmlOverlayShortcutKeyDown(key))
+            {
+                return 0;
+            }
+
+            HandleHtmlOverlayKeyDown(wParam);
+            return 0;
+        }
+
+        if (handled)
+        {
+            return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
@@ -1153,9 +1195,24 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return 0;
         }
         return 0;
+    }
+
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    {
+        if (g_hasHtml)
+        {
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            return 0;
+        }
+        break;
     }
 
     case WM_TIMER:
@@ -2619,6 +2676,11 @@ void UpdateWebViewInputState()
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
+        HWND focused = GetFocus();
+        if (focused && (focused == g_webviewWindow || IsChild(g_webviewWindow, focused)) && g_hwnd)
+        {
+            SetFocus(g_hwnd);
+        }
     }
     else
     {
@@ -2634,6 +2696,111 @@ void UpdateWebViewInputState()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+bool ExecuteWebViewScript(const wchar_t* script)
+{
+    if (!g_hasHtml || !g_webview || !script)
+    {
+        return false;
+    }
+
+    HRESULT hr = g_webview->ExecuteScript(
+        script,
+        Microsoft::WRL::Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [](HRESULT, LPCWSTR) -> HRESULT
+            {
+                return S_OK;
+            }).Get());
+    return SUCCEEDED(hr);
+}
+
+bool HandleHtmlOverlayKeyDown(WPARAM wParam)
+{
+    bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    switch (wParam)
+    {
+    case VK_UP:
+        return ExecuteWebViewScript(L"window.scrollBy(0, -60);");
+    case VK_DOWN:
+        return ExecuteWebViewScript(L"window.scrollBy(0, 60);");
+    case VK_LEFT:
+        return ExecuteWebViewScript(L"window.scrollBy(-60, 0);");
+    case VK_RIGHT:
+        return ExecuteWebViewScript(L"window.scrollBy(60, 0);");
+    case VK_PRIOR:
+        return ExecuteWebViewScript(L"window.scrollBy(0, -window.innerHeight * 0.9);");
+    case VK_NEXT:
+    case VK_SPACE:
+        return ExecuteWebViewScript(L"window.scrollBy(0, window.innerHeight * 0.9);");
+    case VK_HOME:
+        return ExecuteWebViewScript(L"window.scrollTo(0, 0);");
+    case VK_END:
+        return ExecuteWebViewScript(L"window.scrollTo(0, document.body ? document.body.scrollHeight : document.documentElement.scrollHeight);");
+    case '0':
+        if (ctrlDown)
+        {
+            return SetWebViewZoomFactor(g_htmlBaseZoomFactor > 0.0 ? g_htmlBaseZoomFactor : 1.0);
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+
+bool GetWebViewZoomFactor(double& factor)
+{
+    factor = 1.0;
+    if (!g_webviewController)
+    {
+        return false;
+    }
+
+    double value = 1.0;
+    HRESULT hr = g_webviewController->get_ZoomFactor(&value);
+    if (FAILED(hr) || value <= 0.0)
+    {
+        return false;
+    }
+
+    factor = value;
+    return true;
+}
+
+bool SetWebViewZoomFactor(double factor)
+{
+    if (!g_webviewController || factor <= 0.0)
+    {
+        return false;
+    }
+
+    double clamped = (std::max)(0.1, (std::min)(factor, 5.0));
+    HRESULT hr = g_webviewController->put_ZoomFactor(clamped);
+    return SUCCEEDED(hr);
+}
+
+bool HandleHtmlOverlayShortcutKeyDown(WORD key)
+{
+    double current = 1.0;
+    if (!GetWebViewZoomFactor(current))
+    {
+        current = g_htmlBaseZoomFactor;
+    }
+
+    if (key == g_keyZoomIn)
+    {
+        return SetWebViewZoomFactor(current * 1.1);
+    }
+    if (key == g_keyZoomOut)
+    {
+        return SetWebViewZoomFactor(current / 1.1);
+    }
+    if (key == g_keyOriginalSize)
+    {
+        return SetWebViewZoomFactor(g_htmlBaseZoomFactor > 0.0 ? g_htmlBaseZoomFactor : 1.0);
+    }
+    return false;
 }
 
 bool EnsureWebView2(HWND hwnd)
@@ -2716,6 +2883,14 @@ bool EnsureWebView2(HWND hwnd)
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
                                     {
+                                        if (g_webviewController)
+                                        {
+                                            double zoom = 1.0;
+                                            if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoom)) && zoom > 0.0)
+                                            {
+                                                g_htmlBaseZoomFactor = zoom;
+                                            }
+                                        }
                                         if (g_webviewController && g_webviewPendingShow)
                                         {
                                             g_webviewPendingShow = false;
@@ -2753,6 +2928,7 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
