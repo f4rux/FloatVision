@@ -86,6 +86,7 @@ float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
 bool g_webviewPendingShow = false;
+double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
@@ -398,6 +399,8 @@ void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
+bool GetWebViewZoomFactor(double& factor);
+bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -2722,7 +2725,7 @@ bool HandleHtmlOverlayKeyDown(WPARAM wParam)
     case '0':
         if (ctrlDown)
         {
-            return ExecuteWebViewScript(L"document.body && (document.body.style.zoom='100%');");
+            return SetWebViewZoomFactor(g_htmlBaseZoomFactor > 0.0 ? g_htmlBaseZoomFactor : 1.0);
         }
         break;
     default:
@@ -2731,19 +2734,56 @@ bool HandleHtmlOverlayKeyDown(WPARAM wParam)
     return false;
 }
 
+bool GetWebViewZoomFactor(double& factor)
+{
+    factor = 1.0;
+    if (!g_webviewController)
+    {
+        return false;
+    }
+
+    double value = 1.0;
+    HRESULT hr = g_webviewController->get_ZoomFactor(&value);
+    if (FAILED(hr) || value <= 0.0)
+    {
+        return false;
+    }
+
+    factor = value;
+    return true;
+}
+
+bool SetWebViewZoomFactor(double factor)
+{
+    if (!g_webviewController || factor <= 0.0)
+    {
+        return false;
+    }
+
+    double clamped = (std::max)(0.1, (std::min)(factor, 5.0));
+    HRESULT hr = g_webviewController->put_ZoomFactor(clamped);
+    return SUCCEEDED(hr);
+}
+
 bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 {
+    double current = 1.0;
+    if (!GetWebViewZoomFactor(current))
+    {
+        current = g_htmlBaseZoomFactor;
+    }
+
     if (key == g_keyZoomIn)
     {
-        return ExecuteWebViewScript(L"(function(){var el=document.body||document.documentElement;if(!el){return;}var z=parseFloat(el.style.zoom);if(!(z>0)){z=100;}z=Math.min(500,z+10);el.style.zoom=z+'%';})();");
+        return SetWebViewZoomFactor(current * 1.1);
     }
     if (key == g_keyZoomOut)
     {
-        return ExecuteWebViewScript(L"(function(){var el=document.body||document.documentElement;if(!el){return;}var z=parseFloat(el.style.zoom);if(!(z>0)){z=100;}z=Math.max(10,z-10);el.style.zoom=z+'%';})();");
+        return SetWebViewZoomFactor(current / 1.1);
     }
     if (key == g_keyOriginalSize)
     {
-        return ExecuteWebViewScript(L"(function(){var el=document.body||document.documentElement;if(!el){return;}el.style.zoom='100%';})();");
+        return SetWebViewZoomFactor(g_htmlBaseZoomFactor > 0.0 ? g_htmlBaseZoomFactor : 1.0);
     }
     return false;
 }
@@ -2828,6 +2868,14 @@ bool EnsureWebView2(HWND hwnd)
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
                                     {
+                                        if (g_webviewController)
+                                        {
+                                            double zoom = 1.0;
+                                            if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoom)) && zoom > 0.0)
+                                            {
+                                                g_htmlBaseZoomFactor = zoom;
+                                            }
+                                        }
                                         if (g_webviewController && g_webviewPendingShow)
                                         {
                                             g_webviewPendingShow = false;
@@ -2865,6 +2913,7 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
