@@ -60,6 +60,7 @@ Microsoft::WRL::ComPtr<ICoreWebView2Controller2> g_webviewController2;
 Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
 HWND g_webviewWindow = nullptr;
+HWND g_webviewSubclassTarget = nullptr;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -338,6 +339,7 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kWebViewMouseBlockSubclassId = 3001;
 
 // =====================
 // 前方宣言
@@ -386,6 +388,7 @@ std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
+static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR subclassId, DWORD_PTR refData);
 WORD GetHtmlMouseBypassVirtualKey();
 void UpdateWebViewInputState();
 void UpdateWebViewWindowHandle();
@@ -2565,6 +2568,58 @@ void UpdateWebViewBounds()
     g_webviewController->put_Bounds(bounds);
 }
 
+static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam, UINT_PTR, DWORD_PTR)
+{
+    if (!g_hasHtml)
+    {
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+
+    WORD inputKey = GetHtmlMouseBypassVirtualKey();
+    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+    if (keyDown)
+    {
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
+
+    switch (msg)
+    {
+    case WM_NCHITTEST:
+        return HTTRANSPARENT;
+    case WM_MOUSEWHEEL:
+    case WM_MOUSEHWHEEL:
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONUP:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONUP:
+    case WM_RBUTTONDBLCLK:
+    case WM_MBUTTONDOWN:
+    case WM_MBUTTONUP:
+    case WM_MBUTTONDBLCLK:
+    case WM_XBUTTONDOWN:
+    case WM_XBUTTONUP:
+    case WM_XBUTTONDBLCLK:
+    case WM_NCMOUSEMOVE:
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONUP:
+    case WM_NCLBUTTONDBLCLK:
+    case WM_NCRBUTTONDOWN:
+    case WM_NCRBUTTONUP:
+    case WM_NCRBUTTONDBLCLK:
+    case WM_NCMBUTTONDOWN:
+    case WM_NCMBUTTONUP:
+    case WM_NCMBUTTONDBLCLK:
+    case WM_NCXBUTTONDOWN:
+    case WM_NCXBUTTONUP:
+    case WM_NCXBUTTONDBLCLK:
+        return 0;
+    }
+
+    return DefSubclassProc(hwnd, msg, wParam, lParam);
+}
+
 void UpdateWebViewWindowHandle()
 {
     if (!g_hwnd)
@@ -2593,7 +2648,20 @@ void UpdateWebViewWindowHandle()
     {
         found = GetWindow(g_hwnd, GW_CHILD);
     }
+
+    if (g_webviewSubclassTarget && g_webviewSubclassTarget != found)
+    {
+        RemoveWindowSubclass(g_webviewSubclassTarget, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId);
+        g_webviewSubclassTarget = nullptr;
+    }
+
     g_webviewWindow = found;
+
+    if (g_webviewWindow)
+    {
+        SetWindowSubclass(g_webviewWindow, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId, 0);
+        g_webviewSubclassTarget = g_webviewWindow;
+    }
 }
 
 void UpdateWebViewInputTimer()
@@ -2641,12 +2709,6 @@ void UpdateWebViewInputState()
     else
     {
         exStyle |= WS_EX_TRANSPARENT;
-
-        HWND focused = GetFocus();
-        if (focused == g_webviewWindow || IsChild(g_webviewWindow, focused))
-        {
-            SetFocus(g_hwnd);
-        }
     }
 
     SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
@@ -2777,6 +2839,11 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    if (g_webviewSubclassTarget)
+    {
+        RemoveWindowSubclass(g_webviewSubclassTarget, WebViewMouseBlockSubclassProc, kWebViewMouseBlockSubclassId);
+        g_webviewSubclassTarget = nullptr;
+    }
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
