@@ -2682,10 +2682,12 @@ void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
     }
 
     bool isKeyMessage = (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP);
+    HWND previousFocus = nullptr;
+    bool focusTemporarilyMoved = false;
     if (isKeyMessage)
     {
-        HWND focused = GetFocus();
-        bool focusInWebView = focused && (focused == g_webviewWindow || IsChild(g_webviewWindow, focused));
+        previousFocus = GetFocus();
+        bool focusInWebView = previousFocus && (previousFocus == g_webviewWindow || IsChild(g_webviewWindow, previousFocus));
         if (!focusInWebView)
         {
             SetFocus(g_webviewWindow);
@@ -2697,10 +2699,23 @@ void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
             {
                 g_webviewController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
             }
+            focusTemporarilyMoved = true;
         }
     }
 
     SendMessageW(g_webviewWindow, msg, wParam, lParam);
+
+    if (focusTemporarilyMoved)
+    {
+        if (previousFocus && IsWindow(previousFocus) && previousFocus != g_webviewWindow && !IsChild(g_webviewWindow, previousFocus))
+        {
+            SetFocus(previousFocus);
+        }
+        else if (g_hwnd && IsWindow(g_hwnd))
+        {
+            SetFocus(g_hwnd);
+        }
+    }
 
     if (!wasEnabled)
     {
