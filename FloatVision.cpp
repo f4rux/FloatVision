@@ -396,7 +396,6 @@ void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 void HandleWebViewInputModifierState(HWND hwnd);
-bool IsFocusInWebViewSubtree(HWND focus);
 void AdjustWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
@@ -2655,12 +2654,10 @@ void UpdateWebViewInputState()
     if (g_hasHtml && !keyDown)
     {
         exStyle |= WS_EX_TRANSPARENT;
-        EnableWindow(g_webviewWindow, FALSE);
     }
     else
     {
         exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
-        EnableWindow(g_webviewWindow, TRUE);
     }
     SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
     SetWindowPos(
@@ -2673,15 +2670,6 @@ void UpdateWebViewInputState()
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
-bool IsFocusInWebViewSubtree(HWND focus)
-{
-    if (!focus || !g_webviewWindow)
-    {
-        return false;
-    }
-    return focus == g_webviewWindow || IsChild(g_webviewWindow, focus);
-}
-
 void HandleWebViewInputModifierState(HWND hwnd)
 {
     if (!g_hasHtml)
@@ -2689,8 +2677,7 @@ void HandleWebViewInputModifierState(HWND hwnd)
         return;
     }
 
-    WORD inputKey = GetHtmlInputVirtualKey();
-    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+    (void)hwnd;
     UpdateWebViewInputState();
 
     if (!g_webviewWindow)
@@ -2699,16 +2686,9 @@ void HandleWebViewInputModifierState(HWND hwnd)
     }
 
     HWND focus = GetFocus();
-    if (keyDown)
+    if (focus != g_webviewWindow && !IsChild(g_webviewWindow, focus))
     {
-        if (!IsFocusInWebViewSubtree(focus))
-        {
-            SetFocus(g_webviewWindow);
-        }
-    }
-    else if (IsFocusInWebViewSubtree(focus))
-    {
-        SetFocus(hwnd);
+        SetFocus(g_webviewWindow);
     }
 }
 
