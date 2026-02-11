@@ -1,4 +1,6 @@
-<img title="" src="res/FloatVision.png" alt="" data-align="center" width="102">
+<p align="center">
+  <img src="res/FloatVision.png" alt="FloatVision" width="102">
+</p>
 
 # FloatVision
 
@@ -16,6 +18,8 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
 
 - **Always on Top**: Perfect for checking reference materials while working in other apps.
 
+- **Portable Application**: No installer required. Runs from any folder without touching the Windows Registry.
+
 - **Broad Format Support**:
   
   - **Images**: `.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`, `.tif`, `.tiff`, `.webp`
@@ -31,6 +35,8 @@ By keeping your images or notes pinned to the top of your screen, it serves as a
 ## Installation & Uninstallation
 
 - **Install**: Simply extract the downloaded folder to any location. This app is portable and does not touch the Windows Registry.
+  
+  ⚠️ Installing under protected directories such as `Program Files` is not recommended, as write permissions are required.
 
 - **Uninstall**: Delete the entire folder.
 
@@ -81,6 +87,14 @@ Right-click the window to open the **Context Menu**, then select **Settings**.
 ## Custom Skins
 
 If a file named `skin.png` is placed in the same directory as `FloatVision.exe`, it will be displayed as the default background upon startup.
+
+## Project Page
+
+https://github.com/f4rux/FloatVision
+
+## Author
+
+**f4rux**
 
 ## Third-Party Libraries
 
