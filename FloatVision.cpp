@@ -395,7 +395,8 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
-void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam);
+bool ExecuteWebViewScript(const wchar_t* script);
+bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -1089,8 +1090,15 @@ LRESULT CALLBACK WndProc(
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
+                return 0;
             }
-            ForwardKeyMessageToWebView(msg, wParam, lParam);
+
+            if (handled)
+            {
+                return 0;
+            }
+
+            HandleHtmlOverlayKeyDown(wParam);
             return 0;
         }
 
@@ -1163,7 +1171,6 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            ForwardKeyMessageToWebView(msg, wParam, lParam);
             return 0;
         }
         return 0;
@@ -1174,7 +1181,11 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
-            ForwardKeyMessageToWebView(msg, wParam, lParam);
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
             return 0;
         }
         break;
@@ -2663,72 +2674,51 @@ void UpdateWebViewInputState()
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
 }
 
-void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
+bool ExecuteWebViewScript(const wchar_t* script)
 {
-    if (!g_hasHtml)
+    if (!g_hasHtml || !g_webview || !script)
     {
-        return;
+        return false;
     }
 
-    if (!g_webviewWindow || !IsWindow(g_webviewWindow))
-    {
-        UpdateWebViewWindowHandle();
-    }
-
-    if (!g_webviewWindow || !IsWindow(g_webviewWindow))
-    {
-        return;
-    }
-
-    BOOL wasEnabled = IsWindowEnabled(g_webviewWindow);
-    if (!wasEnabled)
-    {
-        EnableWindow(g_webviewWindow, TRUE);
-    }
-
-    HWND targetWindow = g_webviewWindow;
-    HWND focused = GetFocus();
-    if (focused && (focused == g_webviewWindow || IsChild(g_webviewWindow, focused)))
-    {
-        targetWindow = focused;
-    }
-    else
-    {
-        HWND renderWidget = nullptr;
-        EnumChildWindows(
-            g_webviewWindow,
-            [](HWND child, LPARAM lParam) -> BOOL
+    HRESULT hr = g_webview->ExecuteScript(
+        script,
+        Microsoft::WRL::Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [](HRESULT, LPCWSTR) -> HRESULT
             {
-                wchar_t className[128] = {};
-                GetClassNameW(child, className, static_cast<int>(std::size(className)));
-                if (wcsncmp(className, L"Chrome_RenderWidgetHostHWND", 27) == 0)
-                {
-                    *reinterpret_cast<HWND*>(lParam) = child;
-                    return FALSE;
-                }
-                return TRUE;
-            },
-            reinterpret_cast<LPARAM>(&renderWidget));
-        if (renderWidget && IsWindow(renderWidget))
-        {
-            targetWindow = renderWidget;
-        }
-        else
-        {
-            HWND firstChild = GetWindow(g_webviewWindow, GW_CHILD);
-            if (firstChild && IsWindow(firstChild))
-            {
-                targetWindow = firstChild;
-            }
-        }
-    }
+                return S_OK;
+            }).Get());
+    return SUCCEEDED(hr);
+}
 
-    SendMessageW(targetWindow, msg, wParam, lParam);
-
-    if (!wasEnabled)
+bool HandleHtmlOverlayKeyDown(WPARAM wParam)
+{
+    bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    switch (wParam)
     {
-        EnableWindow(g_webviewWindow, FALSE);
+    case VK_UP:
+        return ExecuteWebViewScript(L"window.scrollBy(0, -60);");
+    case VK_DOWN:
+        return ExecuteWebViewScript(L"window.scrollBy(0, 60);");
+    case VK_PRIOR:
+        return ExecuteWebViewScript(L"window.scrollBy(0, -window.innerHeight * 0.9);");
+    case VK_NEXT:
+    case VK_SPACE:
+        return ExecuteWebViewScript(L"window.scrollBy(0, window.innerHeight * 0.9);");
+    case VK_HOME:
+        return ExecuteWebViewScript(L"window.scrollTo(0, 0);");
+    case VK_END:
+        return ExecuteWebViewScript(L"window.scrollTo(0, document.body ? document.body.scrollHeight : document.documentElement.scrollHeight);");
+    case '0':
+        if (ctrlDown)
+        {
+            return ExecuteWebViewScript(L"document.body && (document.body.style.zoom='100%');");
+        }
+        break;
+    default:
+        break;
     }
+    return false;
 }
 
 bool EnsureWebView2(HWND hwnd)
