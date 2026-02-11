@@ -2641,6 +2641,11 @@ void UpdateWebViewInputState()
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
+        HWND focused = GetFocus();
+        if (focused && (focused == g_webviewWindow || IsChild(g_webviewWindow, focused)) && g_hwnd)
+        {
+            SetFocus(g_hwnd);
+        }
     }
     else
     {
@@ -2679,19 +2684,6 @@ void ForwardKeyMessageToWebView(UINT msg, WPARAM wParam, LPARAM lParam)
     if (!wasEnabled)
     {
         EnableWindow(g_webviewWindow, TRUE);
-    }
-
-    bool isKeyMessage = (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP);
-    if (isKeyMessage)
-    {
-        if (g_webviewController2)
-        {
-            g_webviewController2->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        }
-        else if (g_webviewController)
-        {
-            g_webviewController->MoveFocus(COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC);
-        }
     }
 
     HWND targetWindow = g_webviewWindow;
