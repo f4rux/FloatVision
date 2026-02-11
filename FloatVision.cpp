@@ -395,6 +395,9 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
+bool ExecuteWebViewScript(const wchar_t* script);
+bool HandleHtmlOverlayKeyDown(WPARAM wParam);
+bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -1040,24 +1043,26 @@ LRESULT CALLBACK WndProc(
     case WM_KEYDOWN:
     {
         WORD key = static_cast<WORD>(wParam);
+        bool handled = false;
+
         if (key == g_keyExit)
         {
             DestroyWindow(hwnd);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyAlwaysOnTop)
+        else if (key == g_keyAlwaysOnTop)
         {
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
-            return 0;
+            handled = true;
         }
-        if (key == g_keyReload)
+        else if (key == g_keyReload)
         {
             ReloadCurrentFile(true);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyOpenFile)
+        else if (key == g_keyOpenFile)
         {
             if (ShowOpenImageDialog(hwnd))
             {
@@ -1067,26 +1072,45 @@ LRESULT CALLBACK WndProc(
                 }
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
-            return 0;
+            handled = true;
         }
-        if (key == g_keyNextFile && !g_imageList.empty())
+        else if (key == g_keyNextFile && !g_imageList.empty())
         {
             NavigateImage(1);
-            return 0;
+            handled = true;
         }
-        if (key == g_keyPrevFile && !g_imageList.empty())
+        else if (key == g_keyPrevFile && !g_imageList.empty())
         {
             NavigateImage(-1);
-            return 0;
+            handled = true;
         }
+
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
             if (wParam == inputKey)
             {
                 UpdateWebViewInputState();
+                return 0;
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+
+            if (handled)
+            {
+                return 0;
+            }
+
+            if (HandleHtmlOverlayShortcutKeyDown(key))
+            {
+                return 0;
+            }
+
+            HandleHtmlOverlayKeyDown(wParam);
+            return 0;
+        }
+
+        if (handled)
+        {
+            return 0;
         }
         if ((key == g_keyZoomIn || key == g_keyZoomOut) && g_hasText)
         {
@@ -1153,9 +1177,24 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            return DefWindowProc(hwnd, msg, wParam, lParam);
+            return 0;
         }
         return 0;
+    }
+
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    {
+        if (g_hasHtml)
+        {
+            WORD inputKey = GetHtmlInputVirtualKey();
+            if (wParam == inputKey)
+            {
+                UpdateWebViewInputState();
+            }
+            return 0;
+        }
+        break;
     }
 
     case WM_TIMER:
@@ -2619,6 +2658,11 @@ void UpdateWebViewInputState()
     {
         exStyle |= WS_EX_TRANSPARENT;
         EnableWindow(g_webviewWindow, FALSE);
+        HWND focused = GetFocus();
+        if (focused && (focused == g_webviewWindow || IsChild(g_webviewWindow, focused)) && g_hwnd)
+        {
+            SetFocus(g_hwnd);
+        }
     }
     else
     {
@@ -2634,6 +2678,74 @@ void UpdateWebViewInputState()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+bool ExecuteWebViewScript(const wchar_t* script)
+{
+    if (!g_hasHtml || !g_webview || !script)
+    {
+        return false;
+    }
+
+    HRESULT hr = g_webview->ExecuteScript(
+        script,
+        Microsoft::WRL::Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [](HRESULT, LPCWSTR) -> HRESULT
+            {
+                return S_OK;
+            }).Get());
+    return SUCCEEDED(hr);
+}
+
+bool HandleHtmlOverlayKeyDown(WPARAM wParam)
+{
+    bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+    switch (wParam)
+    {
+    case VK_UP:
+        return ExecuteWebViewScript(L"window.scrollBy(0, -60);");
+    case VK_DOWN:
+        return ExecuteWebViewScript(L"window.scrollBy(0, 60);");
+    case VK_LEFT:
+        return ExecuteWebViewScript(L"window.scrollBy(-60, 0);");
+    case VK_RIGHT:
+        return ExecuteWebViewScript(L"window.scrollBy(60, 0);");
+    case VK_PRIOR:
+        return ExecuteWebViewScript(L"window.scrollBy(0, -window.innerHeight * 0.9);");
+    case VK_NEXT:
+    case VK_SPACE:
+        return ExecuteWebViewScript(L"window.scrollBy(0, window.innerHeight * 0.9);");
+    case VK_HOME:
+        return ExecuteWebViewScript(L"window.scrollTo(0, 0);");
+    case VK_END:
+        return ExecuteWebViewScript(L"window.scrollTo(0, document.body ? document.body.scrollHeight : document.documentElement.scrollHeight);");
+    case '0':
+        if (ctrlDown)
+        {
+            return ExecuteWebViewScript(L"document.body && (document.body.style.zoom='100%');");
+        }
+        break;
+    default:
+        break;
+    }
+    return false;
+}
+
+bool HandleHtmlOverlayShortcutKeyDown(WORD key)
+{
+    if (key == g_keyZoomIn)
+    {
+        return ExecuteWebViewScript(L"(function(){var el=document.body||document.documentElement;if(!el){return;}var z=parseFloat(el.style.zoom);if(!(z>0)){z=100;}z=Math.min(500,z+10);el.style.zoom=z+'%';})();");
+    }
+    if (key == g_keyZoomOut)
+    {
+        return ExecuteWebViewScript(L"(function(){var el=document.body||document.documentElement;if(!el){return;}var z=parseFloat(el.style.zoom);if(!(z>0)){z=100;}z=Math.max(10,z-10);el.style.zoom=z+'%';})();");
+    }
+    if (key == g_keyOriginalSize)
+    {
+        return ExecuteWebViewScript(L"(function(){var el=document.body||document.documentElement;if(!el){return;}el.style.zoom='100%';})();");
+    }
+    return false;
 }
 
 bool EnsureWebView2(HWND hwnd)
