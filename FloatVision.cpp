@@ -2716,6 +2716,9 @@ LRESULT CALLBACK WebViewMouseGateProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM
 
 void UpdateWebViewInputState()
 {
+    WORD inputKey = GetHtmlInputVirtualKey();
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+
     if (!g_webviewWindow)
     {
         return;
