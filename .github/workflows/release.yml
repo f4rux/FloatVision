@@ -3,7 +3,7 @@ name: Build and Release FloatVision
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*'   # v1.0.0, v1.2.3, ...
 
 jobs:
   build:
@@ -12,15 +12,15 @@ jobs:
       contents: write
 
     steps:
-      # -------------------------------------------------
+      # -------------------------
       # Checkout
-      # -------------------------------------------------
+      # -------------------------
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # -------------------------------------------------
+      # -------------------------
       # Toolchain
-      # -------------------------------------------------
+      # -------------------------
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
         with:
@@ -32,9 +32,9 @@ jobs:
       - name: Restore NuGet packages
         run: nuget restore FloatVision.slnx
 
-      # =================================================
+      # =========================================================
       # x86 BUILD
-      # =================================================
+      # =========================================================
       - name: Build x86
         run: |
           msbuild FloatVision.slnx `
@@ -49,13 +49,16 @@ jobs:
           $dist = "publish_dist/x86/FloatVision"
           New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
 
-          Get-ChildItem -Recurse -Filter "FloatVision.exe" |
+          Get-ChildItem -Path . -Filter "FloatVision.exe" -Recurse |
             Where-Object { $_.FullName -match "\\x86\\Release\\" } |
             Select-Object -First 1 |
             Copy-Item -Destination $dist
 
-          Copy-Item res/*.png $dist/res/
-          Copy-Item README.md $dist/
+          Copy-Item res/FloatVision.png $dist/res/
+          Copy-Item res/ss1.png        $dist/res/
+          Copy-Item res/ss2.png        $dist/res/
+          Copy-Item res/ss3.png        $dist/res/
+          Copy-Item README.md          $dist/
 
       - name: Archive x86
         shell: pwsh
@@ -64,9 +67,9 @@ jobs:
             -Path publish_dist/x86/FloatVision `
             -DestinationPath FloatVision-x86-v${{ github.ref_name }}.zip
 
-      # =================================================
+      # =========================================================
       # x64 BUILD
-      # =================================================
+      # =========================================================
       - name: Build x64
         run: |
           msbuild FloatVision.slnx `
@@ -81,13 +84,16 @@ jobs:
           $dist = "publish_dist/x64/FloatVision"
           New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
 
-          Get-ChildItem -Recurse -Filter "FloatVision.exe" |
+          Get-ChildItem -Path . -Filter "FloatVision.exe" -Recurse |
             Where-Object { $_.FullName -match "\\x64\\Release\\" } |
             Select-Object -First 1 |
             Copy-Item -Destination $dist
 
-          Copy-Item res/*.png $dist/res/
-          Copy-Item README.md $dist/
+          Copy-Item res/FloatVision.png $dist/res/
+          Copy-Item res/ss1.png        $dist/res/
+          Copy-Item res/ss2.png        $dist/res/
+          Copy-Item res/ss3.png        $dist/res/
+          Copy-Item README.md          $dist/
 
       - name: Archive x64
         shell: pwsh
@@ -96,66 +102,29 @@ jobs:
             -Path publish_dist/x64/FloatVision `
             -DestinationPath FloatVision-x64-v${{ github.ref_name }}.zip
 
-      # =================================================
-      # ARM64 BUILD (Windows on ARM)
-      # =================================================
-      - name: Build ARM64
-        run: |
-          msbuild FloatVision.slnx `
-            /p:Configuration=Release `
-            /p:Platform=ARM64 `
-            /p:PlatformToolset=v143 `
-            /p:WindowsTargetPlatformVersion=10.0
-
-      - name: Collect ARM64 artifacts
-        shell: pwsh
-        run: |
-          $dist = "publish_dist/arm64/FloatVision"
-          New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
-
-          Get-ChildItem -Recurse -Filter "FloatVision.exe" |
-            Where-Object { $_.FullName -match "\\ARM64\\Release\\" } |
-            Select-Object -First 1 |
-            Copy-Item -Destination $dist
-
-          Copy-Item res/*.png $dist/res/
-          Copy-Item README.md $dist/
-
-      - name: Archive ARM64
-        shell: pwsh
-        run: |
-          Compress-Archive `
-            -Path publish_dist/arm64/FloatVision `
-            -DestinationPath FloatVision-arm64-v${{ github.ref_name }}.zip
-
-      # =================================================
+      # =========================================================
       # GitHub Release (latest auto-updated)
-      # =================================================
+      # =========================================================
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             FloatVision-x86-v${{ github.ref_name }}.zip
             FloatVision-x64-v${{ github.ref_name }}.zip
-            FloatVision-arm64-v${{ github.ref_name }}.zip
           generate_release_notes: true
           body: |
             ## Downloads
 
             - **FloatVision x64**  
               64-bit build.  
-              Recommended for most users on Windows 10 / 11.
-
-            - **FloatVision ARM64**  
-              Native build for Windows on ARM devices  
-              (Surface Pro X, Snapdragon X Elite, etc.).
+              Recommended for most users running Windows 10 / 11 (64-bit).
 
             - **FloatVision x86**  
               32-bit build.  
-              Provided for legacy or compatibility purposes only.
+              Use this only if you are on a 32-bit Windows environment or need legacy compatibility.
 
             ---
 
-            All binaries are built from the same source code and differ only by target architecture.
+            Both builds are generated from the same source code and differ only in target architecture.
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
