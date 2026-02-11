@@ -395,6 +395,8 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
+void HandleWebViewInputModifierState(HWND hwnd);
+void AdjustWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
@@ -912,9 +914,16 @@ LRESULT CALLBACK WndProc(
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
-            bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+            bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
             if (keyDown && g_webviewWindow)
             {
+                int delta = GET_WHEEL_DELTA_WPARAM(wParam);
+                float steps = static_cast<float>(delta) / WHEEL_DELTA;
+                if ((GetAsyncKeyState(VK_CONTROL) & 0x8000) != 0)
+                {
+                    AdjustWebViewZoomFactor(std::pow(1.1f, steps));
+                    return 0;
+                }
                 WPARAM adjustedWParam = wParam;
                 if (inputKey == VK_SHIFT)
                 {
@@ -1038,6 +1047,7 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
     {
         WORD key = static_cast<WORD>(wParam);
         if (key == g_keyExit)
@@ -1084,7 +1094,31 @@ LRESULT CALLBACK WndProc(
             WORD inputKey = GetHtmlInputVirtualKey();
             if (wParam == inputKey)
             {
-                UpdateWebViewInputState();
+                HandleWebViewInputModifierState(hwnd);
+            }
+            if ((key == g_keyZoomIn || key == g_keyZoomOut))
+            {
+                double factor = (key == g_keyZoomIn) ? 1.1 : (1.0 / 1.1);
+                AdjustWebViewZoomFactor(factor);
+                return 0;
+            }
+            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && (wParam == VK_ADD || wParam == VK_OEM_PLUS))
+            {
+                AdjustWebViewZoomFactor(1.1);
+                return 0;
+            }
+            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && (wParam == VK_SUBTRACT || wParam == VK_OEM_MINUS))
+            {
+                AdjustWebViewZoomFactor(1.0 / 1.1);
+                return 0;
+            }
+            if ((GetKeyState(VK_CONTROL) & 0x8000) != 0 && wParam == '0')
+            {
+                if (g_webviewController)
+                {
+                    g_webviewController->put_ZoomFactor(1.0);
+                }
+                return 0;
             }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
@@ -1145,13 +1179,14 @@ LRESULT CALLBACK WndProc(
     }
 
     case WM_KEYUP:
+    case WM_SYSKEYUP:
     {
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlInputVirtualKey();
             if (wParam == inputKey)
             {
-                UpdateWebViewInputState();
+                HandleWebViewInputModifierState(hwnd);
             }
             return DefWindowProc(hwnd, msg, wParam, lParam);
         }
@@ -1164,7 +1199,7 @@ LRESULT CALLBACK WndProc(
         {
             if (g_hasHtml)
             {
-                UpdateWebViewInputState();
+                HandleWebViewInputModifierState(hwnd);
             }
             else
             {
@@ -2607,23 +2642,22 @@ WORD GetHtmlInputVirtualKey()
 
 void UpdateWebViewInputState()
 {
+    WORD inputKey = GetHtmlInputVirtualKey();
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
+
     if (!g_webviewWindow)
     {
         return;
     }
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
-    WORD inputKey = GetHtmlInputVirtualKey();
-    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
     if (g_hasHtml && !keyDown)
     {
         exStyle |= WS_EX_TRANSPARENT;
-        EnableWindow(g_webviewWindow, FALSE);
     }
     else
     {
         exStyle &= ~static_cast<LONG_PTR>(WS_EX_TRANSPARENT);
-        EnableWindow(g_webviewWindow, TRUE);
     }
     SetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE, exStyle);
     SetWindowPos(
@@ -2634,6 +2668,43 @@ void UpdateWebViewInputState()
         0,
         0,
         SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+}
+
+void HandleWebViewInputModifierState(HWND hwnd)
+{
+    if (!g_hasHtml)
+    {
+        return;
+    }
+
+    (void)hwnd;
+    UpdateWebViewInputState();
+
+    if (!g_webviewWindow)
+    {
+        return;
+    }
+
+    HWND focus = GetFocus();
+    if (focus != g_webviewWindow && !IsChild(g_webviewWindow, focus))
+    {
+        SetFocus(g_webviewWindow);
+    }
+}
+
+void AdjustWebViewZoomFactor(double factor)
+{
+    if (!g_webviewController)
+    {
+        return;
+    }
+    double zoomFactor = 1.0;
+    if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoomFactor)))
+    {
+        zoomFactor *= factor;
+        zoomFactor = (std::max)(0.25, (std::min)(zoomFactor, 5.0));
+        g_webviewController->put_ZoomFactor(zoomFactor);
+    }
 }
 
 bool EnsureWebView2(HWND hwnd)
