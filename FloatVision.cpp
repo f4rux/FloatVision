@@ -61,6 +61,7 @@ Microsoft::WRL::ComPtr<ICoreWebView2> g_webview;
 HMODULE g_webviewLoader = nullptr;
 HWND g_webviewWindow = nullptr;
 HWND g_webviewSubclassTarget = nullptr;
+bool g_forwardingWebViewKeyToHost = false;
 
 UINT g_imageWidth = 0;
 UINT g_imageHeight = 0;
@@ -908,7 +909,7 @@ LRESULT CALLBACK WndProc(
         if (g_hasHtml)
         {
             WORD inputKey = GetHtmlMouseBypassVirtualKey();
-            bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+            bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
             if (keyDown && g_webviewWindow)
             {
                 SendMessageW(g_webviewWindow, WM_MOUSEWHEEL, wParam, lParam);
@@ -1092,7 +1093,7 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            if (g_webviewWindow)
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
             {
                 SendMessageW(g_webviewWindow, msg, wParam, lParam);
             }
@@ -1164,7 +1165,7 @@ LRESULT CALLBACK WndProc(
             {
                 UpdateWebViewInputState();
             }
-            if (g_webviewWindow)
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
             {
                 SendMessageW(g_webviewWindow, msg, wParam, lParam);
             }
@@ -1178,7 +1179,7 @@ LRESULT CALLBACK WndProc(
     {
         if (g_hasHtml)
         {
-            if (g_webviewWindow)
+            if (g_webviewWindow && !g_forwardingWebViewKeyToHost)
             {
                 SendMessageW(g_webviewWindow, msg, wParam, lParam);
             }
@@ -2576,15 +2577,32 @@ static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARA
     }
 
     WORD inputKey = GetHtmlMouseBypassVirtualKey();
-    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
-    if (keyDown)
-    {
-        return DefSubclassProc(hwnd, msg, wParam, lParam);
-    }
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
 
     switch (msg)
     {
+    case WM_SYSKEYDOWN:
+    case WM_SYSKEYUP:
+    case WM_KEYDOWN:
+    case WM_KEYUP:
+    {
+        if (wParam == GetHtmlMouseBypassVirtualKey())
+        {
+            UpdateWebViewInputState();
+        }
+        if (!g_forwardingWebViewKeyToHost && g_hwnd)
+        {
+            g_forwardingWebViewKeyToHost = true;
+            SendMessageW(g_hwnd, msg, wParam, lParam);
+            g_forwardingWebViewKeyToHost = false;
+        }
+        return DefSubclassProc(hwnd, msg, wParam, lParam);
+    }
     case WM_NCHITTEST:
+        if (keyDown)
+        {
+            return DefSubclassProc(hwnd, msg, wParam, lParam);
+        }
         return HTTRANSPARENT;
     case WM_MOUSEWHEEL:
     case WM_MOUSEHWHEEL:
@@ -2614,6 +2632,10 @@ static LRESULT CALLBACK WebViewMouseBlockSubclassProc(HWND hwnd, UINT msg, WPARA
     case WM_NCXBUTTONDOWN:
     case WM_NCXBUTTONUP:
     case WM_NCXBUTTONDBLCLK:
+        if (keyDown)
+        {
+            return DefSubclassProc(hwnd, msg, wParam, lParam);
+        }
         return 0;
     }
 
@@ -2699,7 +2721,7 @@ void UpdateWebViewInputState()
 
     LONG_PTR exStyle = GetWindowLongPtrW(g_webviewWindow, GWL_EXSTYLE);
     WORD inputKey = GetHtmlMouseBypassVirtualKey();
-    bool keyDown = (GetKeyState(inputKey) & 0x8000) != 0;
+    bool keyDown = (GetAsyncKeyState(inputKey) & 0x8000) != 0;
     bool allowMouseInput = g_hasHtml && keyDown;
 
     if (allowMouseInput)
