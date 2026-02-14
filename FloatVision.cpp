@@ -3102,29 +3102,27 @@ std::wstring BuildWebViewDocumentInjectionScript()
 {
     const bool darkMode = IsDarkModeEnabled();
     const wchar_t* scrollbarCss = darkMode ? LR"(
-            :root,
             html,
-            body,
-            * {
-                scrollbar-color: #5a5a5a #1f1f1f !important;
+            body {
+                scrollbar-color: #5a5a5a #1f1f1f;
             }
             ::-webkit-scrollbar {
                 width: 14px;
                 height: 14px;
             }
             ::-webkit-scrollbar-track {
-                background: #1f1f1f !important;
+                background: #1f1f1f;
             }
             ::-webkit-scrollbar-thumb {
-                background-color: #5a5a5a !important;
-                border: 3px solid #1f1f1f !important;
+                background-color: #5a5a5a;
+                border: 3px solid #1f1f1f;
                 border-radius: 8px;
             }
             ::-webkit-scrollbar-thumb:hover {
-                background-color: #7a7a7a !important;
+                background-color: #7a7a7a;
             }
             ::-webkit-scrollbar-corner {
-                background: #1f1f1f !important;
+                background: #1f1f1f;
             }
     )" : L"";
 
@@ -3132,7 +3130,6 @@ std::wstring BuildWebViewDocumentInjectionScript()
         if (window.__fvCssInjectorInstalled) {
             return;
         }
-        window.__fvCssInjectorInstalled = true;
 
         const css = `
     )";
@@ -3145,34 +3142,37 @@ std::wstring BuildWebViewDocumentInjectionScript()
         }
 
         const insertStyle = () => {
-            const root = document.head || document.body || document.documentElement;
+            const root = document.head || document.documentElement || document.body;
             if (!root) {
                 return false;
             }
 
-            let style = document.getElementById('fv-webview-style');
-            if (!style) {
-                style = document.createElement('style');
-                style.id = 'fv-webview-style';
-                style.textContent = css;
-                root.appendChild(style);
-            } else if (style.textContent !== css) {
-                style.textContent = css;
+            if (document.getElementById('fv-webview-style')) {
+                return true;
             }
 
+            const style = document.createElement('style');
+            style.id = 'fv-webview-style';
+            style.textContent = css;
+            root.appendChild(style);
             return true;
         };
 
-        insertStyle();
-        setTimeout(insertStyle, 0);
-        requestAnimationFrame(() => {
-            insertStyle();
-        });
+        if (insertStyle()) {
+            window.__fvCssInjected = true;
+            return;
+        }
+
+        const onReady = () => {
+            if (insertStyle()) {
+                window.__fvCssInjected = true;
+            }
+        };
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', insertStyle, { once: true });
+            document.addEventListener('DOMContentLoaded', onReady, { once: true });
         } else {
-            insertStyle();
+            onReady();
         }
     })(); )";
     return script;
