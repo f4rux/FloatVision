@@ -1283,9 +1283,28 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
-                if (!g_webviewPendingTimeoutRetried && g_webview && !g_pendingHtmlContent.empty())
+                if (!g_webviewPendingTimeoutRetried && g_webview)
                 {
-                    const HRESULT retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                    HRESULT retryHr = E_FAIL;
+                    if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                    {
+                        retryHr = g_webview->Navigate(g_pendingHtmlUri.c_str());
+                        if (FAILED(retryHr))
+                        {
+                            const bool fallbackSucceeded = RetryPendingHtmlWithNavigateToStringInternal();
+                            if (fallbackSucceeded)
+                            {
+                                g_webviewPendingTimeoutRetried = true;
+                                g_webviewPendingStartTick = now;
+                                return 0;
+                            }
+                        }
+                    }
+                    else if (!g_pendingHtmlContent.empty())
+                    {
+                        retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                    }
+
                     if (SUCCEEDED(retryHr))
                     {
                         g_webviewPendingTimeoutRetried = true;
@@ -3100,113 +3119,9 @@ void CompletePendingHtmlShowInternal(bool showWebView)
 
 std::wstring BuildWebViewDocumentInjectionScript()
 {
-    const bool darkMode = IsDarkModeEnabled();
-    const wchar_t* scrollbarCss = darkMode ? LR"(
-            html,
-            body {
-                scrollbar-color: #5a5a5a #1f1f1f;
-            }
-            ::-webkit-scrollbar {
-                width: 14px;
-                height: 14px;
-            }
-            ::-webkit-scrollbar-track {
-                background: #1f1f1f;
-            }
-            ::-webkit-scrollbar-thumb {
-                background-color: #5a5a5a;
-                border: 3px solid #1f1f1f;
-                border-radius: 8px;
-            }
-            ::-webkit-scrollbar-thumb:hover {
-                background-color: #7a7a7a;
-            }
-            ::-webkit-scrollbar-corner {
-                background: #1f1f1f;
-            }
-    )" : L"";
-
-    std::wstring script = LR"((function() {
-        if (window.__fvCssInjectorInstalled) {
-            return;
-        }
-
-        const css = `
-    )";
-    script += scrollbarCss;
-    script += LR"(
-        `;
-
-        if (css.trim().length === 0) {
-            return;
-        }
-
-        const insertStyle = () => {
-            const root = document.head || document.documentElement || document.body;
-            if (!root) {
-                return false;
-            }
-
-            if (document.getElementById('fv-webview-style')) {
-                return true;
-            }
-
-            const style = document.createElement('style');
-            style.id = 'fv-webview-style';
-            style.textContent = css;
-            root.appendChild(style);
-            return true;
-        };
-
-        if (insertStyle()) {
-            window.__fvCssInjected = true;
-            return;
-        }
-
-        const tryInject = () => {
-            if (window.__fvCssInjected) {
-                return true;
-            }
-            if (!insertStyle()) {
-                return false;
-            }
-            window.__fvCssInjected = true;
-            return true;
-        };
-
-        if (tryInject()) {
-            return;
-        }
-
-        let observer = null;
-        const onReady = () => {
-            if (tryInject()) {
-                cleanup();
-            }
-        };
-
-        const cleanup = () => {
-            document.removeEventListener('DOMContentLoaded', onReady);
-            window.removeEventListener('load', onReady);
-            if (observer) {
-                observer.disconnect();
-                observer = null;
-            }
-        };
-
-        document.addEventListener('DOMContentLoaded', onReady);
-        window.addEventListener('load', onReady);
-
-        observer = new MutationObserver(() => {
-            if (tryInject()) {
-                cleanup();
-            }
-        });
-        observer.observe(document, { childList: true, subtree: true });
-
-        setTimeout(cleanup, 3000);
-    })(); )";
-    return script;
+    // CSS/JS injectionによる初回表示フラッシュや副作用を避けるため、
+    // WebView2側の設定（ブラウザ引数 + DevTools emulation）のみを利用する。
+    return L"";
 }
 
 
@@ -3245,10 +3160,7 @@ bool EnsureWebView2(HWND hwnd)
 
     if (g_webviewController && g_webview)
     {
-        if (!g_webviewPendingShow)
-        {
-            g_webviewController->put_IsVisible(TRUE);
-        }
+        g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
         if (g_webviewController2)
         {
             COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
@@ -3351,7 +3263,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
-                            g_webviewController->put_IsVisible(TRUE);
+                            g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                             if (g_webviewController2)
                             {
                                 COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
