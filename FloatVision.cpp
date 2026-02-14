@@ -3100,12 +3100,14 @@ std::wstring BuildWebViewDocumentInjectionScript()
     )" : L"";
 
     std::wstring script = LR"((function() {
-        if (window.__fvBgInit) {
+        if (window.__fvCssInjected) {
             return;
         }
-        window.__fvBgInit = true;
 
         const css = `
+            :root {
+                color-scheme: light;
+            }
             html, body {
                 background-color: #ffffff !important;
             }
@@ -3114,65 +3116,11 @@ std::wstring BuildWebViewDocumentInjectionScript()
     script += LR"(
         `;
 
-        const insertStyle = () => {
-            if (!document.getElementById('fv-webview-style')) {
-                const style = document.createElement('style');
-                style.id = 'fv-webview-style';
-                style.textContent = css;
-                (document.head || document.body || document.documentElement).appendChild(style);
-            }
-        };
-
-        const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
-        const isWhite = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff';
-
-        const ensureWhiteBackground = () => {
-            const html = document.documentElement;
-            const body = document.body;
-            if (!html) {
-                return;
-            }
-            const htmlBg = getComputedStyle(html).backgroundColor;
-            if (isTransparent(htmlBg) || !isWhite(htmlBg)) {
-                html.style.setProperty('background-color', '#ffffff', 'important');
-            }
-
-            if (body) {
-                const bodyBg = getComputedStyle(body).backgroundColor;
-                if (isTransparent(bodyBg) || !isWhite(bodyBg)) {
-                    body.style.setProperty('background-color', '#ffffff', 'important');
-                }
-            }
-        };
-
-        const applyAll = () => {
-            insertStyle();
-            ensureWhiteBackground();
-        };
-
-        const startObserver = () => {
-            const root = document.documentElement;
-            if (!root || window.__fvBgObserver) {
-                return;
-            }
-            const observer = new MutationObserver(() => {
-                ensureWhiteBackground();
-            });
-            observer.observe(root, { attributes: true, childList: true, subtree: true });
-            window.__fvBgObserver = observer;
-        };
-
-        applyAll();
-        window.addEventListener('load', applyAll, { once: true });
-
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                applyAll();
-                startObserver();
-            }, { once: true });
-        } else {
-            startObserver();
-        }
+        const style = document.createElement('style');
+        style.id = 'fv-webview-style';
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
+        window.__fvCssInjected = true;
     })(); )";
     return script;
 }
