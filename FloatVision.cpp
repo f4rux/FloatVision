@@ -94,6 +94,7 @@ std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
 int g_webviewPendingNavigationCount = 0;
 bool g_pendingHtmlFallbackAttempted = false;
+bool g_webviewPendingTimeoutRetried = false;
 bool g_webviewCreationInProgress = false;
 bool g_webviewPendingTimerActive = false;
 ULONGLONG g_webviewPendingStartTick = 0;
@@ -1269,6 +1270,24 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
+                if (!g_webviewPendingTimeoutRetried && g_webview)
+                {
+                    HRESULT retryHr = E_FAIL;
+                    if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                    {
+                        retryHr = g_webview->Navigate(g_pendingHtmlUri.c_str());
+                    }
+                    else if (!g_pendingHtmlContent.empty())
+                    {
+                        retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                    }
+                    if (SUCCEEDED(retryHr))
+                    {
+                        g_webviewPendingTimeoutRetried = true;
+                        g_webviewPendingStartTick = now;
+                        return 0;
+                    }
+                }
                 CompletePendingHtmlShow(true);
             }
             return 0;
@@ -3068,6 +3087,7 @@ void BeginPendingHtmlShow(bool keepLayered)
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
     g_pendingHtmlFallbackAttempted = false;
+    g_webviewPendingTimeoutRetried = false;
     g_keepLayeredWhileHtmlPending = keepLayered;
     g_webviewPendingStartTick = GetTickCount64();
     if (g_webviewController)
@@ -3110,7 +3130,11 @@ void CompletePendingHtmlShow(bool showWebView)
 
     g_webviewPendingShow = false;
     g_webviewPendingNavigationCount = 0;
+    g_webviewPendingTimeoutRetried = false;
     g_webviewPendingStartTick = 0;
+    g_pendingHtmlContent.clear();
+    g_pendingHtmlUri.clear();
+    g_pendingHtmlIsUri = false;
     if (g_webviewPendingTimerActive && g_hwnd)
     {
         KillTimer(g_hwnd, kWebViewPendingTimerId);
@@ -3149,8 +3173,6 @@ bool EnsureWebView2(HWND hwnd)
         {
             BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
-            g_pendingHtmlUri.clear();
-            g_pendingHtmlIsUri = false;
             if (FAILED(navigateResult))
             {
                 CompletePendingHtmlShow(true);
@@ -3161,7 +3183,6 @@ bool EnsureWebView2(HWND hwnd)
         {
             BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-            g_pendingHtmlContent.clear();
             if (FAILED(navigateResult))
             {
                 CompletePendingHtmlShow(true);
@@ -3284,8 +3305,6 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                                g_pendingHtmlUri.clear();
-                                g_pendingHtmlIsUri = false;
                                 if (FAILED(navigateResult))
                                 {
                                     CompletePendingHtmlShow(false);
@@ -3295,7 +3314,6 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                g_pendingHtmlContent.clear();
                                 if (FAILED(navigateResult))
                                 {
                                     CompletePendingHtmlShow(false);
@@ -3336,6 +3354,7 @@ void CloseWebView()
     g_pendingInjectBaseStyle = false;
     g_pendingHtmlFilePath.clear();
     g_pendingHtmlFallbackAttempted = false;
+    g_webviewPendingTimeoutRetried = false;
     g_webviewPendingNavigationCount = 0;
     g_webviewCreationInProgress = false;
     g_webviewPendingStartTick = 0;
