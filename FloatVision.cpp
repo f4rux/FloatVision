@@ -3057,15 +3057,10 @@ void CompletePendingHtmlShowInternal(bool showWebView)
 }
 #endif
 
-std::wstring BuildWebViewScrollbarInjectionScript()
+std::wstring BuildWebViewDocumentInjectionScript()
 {
-    if (!IsDarkModeEnabled())
-    {
-        return L"";
-    }
-
-    return LR"((function() {
-        const css = `
+    const bool darkMode = IsDarkModeEnabled();
+    const wchar_t* scrollbarCss = darkMode ? LR"(
             html::-webkit-scrollbar,
             body::-webkit-scrollbar {
                 width: 14px;
@@ -3089,25 +3084,58 @@ std::wstring BuildWebViewScrollbarInjectionScript()
             body::-webkit-scrollbar-corner {
                 background: #1f1f1f;
             }
+    )" : L"";
+
+    std::wstring script = LR"((function() {
+        const css = `
+            html, body {
+                background-color: rgb(255, 255, 255);
+            }
+    )";
+    script += scrollbarCss;
+    script += LR"(
         `;
 
         const insertStyle = () => {
-            if (!document.getElementById('scrollbar-style')) {
+            if (!document.getElementById('fv-webview-style')) {
                 const style = document.createElement('style');
-                style.id = 'scrollbar-style';
+                style.id = 'fv-webview-style';
                 style.textContent = css;
                 (document.head || document.body || document.documentElement).appendChild(style);
             }
         };
 
-        insertStyle();
-        setTimeout(insertStyle, 0);
-        requestAnimationFrame(insertStyle);
+        const ensureWhiteBackground = () => {
+            const html = document.documentElement;
+            const body = document.body;
+            if (!html) {
+                return;
+            }
+            const htmlBg = getComputedStyle(html).backgroundColor;
+            const bodyBg = body ? getComputedStyle(body).backgroundColor : 'rgba(0, 0, 0, 0)';
+            const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
+            if (isTransparent(htmlBg)) {
+                html.style.backgroundColor = '#ffffff';
+            }
+            if (body && isTransparent(bodyBg)) {
+                body.style.backgroundColor = '#ffffff';
+            }
+        };
+
+        const applyAll = () => {
+            insertStyle();
+            ensureWhiteBackground();
+        };
+
+        applyAll();
+        setTimeout(applyAll, 0);
+        requestAnimationFrame(applyAll);
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', insertStyle);
+            document.addEventListener('DOMContentLoaded', applyAll);
         }
     })(); )";
+    return script;
 }
 
 bool EnsureWebView2(HWND hwnd)
@@ -3122,6 +3150,11 @@ bool EnsureWebView2(HWND hwnd)
         if (!g_webviewPendingShow)
         {
             g_webviewController->put_IsVisible(TRUE);
+        }
+        if (g_webviewController2)
+        {
+            COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
+            g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
         }
         UpdateWebViewWindowHandle();
         UpdateWebViewInputState();
@@ -3228,10 +3261,10 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
-                            std::wstring scrollbarScript = BuildWebViewScrollbarInjectionScript();
-                            if (!scrollbarScript.empty())
+                            std::wstring documentScript = BuildWebViewDocumentInjectionScript();
+                            if (!documentScript.empty())
                             {
-                                g_webview->AddScriptToExecuteOnDocumentCreated(scrollbarScript.c_str(), nullptr);
+                                g_webview->AddScriptToExecuteOnDocumentCreated(documentScript.c_str(), nullptr);
                             }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
