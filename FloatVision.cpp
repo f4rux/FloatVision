@@ -2607,7 +2607,7 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_pendingHtmlFilePath = path;
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
-    g_pendingInjectBaseStyle = true;
+    g_pendingInjectBaseStyle = false;
     BeginPendingHtmlShow(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
@@ -3049,39 +3049,6 @@ void InjectBaseStyleIntoCurrentHtml()
             }).Get());
 }
 
-void RegisterWebViewDocumentStyleScript()
-{
-    if (!g_webview)
-    {
-        return;
-    }
-
-    const wchar_t* script =
-        LR"JS((() => {
-            const css = "html, body { color-scheme: light dark; background: Canvas !important; color: CanvasText; margin: 0; width: 100%; height: 100%; overflow: auto; }";
-            const doc = document;
-            if (!doc) {
-                return;
-            }
-            const id = "floatvision-base-style";
-            let style = doc.getElementById(id);
-            if (!style) {
-                style = doc.createElement("style");
-                style.id = id;
-                (doc.head || doc.documentElement || doc.body || doc).appendChild(style);
-            }
-            style.textContent = css;
-        })(); )JS";
-
-    g_webview->AddScriptToExecuteOnDocumentCreated(
-        script,
-        Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
-            [](HRESULT, PCWSTR) -> HRESULT
-            {
-                return S_OK;
-            }).Get());
-}
-
 void BeginPendingHtmlShow(bool keepLayered)
 {
     g_webviewPendingShow = true;
@@ -3117,8 +3084,7 @@ bool RetryPendingHtmlWithNavigateToString()
         return false;
     }
 
-    std::wstring html = InjectHtmlBaseStyles(content);
-    return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
+    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
 }
 
 void CompletePendingHtmlShow(bool showWebView)
