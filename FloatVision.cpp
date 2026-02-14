@@ -3145,16 +3145,8 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(
                                     LR"((() => {
-                                        const root = document.documentElement;
-                                        if (!root) {
-                                            return;
-                                        }
-                                        let style = document.getElementById('floatvision-webview-style');
-                                        if (!style) {
-                                            style = document.createElement('style');
-                                            style.id = 'floatvision-webview-style';
-                                        }
-                                        style.textContent = `
+                                        const styleId = 'floatvision-webview-style';
+                                        const css = `
                                             html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
                                             ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
                                             ::-webkit-scrollbar-track { background: #1f1f1f !important; }
@@ -3162,8 +3154,32 @@ bool EnsureWebView2(HWND hwnd)
                                             ::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
                                             ::-webkit-scrollbar-corner { background: #1f1f1f !important; }
                                         `;
-                                        if (!style.parentNode) {
-                                            root.appendChild(style);
+                                        const ensureStyle = () => {
+                                            const root = document.documentElement;
+                                            if (!root) {
+                                                return;
+                                            }
+                                            let style = document.getElementById(styleId);
+                                            if (!style) {
+                                                style = document.createElement('style');
+                                                style.id = styleId;
+                                                root.appendChild(style);
+                                            }
+                                            if (style.textContent !== css) {
+                                                style.textContent = css;
+                                            }
+                                        };
+
+                                        ensureStyle();
+                                        document.addEventListener('DOMContentLoaded', ensureStyle, { once: true });
+                                        window.addEventListener('load', ensureStyle, { once: true });
+                                        if (document.documentElement) {
+                                            const observer = new MutationObserver(() => {
+                                                if (!document.getElementById(styleId)) {
+                                                    ensureStyle();
+                                                }
+                                            });
+                                            observer.observe(document.documentElement, { childList: true, subtree: true });
                                         }
                                     })();)",
                                     nullptr);
