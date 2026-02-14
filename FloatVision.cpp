@@ -91,8 +91,10 @@ std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
 bool g_pendingInjectBaseStyle = false;
 bool g_webviewPendingShow = false;
+int g_webviewPendingNavigationCount = 0;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
+EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
@@ -413,6 +415,7 @@ bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 void InjectBaseStyleIntoCurrentHtml();
+void CompletePendingHtmlShow(bool showWebView);
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -2941,6 +2944,27 @@ void InjectBaseStyleIntoCurrentHtml()
             }).Get());
 }
 
+void CompletePendingHtmlShow(bool showWebView)
+{
+    if (!g_webviewPendingShow)
+    {
+        return;
+    }
+
+    g_webviewPendingShow = false;
+    g_webviewPendingNavigationCount = 0;
+    g_keepLayeredWhileHtmlPending = false;
+    ApplyTransparencyMode();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(showWebView ? TRUE : FALSE);
+    }
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -2961,17 +2985,29 @@ bool EnsureWebView2(HWND hwnd)
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             g_webviewPendingShow = true;
+            g_webviewPendingNavigationCount = 0;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->Navigate(g_pendingHtmlUri.c_str());
+            const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
             g_pendingHtmlUri.clear();
             g_pendingHtmlIsUri = false;
+            if (FAILED(navigateResult))
+            {
+                CompletePendingHtmlShow(true);
+                return false;
+            }
         }
         else if (!g_pendingHtmlContent.empty())
         {
             g_webviewPendingShow = true;
+            g_webviewPendingNavigationCount = 0;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+            const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             g_pendingHtmlContent.clear();
+            if (FAILED(navigateResult))
+            {
+                CompletePendingHtmlShow(true);
+                return false;
+            }
         }
         return true;
     }
@@ -3006,6 +3042,7 @@ bool EnsureWebView2(HWND hwnd)
             {
                 if (FAILED(result) || !env)
                 {
+                    CompletePendingHtmlShow(false);
                     return result;
                 }
                 return env->CreateCoreWebView2Controller(
@@ -3015,6 +3052,7 @@ bool EnsureWebView2(HWND hwnd)
                         {
                             if (FAILED(result) || !controller)
                             {
+                                CompletePendingHtmlShow(false);
                                 return result;
                             }
                             g_webviewController = controller;
@@ -3025,9 +3063,20 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->add_NavigationStarting(
+                                Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    {
+                                        if (g_webviewPendingShow)
+                                        {
+                                            ++g_webviewPendingNavigationCount;
+                                        }
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewNavigationStartingToken);
                             g_webview->add_NavigationCompleted(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
                                         if (g_webviewController)
                                         {
@@ -3042,12 +3091,23 @@ bool EnsureWebView2(HWND hwnd)
                                             InjectBaseStyleIntoCurrentHtml();
                                             g_pendingInjectBaseStyle = false;
                                         }
-                                        if (g_webviewController && g_webviewPendingShow)
+                                        if (g_webviewPendingShow)
                                         {
-                                            g_webviewPendingShow = false;
-                                            g_keepLayeredWhileHtmlPending = false;
-                                            ApplyTransparencyMode();
-                                            g_webviewController->put_IsVisible(TRUE);
+                                            if (g_webviewPendingNavigationCount > 0)
+                                            {
+                                                --g_webviewPendingNavigationCount;
+                                                if (g_webviewPendingNavigationCount > 0)
+                                                {
+                                                    return S_OK;
+                                                }
+                                            }
+                                            BOOL isSuccess = TRUE;
+                                            if (args)
+                                            {
+                                                args->get_IsSuccess(&isSuccess);
+                                            }
+                                            (void)isSuccess;
+                                            CompletePendingHtmlShow(true);
                                         }
                                         return S_OK;
                                     }).Get(),
@@ -3055,15 +3115,25 @@ bool EnsureWebView2(HWND hwnd)
                             if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                g_webviewPendingNavigationCount = 0;
+                                const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                                 g_pendingHtmlUri.clear();
                                 g_pendingHtmlIsUri = false;
+                                if (FAILED(navigateResult))
+                                {
+                                    CompletePendingHtmlShow(false);
+                                }
                             }
                             else if (g_webview && !g_pendingHtmlContent.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                                g_webviewPendingNavigationCount = 0;
+                                const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 g_pendingHtmlContent.clear();
+                                if (FAILED(navigateResult))
+                                {
+                                    CompletePendingHtmlShow(false);
+                                }
                             }
                             return S_OK;
                         }).Get());
@@ -3089,6 +3159,7 @@ void CloseWebView()
     g_pendingHtmlUri.clear();
     g_pendingHtmlIsUri = false;
     g_pendingInjectBaseStyle = false;
+    g_webviewPendingNavigationCount = 0;
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
