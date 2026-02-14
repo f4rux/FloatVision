@@ -3163,8 +3163,17 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
+                                nullptr);
                             g_webview->AddScriptToExecuteOnDocumentCreated(
-                                LR"(document.documentElement.style.colorScheme = 'light';)",
+                                LR"((() => {
+                                    document.documentElement.style.setProperty('color-scheme', 'light', 'important');
+                                    const style = document.createElement('style');
+                                    style.textContent = ':root { color-scheme: light !important; }';
+                                    document.documentElement.appendChild(style);
+                                })();)",
                                 nullptr);
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
