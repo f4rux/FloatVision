@@ -3159,6 +3159,10 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
+                                nullptr);
                             g_webview->AddScriptToExecuteOnDocumentCreated(
                                 LR"((() => {
                                     document.documentElement.style.setProperty('color-scheme', 'light', 'important');
@@ -5135,20 +5139,6 @@ void Render(HWND hwnd)
 {
     if (g_hasHtml)
     {
-        if (g_webviewPendingShow)
-        {
-            HDC hdc = GetDC(hwnd);
-            if (hdc)
-            {
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, RGB(90, 90, 90));
-                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                ReleaseDC(hwnd, hdc);
-            }
-        }
         UpdateWebViewBounds();
         return;
     }
