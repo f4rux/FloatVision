@@ -1283,9 +1283,28 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
-                if (!g_webviewPendingTimeoutRetried && g_webview && !g_pendingHtmlContent.empty())
+                if (!g_webviewPendingTimeoutRetried && g_webview)
                 {
-                    const HRESULT retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                    HRESULT retryHr = E_FAIL;
+                    if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                    {
+                        retryHr = g_webview->Navigate(g_pendingHtmlUri.c_str());
+                        if (FAILED(retryHr))
+                        {
+                            const bool fallbackSucceeded = RetryPendingHtmlWithNavigateToStringInternal();
+                            if (fallbackSucceeded)
+                            {
+                                g_webviewPendingTimeoutRetried = true;
+                                g_webviewPendingStartTick = now;
+                                return 0;
+                            }
+                        }
+                    }
+                    else if (!g_pendingHtmlContent.empty())
+                    {
+                        retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                    }
+
                     if (SUCCEEDED(retryHr))
                     {
                         g_webviewPendingTimeoutRetried = true;
