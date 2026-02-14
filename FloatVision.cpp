@@ -2713,21 +2713,8 @@ bool LoadHtmlFromFile(const wchar_t* path)
         return false;
     }
 
-    std::wstring sourceHtml;
-    if (!Utf8ToWide(bytes, sourceHtml) && !AnsiToWide(bytes, sourceHtml))
-    {
-        g_hasHtml = false;
-        return false;
-    }
-
-    std::wstring decoratedHtml;
-    if (!BuildHtmlDocumentForWebView(path, sourceHtml, decoratedHtml))
-    {
-        g_hasHtml = false;
-        return false;
-    }
-
     g_hasHtml = true;
+    g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
     g_pendingHtmlContent = std::move(decoratedHtml);
     g_pendingHtmlUri.clear();
