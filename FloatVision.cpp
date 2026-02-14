@@ -3102,41 +3102,37 @@ std::wstring BuildWebViewDocumentInjectionScript()
 {
     const bool darkMode = IsDarkModeEnabled();
     const wchar_t* scrollbarCss = darkMode ? LR"(
-            html::-webkit-scrollbar,
-            body::-webkit-scrollbar,
-            *::-webkit-scrollbar {
+            :root,
+            html,
+            body,
+            * {
+                scrollbar-color: #5a5a5a #1f1f1f !important;
+            }
+            ::-webkit-scrollbar {
                 width: 14px;
                 height: 14px;
             }
-            html::-webkit-scrollbar-track,
-            body::-webkit-scrollbar-track,
-            *::-webkit-scrollbar-track {
+            ::-webkit-scrollbar-track {
                 background: #1f1f1f !important;
             }
-            html::-webkit-scrollbar-thumb,
-            body::-webkit-scrollbar-thumb,
-            *::-webkit-scrollbar-thumb {
+            ::-webkit-scrollbar-thumb {
                 background-color: #5a5a5a !important;
                 border: 3px solid #1f1f1f !important;
                 border-radius: 8px;
             }
-            html::-webkit-scrollbar-thumb:hover,
-            body::-webkit-scrollbar-thumb:hover,
-            *::-webkit-scrollbar-thumb:hover {
+            ::-webkit-scrollbar-thumb:hover {
                 background-color: #7a7a7a !important;
             }
-            html::-webkit-scrollbar-corner,
-            body::-webkit-scrollbar-corner,
-            *::-webkit-scrollbar-corner {
+            ::-webkit-scrollbar-corner {
                 background: #1f1f1f !important;
             }
     )" : L"";
 
     std::wstring script = LR"((function() {
-        if (window.__fvCssInjected) {
+        if (window.__fvCssInjectorInstalled) {
             return;
         }
-        window.__fvCssInjected = true;
+        window.__fvCssInjectorInstalled = true;
 
         const css = `
     )";
@@ -3148,10 +3144,36 @@ std::wstring BuildWebViewDocumentInjectionScript()
             return;
         }
 
-        const style = document.createElement('style');
-        style.id = 'fv-webview-style';
-        style.textContent = css;
-        (document.head || document.documentElement).appendChild(style);
+        const insertStyle = () => {
+            const root = document.head || document.body || document.documentElement;
+            if (!root) {
+                return false;
+            }
+
+            let style = document.getElementById('fv-webview-style');
+            if (!style) {
+                style = document.createElement('style');
+                style.id = 'fv-webview-style';
+                style.textContent = css;
+                root.appendChild(style);
+            } else if (style.textContent !== css) {
+                style.textContent = css;
+            }
+
+            return true;
+        };
+
+        insertStyle();
+        setTimeout(insertStyle, 0);
+        requestAnimationFrame(() => {
+            insertStyle();
+        });
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', insertStyle, { once: true });
+        } else {
+            insertStyle();
+        }
     })(); )";
     return script;
 }
