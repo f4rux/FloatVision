@@ -90,8 +90,10 @@ std::wstring g_pendingHtmlContent;
 std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
 bool g_pendingInjectBaseStyle = false;
+std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
 int g_webviewPendingNavigationCount = 0;
+bool g_pendingHtmlFallbackAttempted = false;
 bool g_webviewCreationInProgress = false;
 bool g_webviewPendingTimerActive = false;
 ULONGLONG g_webviewPendingStartTick = 0;
@@ -425,6 +427,7 @@ void InjectBaseStyleIntoCurrentHtml();
 void BeginPendingHtmlShow(bool keepLayered);
 void CompletePendingHtmlShow(bool showWebView);
 void UpdateWebViewPendingTimeoutTimer();
+bool RetryPendingHtmlWithNavigateToString();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -2520,6 +2523,7 @@ bool ApplyHtmlContent(std::wstring html)
     g_fitToWindow = false;
     g_zoom = 1.0f;
     g_hasHtml = true;
+    g_pendingHtmlFilePath.clear();
     g_pendingHtmlContent = std::move(html);
     BeginPendingHtmlShow(keepLayered);
     ApplyTransparencyMode();
@@ -2571,15 +2575,17 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     g_fitToWindow = false;
     g_zoom = 1.0f;
-    g_hasHtml = true;
-
     std::wstring uri;
     if (!BuildFileUri(path, uri))
     {
+        g_hasHtml = false;
         return false;
     }
 
+    g_hasHtml = true;
+
     g_pendingHtmlContent.clear();
+    g_pendingHtmlFilePath = path;
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
     g_pendingInjectBaseStyle = true;
@@ -3024,6 +3030,7 @@ void BeginPendingHtmlShow(bool keepLayered)
 {
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
+    g_pendingHtmlFallbackAttempted = false;
     g_keepLayeredWhileHtmlPending = keepLayered;
     g_webviewPendingStartTick = GetTickCount64();
     if (g_webviewController)
@@ -3031,6 +3038,30 @@ void BeginPendingHtmlShow(bool keepLayered)
         g_webviewController->put_IsVisible(FALSE);
     }
     UpdateWebViewPendingTimeoutTimer();
+}
+
+bool RetryPendingHtmlWithNavigateToString()
+{
+    if (!g_webview || g_pendingHtmlFilePath.empty() || g_pendingHtmlFallbackAttempted)
+    {
+        return false;
+    }
+
+    g_pendingHtmlFallbackAttempted = true;
+    std::string bytes;
+    if (!ReadFileBytes(g_pendingHtmlFilePath.c_str(), bytes))
+    {
+        return false;
+    }
+
+    std::wstring content;
+    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    {
+        return false;
+    }
+
+    std::wstring html = InjectHtmlBaseStyles(content);
+    return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
 }
 
 void CompletePendingHtmlShow(bool showWebView)
@@ -3206,7 +3237,10 @@ bool EnsureWebView2(HWND hwnd)
                                             {
                                                 args->get_IsSuccess(&isSuccess);
                                             }
-                                            (void)isSuccess;
+                                            if (isSuccess != TRUE && RetryPendingHtmlWithNavigateToString())
+                                            {
+                                                return S_OK;
+                                            }
                                             CompletePendingHtmlShow(true);
                                         }
                                         return S_OK;
@@ -3266,6 +3300,8 @@ void CloseWebView()
     g_pendingHtmlUri.clear();
     g_pendingHtmlIsUri = false;
     g_pendingInjectBaseStyle = false;
+    g_pendingHtmlFilePath.clear();
+    g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingNavigationCount = 0;
     g_webviewCreationInProgress = false;
     g_webviewPendingStartTick = 0;
