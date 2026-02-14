@@ -419,6 +419,7 @@ WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
 void EnsureWebViewBackgroundWhite();
+void EnsureWebViewLightColorScheme();
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
@@ -3162,6 +3163,20 @@ void EnsureWebViewBackgroundWhite()
     g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
 }
 
+void EnsureWebViewLightColorScheme()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    constexpr wchar_t kEmulateLightSchemeParams[] = LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})";
+    g_webview->CallDevToolsProtocolMethod(
+        L"Emulation.setEmulatedMedia",
+        kEmulateLightSchemeParams,
+        nullptr);
+}
+
 
 bool EnsureWebView2(HWND hwnd)
 {
@@ -3186,6 +3201,7 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
         EnsureWebViewBackgroundWhite();
+        EnsureWebViewLightColorScheme();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
@@ -3246,7 +3262,7 @@ bool EnsureWebView2(HWND hwnd)
     }
     if (options)
     {
-        options->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar,WebContentsForceDark");
+        options->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar,WebContentsForceDark --force-dark-mode=0");
     }
 
     g_webviewCreationInProgress = true;
@@ -3287,6 +3303,7 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            EnsureWebViewLightColorScheme();
                             std::wstring documentScript = BuildWebViewDocumentInjectionScript();
                             if (!documentScript.empty())
                             {
@@ -3297,6 +3314,7 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
+                                        EnsureWebViewLightColorScheme();
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewContentLoadingToken);
@@ -3305,6 +3323,7 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
+                                        EnsureWebViewLightColorScheme();
                                         if (g_webviewPendingShow)
                                         {
                                             ++g_webviewPendingNavigationCount;
@@ -3317,6 +3336,7 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
+                                        EnsureWebViewLightColorScheme();
                                         if (g_webviewController)
                                         {
                                             double zoom = 1.0;
