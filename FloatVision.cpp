@@ -3061,6 +3061,81 @@ void CompletePendingHtmlShow(bool showWebView)
     }
 }
 
+void RegisterWebViewDocumentStyleScript()
+{
+    // Legacy no-op compatibility hook.
+    // Kept to avoid build breaks if older call sites remain during cherry-picks.
+}
+
+void BeginPendingHtmlShow(bool keepLayered)
+{
+    g_webviewPendingShow = true;
+    g_webviewPendingNavigationCount = 0;
+    g_pendingHtmlFallbackAttempted = false;
+    g_webviewPendingTimeoutRetried = false;
+    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_webviewPendingStartTick = GetTickCount64();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
+    UpdateWebViewPendingTimeoutTimer();
+}
+
+bool RetryPendingHtmlWithNavigateToString()
+{
+    if (!g_webview || g_pendingHtmlFilePath.empty() || g_pendingHtmlFallbackAttempted)
+    {
+        return false;
+    }
+
+    g_pendingHtmlFallbackAttempted = true;
+    std::string bytes;
+    if (!ReadFileBytes(g_pendingHtmlFilePath.c_str(), bytes))
+    {
+        return false;
+    }
+
+    std::wstring content;
+    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    {
+        return false;
+    }
+
+    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
+}
+
+void CompletePendingHtmlShow(bool showWebView)
+{
+    if (!g_webviewPendingShow)
+    {
+        return;
+    }
+
+    g_webviewPendingShow = false;
+    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingTimeoutRetried = false;
+    g_webviewPendingStartTick = 0;
+    g_pendingHtmlContent.clear();
+    g_pendingHtmlUri.clear();
+    g_pendingHtmlIsUri = false;
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
+    g_keepLayeredWhileHtmlPending = false;
+    ApplyTransparencyMode();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(showWebView ? TRUE : FALSE);
+    }
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -3156,6 +3231,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
+                            RegisterWebViewDocumentStyleScript();
                             g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
