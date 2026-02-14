@@ -2532,7 +2532,7 @@ bool ApplyHtmlContent(std::wstring html)
     ApplyTransparencyMode();
     if (g_hwnd)
     {
-        InvalidateRect(g_hwnd, nullptr, TRUE);
+        InvalidateRect(g_hwnd, nullptr, FALSE);
     }
 
     if (!EnsureWebView2(g_hwnd))
@@ -2596,7 +2596,7 @@ bool LoadHtmlFromFile(const wchar_t* path)
     ApplyTransparencyMode();
     if (g_hwnd)
     {
-        InvalidateRect(g_hwnd, nullptr, TRUE);
+        InvalidateRect(g_hwnd, nullptr, FALSE);
     }
 
     if (!EnsureWebView2(g_hwnd))
@@ -3007,10 +3007,6 @@ void BeginPendingHtmlShowInternal(bool keepLayered)
     g_webviewPendingTimeoutRetried = false;
     g_keepLayeredWhileHtmlPending = keepLayered;
     g_webviewPendingStartTick = GetTickCount64();
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     UpdateWebViewPendingTimeoutTimer();
 }
 
@@ -3064,7 +3060,7 @@ void CompletePendingHtmlShowInternal(bool showWebView)
     }
     if (g_hwnd)
     {
-        InvalidateRect(g_hwnd, nullptr, TRUE);
+        InvalidateRect(g_hwnd, nullptr, FALSE);
     }
 }
 #endif
@@ -3213,7 +3209,7 @@ bool EnsureWebView2(HWND hwnd)
                 if (FAILED(result) || !env)
                 {
                     g_webviewCreationInProgress = false;
-                    CompletePendingHtmlShowInternal(false);
+                    CompletePendingHtmlShowInternal(true);
                     return result;
                 }
                 return env->CreateCoreWebView2Controller(
@@ -3224,13 +3220,18 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewCreationInProgress = false;
                             if (FAILED(result) || !controller)
                             {
-                                CompletePendingHtmlShowInternal(false);
+                                CompletePendingHtmlShowInternal(true);
                                 return result;
                             }
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
-                            g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
+                            g_webviewController->put_IsVisible(TRUE);
+                            if (g_webviewController2)
+                            {
+                                COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
+                                g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
+                            }
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
@@ -3293,7 +3294,7 @@ bool EnsureWebView2(HWND hwnd)
                                 &g_webviewNavigationToken);
                         if (FAILED(navCompletedResult))
                         {
-                            CompletePendingHtmlShowInternal(false);
+                            CompletePendingHtmlShowInternal(true);
                             return navCompletedResult;
                         }
 
@@ -3303,7 +3304,7 @@ bool EnsureWebView2(HWND hwnd)
                             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                             if (FAILED(navigateResult))
                             {
-                                CompletePendingHtmlShowInternal(false);
+                                CompletePendingHtmlShowInternal(true);
                             }
                         }
                         else if (!g_pendingHtmlContent.empty())
@@ -3312,7 +3313,7 @@ bool EnsureWebView2(HWND hwnd)
                             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                             if (FAILED(navigateResult))
                             {
-                                CompletePendingHtmlShowInternal(false);
+                                CompletePendingHtmlShowInternal(true);
                             }
                         }
                         return S_OK;
