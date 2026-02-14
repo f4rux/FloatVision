@@ -2433,12 +2433,10 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
         }
     }
 
-    const bool darkMode = IsDarkModeEnabled();
-
     std::string bodyBackground = toHex(g_textBackground);
     std::string bodyColor = toHex(g_textColor);
     const char* wrapValue = g_textWrap ? "normal" : "pre";
-    const char* colorScheme = darkMode ? "dark" : "light";
+    const char* colorScheme = "light";
 
     std::ostringstream style;
     style << R"(
@@ -3111,11 +3109,6 @@ std::wstring BuildWebViewDocumentInjectionScript()
             }
             html, body {
                 background-color: #ffffff !important;
-            }
-            @media (prefers-color-scheme: dark) {
-                html, body {
-                    background-color: #ffffff !important;
-                }
             }
     )";
     script += scrollbarCss;
