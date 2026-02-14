@@ -3163,17 +3163,28 @@ std::wstring BuildWebViewDocumentInjectionScript()
             return;
         }
 
-        const onReady = () => {
+        let retryCount = 0;
+        const maxRetries = 8;
+
+        const retryInject = () => {
+            if (window.__fvCssInjected) {
+                return;
+            }
             if (insertStyle()) {
                 window.__fvCssInjected = true;
+                return;
+            }
+            if (++retryCount < maxRetries) {
+                setTimeout(retryInject, 50);
             }
         };
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', onReady, { once: true });
-        } else {
-            onReady();
+            document.addEventListener('DOMContentLoaded', retryInject, { once: true });
         }
+
+        requestAnimationFrame(retryInject);
+        setTimeout(retryInject, 0);
     })(); )";
     return script;
 }
