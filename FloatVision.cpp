@@ -99,6 +99,7 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
+EventRegistrationToken g_webviewContentLoadingToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
 {
@@ -3084,8 +3085,17 @@ bool EnsureWebView2(HWND hwnd)
 
     HRESULT hr = createEnv(
         nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&envOptions)))
+        && envOptions)
+    {
+        envOptions->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar");
+    }
+
+    HRESULT hr = createEnv(
         nullptr,
         nullptr,
+        envOptions.Get(),
         Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT
             {
@@ -3147,8 +3157,39 @@ bool EnsureWebView2(HWND hwnd)
                             }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    [](ICoreWebView2* sender, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                     {
+                                        if (IsDarkModeEnabled() && sender)
+                                        {
+                                            sender->AddScriptToExecuteOnDocumentCreated(
+                                                LR"((function() {
+const style = document.createElement('style');
+style.id = 'custom-scrollbar';
+style.textContent = `
+    html { scrollbar-color: #5a5a5a #1f1f1f !important; }
+    ::-webkit-scrollbar { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-track { background: #1f1f1f; }
+    ::-webkit-scrollbar-thumb { background: #5a5a5a; }
+    ::-webkit-scrollbar-thumb:hover { background: #767676; }
+`;
+
+const tryInsert = () => {
+    if (document.documentElement && !document.getElementById('custom-scrollbar')) {
+        (document.head || document.documentElement).insertBefore(
+            style,
+            (document.head || document.documentElement).firstChild
+        );
+        return true;
+    }
+    return false;
+};
+
+if (!tryInsert()) {
+    setTimeout(tryInsert, 0);
+}
+})();)",
+                                                nullptr);
+                                        }
                                         if (g_webviewPendingShow)
                                         {
                                             ++g_webviewPendingNavigationCount;
@@ -3183,23 +3224,39 @@ bool EnsureWebView2(HWND hwnd)
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
-                            if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                            auto navigatePendingHtml = []()
                             {
-                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
-                                const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                                if (FAILED(navigateResult))
+                                if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                                 {
-                                    CompletePendingHtmlShowInternal(false);
+                                    BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
+                                    const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                    if (FAILED(navigateResult))
+                                    {
+                                        CompletePendingHtmlShowInternal(false);
+                                    }
                                 }
-                            }
-                            else if (g_webview && !g_pendingHtmlContent.empty())
+                                else if (g_webview && !g_pendingHtmlContent.empty())
+                                {
+                                    BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
+                                    const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                                    if (FAILED(navigateResult))
+                                    {
+                                        CompletePendingHtmlShowInternal(false);
+                                    }
+                                }
+                            };
+                            const HRESULT emulationResult = g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
+                                Microsoft::WRL::Callback<ICoreWebView2CallDevToolsProtocolMethodCompletedHandler>(
+                                    [navigatePendingHtml](HRESULT, LPCWSTR) -> HRESULT
+                                    {
+                                        navigatePendingHtml();
+                                        return S_OK;
+                                    }).Get());
+                            if (FAILED(emulationResult))
                             {
-                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
-                                const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                if (FAILED(navigateResult))
-                                {
-                                    CompletePendingHtmlShowInternal(false);
-                                }
+                                navigatePendingHtml();
                             }
                             return S_OK;
                         }).Get());
@@ -3214,6 +3271,11 @@ bool EnsureWebView2(HWND hwnd)
 
 void CloseWebView()
 {
+    if (g_webview)
+    {
+        g_webview->remove_ContentLoading(g_webviewContentLoadingToken);
+        g_webviewContentLoadingToken = EventRegistrationToken{};
+    }
     if (g_webviewController)
     {
         g_webviewController->Close();
