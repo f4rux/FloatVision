@@ -3149,6 +3149,25 @@ bool EnsureWebView2(HWND hwnd)
                                         if (!root) {
                                             return;
                                         }
+                                        const originalMatchMedia = window.matchMedia ? window.matchMedia.bind(window) : null;
+                                        if (originalMatchMedia) {
+                                            window.matchMedia = function(query) {
+                                                if (typeof query === 'string' && query.indexOf('prefers-color-scheme') >= 0) {
+                                                    const isDarkQuery = query.indexOf('dark') >= 0;
+                                                    return {
+                                                        matches: !isDarkQuery,
+                                                        media: query,
+                                                        onchange: null,
+                                                        addListener: () => {},
+                                                        removeListener: () => {},
+                                                        addEventListener: () => {},
+                                                        removeEventListener: () => {},
+                                                        dispatchEvent: () => true
+                                                    };
+                                                }
+                                                return originalMatchMedia(query);
+                                            };
+                                        }
                                         let style = document.getElementById('floatvision-webview-style');
                                         if (!style) {
                                             style = document.createElement('style');
