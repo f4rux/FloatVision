@@ -706,6 +706,19 @@ LRESULT CALLBACK WndProc(
 {
     switch (msg)
     {
+    case WM_ERASEBKGND:
+    {
+        if (g_hasHtml)
+        {
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            RECT rc{};
+            GetClientRect(hwnd, &rc);
+            FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+            return 1;
+        }
+        break;
+    }
+
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
@@ -1268,17 +1281,9 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
-                if (!g_webviewPendingTimeoutRetried && g_webview)
+                if (!g_webviewPendingTimeoutRetried && g_webview && !g_pendingHtmlContent.empty())
                 {
-                    HRESULT retryHr = E_FAIL;
-                    if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
-                    {
-                        retryHr = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                    }
-                    else if (!g_pendingHtmlContent.empty())
-                    {
-                        retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                    }
+                    const HRESULT retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                     if (SUCCEEDED(retryHr))
                     {
                         g_webviewPendingTimeoutRetried = true;
@@ -2527,7 +2532,7 @@ bool ApplyHtmlContent(std::wstring html)
     ApplyTransparencyMode();
     if (g_hwnd)
     {
-        InvalidateRect(g_hwnd, nullptr, TRUE);
+        InvalidateRect(g_hwnd, nullptr, FALSE);
     }
 
     if (!EnsureWebView2(g_hwnd))
@@ -2591,7 +2596,7 @@ bool LoadHtmlFromFile(const wchar_t* path)
     ApplyTransparencyMode();
     if (g_hwnd)
     {
-        InvalidateRect(g_hwnd, nullptr, TRUE);
+        InvalidateRect(g_hwnd, nullptr, FALSE);
     }
 
     if (!EnsureWebView2(g_hwnd))
@@ -3002,10 +3007,6 @@ void BeginPendingHtmlShowInternal(bool keepLayered)
     g_webviewPendingTimeoutRetried = false;
     g_keepLayeredWhileHtmlPending = keepLayered;
     g_webviewPendingStartTick = GetTickCount64();
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     UpdateWebViewPendingTimeoutTimer();
 }
 
@@ -3059,10 +3060,113 @@ void CompletePendingHtmlShowInternal(bool showWebView)
     }
     if (g_hwnd)
     {
-        InvalidateRect(g_hwnd, nullptr, TRUE);
+        InvalidateRect(g_hwnd, nullptr, FALSE);
     }
 }
 #endif
+
+std::wstring BuildWebViewDocumentInjectionScript()
+{
+    const bool darkMode = IsDarkModeEnabled();
+    const wchar_t* scrollbarCss = darkMode ? LR"(
+            html::-webkit-scrollbar,
+            body::-webkit-scrollbar {
+                width: 14px;
+                height: 14px;
+            }
+            html::-webkit-scrollbar-track,
+            body::-webkit-scrollbar-track {
+                background: #1f1f1f;
+            }
+            html::-webkit-scrollbar-thumb,
+            body::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a;
+                border: 3px solid #1f1f1f;
+                border-radius: 8px;
+            }
+            html::-webkit-scrollbar-thumb:hover,
+            body::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a;
+            }
+            html::-webkit-scrollbar-corner,
+            body::-webkit-scrollbar-corner {
+                background: #1f1f1f;
+            }
+    )" : L"";
+
+    std::wstring script = LR"((function() {
+        const css = `
+            html, body {
+                background-color: rgb(255, 255, 255);
+            }
+    )";
+    script += scrollbarCss;
+    script += LR"(
+        `;
+
+        const insertStyle = () => {
+            if (!document.getElementById('fv-webview-style')) {
+                const style = document.createElement('style');
+                style.id = 'fv-webview-style';
+                style.textContent = css;
+                (document.head || document.body || document.documentElement).appendChild(style);
+            }
+        };
+
+        const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
+
+        const ensureWhiteBackground = () => {
+            const html = document.documentElement;
+            const body = document.body;
+            if (!html) {
+                return;
+            }
+            const htmlBg = getComputedStyle(html).backgroundColor;
+            if (isTransparent(htmlBg)) {
+                html.style.setProperty('background-color', '#ffffff', 'important');
+            }
+
+            if (body) {
+                const bodyBg = getComputedStyle(body).backgroundColor;
+                if (isTransparent(bodyBg)) {
+                    body.style.setProperty('background-color', '#ffffff', 'important');
+                }
+            }
+        };
+
+        const applyAll = () => {
+            insertStyle();
+            ensureWhiteBackground();
+        };
+
+        const startObserver = () => {
+            const root = document.documentElement;
+            if (!root || window.__fvBgObserver) {
+                return;
+            }
+            const observer = new MutationObserver(() => {
+                ensureWhiteBackground();
+            });
+            observer.observe(root, { attributes: true, childList: true, subtree: true });
+            window.__fvBgObserver = observer;
+        };
+
+        applyAll();
+        setTimeout(applyAll, 0);
+        requestAnimationFrame(applyAll);
+        window.addEventListener('load', applyAll, { once: true });
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', () => {
+                applyAll();
+                startObserver();
+            }, { once: true });
+        } else {
+            startObserver();
+        }
+    })(); )";
+    return script;
+}
 
 bool EnsureWebView2(HWND hwnd)
 {
@@ -3076,6 +3180,11 @@ bool EnsureWebView2(HWND hwnd)
         if (!g_webviewPendingShow)
         {
             g_webviewController->put_IsVisible(TRUE);
+        }
+        if (g_webviewController2)
+        {
+            COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
+            g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
         }
         UpdateWebViewWindowHandle();
         UpdateWebViewInputState();
@@ -3123,6 +3232,7 @@ bool EnsureWebView2(HWND hwnd)
     using CreateWebView2EnvironmentWithOptionsFn = HRESULT(WINAPI*)(
         PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions*,
         ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*);
+    using CreateWebView2EnvironmentOptionsFn = HRESULT(WINAPI*)(ICoreWebView2EnvironmentOptions**);
     auto createEnv = reinterpret_cast<CreateWebView2EnvironmentWithOptionsFn>(
         GetProcAddress(g_webviewLoader, "CreateCoreWebView2EnvironmentWithOptions"));
     if (!createEnv)
@@ -3131,18 +3241,30 @@ bool EnsureWebView2(HWND hwnd)
         return false;
     }
 
+    Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions> options;
+    auto createOptions = reinterpret_cast<CreateWebView2EnvironmentOptionsFn>(
+        GetProcAddress(g_webviewLoader, "CreateCoreWebView2EnvironmentOptions"));
+    if (createOptions)
+    {
+        createOptions(&options);
+    }
+    if (options)
+    {
+        options->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar,WebContentsForceDark");
+    }
+
     g_webviewCreationInProgress = true;
     HRESULT hr = createEnv(
         nullptr,
         nullptr,
-        nullptr,
+        options.Get(),
         Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT
             {
                 if (FAILED(result) || !env)
                 {
                     g_webviewCreationInProgress = false;
-                    CompletePendingHtmlShowInternal(false);
+                    CompletePendingHtmlShowInternal(true);
                     return result;
                 }
                 return env->CreateCoreWebView2Controller(
@@ -3153,17 +3275,27 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewCreationInProgress = false;
                             if (FAILED(result) || !controller)
                             {
-                                CompletePendingHtmlShowInternal(false);
+                                CompletePendingHtmlShowInternal(true);
                                 return result;
                             }
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
-                            g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
+                            g_webviewController->put_IsVisible(TRUE);
+                            if (g_webviewController2)
+                            {
+                                COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
+                                g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
+                            }
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            std::wstring documentScript = BuildWebViewDocumentInjectionScript();
+                            if (!documentScript.empty())
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(documentScript.c_str(), nullptr);
+                            }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
@@ -3202,10 +3334,13 @@ bool EnsureWebView2(HWND hwnd)
                                             {
                                                 args->get_IsSuccess(&isSuccess);
                                             }
-                                            const bool retrySucceeded = RetryPendingHtmlWithNavigateToStringInternal();
-                                            if (isSuccess != TRUE && retrySucceeded)
+                                            if (isSuccess != TRUE)
                                             {
-                                                return S_OK;
+                                                const bool retrySucceeded = RetryPendingHtmlWithNavigateToStringInternal();
+                                                if (retrySucceeded)
+                                                {
+                                                    return S_OK;
+                                                }
                                             }
                                             CompletePendingHtmlShowInternal(true);
                                         }
@@ -3214,7 +3349,7 @@ bool EnsureWebView2(HWND hwnd)
                                 &g_webviewNavigationToken);
                         if (FAILED(navCompletedResult))
                         {
-                            CompletePendingHtmlShowInternal(false);
+                            CompletePendingHtmlShowInternal(true);
                             return navCompletedResult;
                         }
 
@@ -3224,12 +3359,7 @@ bool EnsureWebView2(HWND hwnd)
                             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                             if (FAILED(navigateResult))
                             {
-                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
-                                const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                                if (FAILED(navigateResult))
-                                {
-                                    CompletePendingHtmlShowInternal(false);
-                                }
+                                CompletePendingHtmlShowInternal(true);
                             }
                         }
                         else if (!g_pendingHtmlContent.empty())
@@ -3238,12 +3368,7 @@ bool EnsureWebView2(HWND hwnd)
                             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                             if (FAILED(navigateResult))
                             {
-                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
-                                const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                if (FAILED(navigateResult))
-                                {
-                                    CompletePendingHtmlShowInternal(false);
-                                }
+                                CompletePendingHtmlShowInternal(true);
                             }
                         }
                         return S_OK;
@@ -5136,20 +5261,6 @@ void Render(HWND hwnd)
 {
     if (g_hasHtml)
     {
-        if (g_webviewPendingShow)
-        {
-            HDC hdc = GetDC(hwnd);
-            if (hdc)
-            {
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, RGB(90, 90, 90));
-                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                ReleaseDC(hwnd, hdc);
-            }
-        }
         UpdateWebViewBounds();
         return;
     }
