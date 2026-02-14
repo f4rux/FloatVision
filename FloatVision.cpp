@@ -706,6 +706,19 @@ LRESULT CALLBACK WndProc(
 {
     switch (msg)
     {
+    case WM_ERASEBKGND:
+    {
+        if (g_hasHtml)
+        {
+            HDC hdc = reinterpret_cast<HDC>(wParam);
+            RECT rc{};
+            GetClientRect(hwnd, &rc);
+            FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+            return 1;
+        }
+        break;
+    }
+
     case WM_PAINT:
     {
         PAINTSTRUCT ps;
@@ -3105,6 +3118,8 @@ std::wstring BuildWebViewDocumentInjectionScript()
             }
         };
 
+        const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
+
         const ensureWhiteBackground = () => {
             const html = document.documentElement;
             const body = document.body;
@@ -3112,13 +3127,15 @@ std::wstring BuildWebViewDocumentInjectionScript()
                 return;
             }
             const htmlBg = getComputedStyle(html).backgroundColor;
-            const bodyBg = body ? getComputedStyle(body).backgroundColor : 'rgba(0, 0, 0, 0)';
-            const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
             if (isTransparent(htmlBg)) {
-                html.style.backgroundColor = '#ffffff';
+                html.style.setProperty('background-color', '#ffffff', 'important');
             }
-            if (body && isTransparent(bodyBg)) {
-                body.style.backgroundColor = '#ffffff';
+
+            if (body) {
+                const bodyBg = getComputedStyle(body).backgroundColor;
+                if (isTransparent(bodyBg)) {
+                    body.style.setProperty('background-color', '#ffffff', 'important');
+                }
             }
         };
 
@@ -3127,12 +3144,30 @@ std::wstring BuildWebViewDocumentInjectionScript()
             ensureWhiteBackground();
         };
 
+        const startObserver = () => {
+            const root = document.documentElement;
+            if (!root || window.__fvBgObserver) {
+                return;
+            }
+            const observer = new MutationObserver(() => {
+                ensureWhiteBackground();
+            });
+            observer.observe(root, { attributes: true, childList: true, subtree: true });
+            window.__fvBgObserver = observer;
+        };
+
         applyAll();
         setTimeout(applyAll, 0);
         requestAnimationFrame(applyAll);
+        window.addEventListener('load', applyAll, { once: true });
 
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', applyAll);
+            document.addEventListener('DOMContentLoaded', () => {
+                applyAll();
+                startObserver();
+            }, { once: true });
+        } else {
+            startObserver();
         }
     })(); )";
     return script;
