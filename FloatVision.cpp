@@ -414,6 +414,7 @@ bool BuildFileUri(const wchar_t* path, std::wstring& uri);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
+bool BuildHtmlDocumentForWebView(const wchar_t* sourcePath, const std::wstring& sourceHtml, std::wstring& decoratedHtml);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
@@ -2598,6 +2599,81 @@ bool ApplyHtmlContent(std::wstring html)
     return true;
 }
 
+bool BuildHtmlDocumentForWebView(const wchar_t* sourcePath, const std::wstring& sourceHtml, std::wstring& decoratedHtml)
+{
+    std::wstring baseUri;
+    if (!BuildFileUri(sourcePath, baseUri))
+    {
+        return false;
+    }
+
+    std::wstring scrollbarCss;
+    if (IsDarkModeEnabled())
+    {
+        scrollbarCss = LR"(
+            html,
+            body {
+                scrollbar-color: #5a5a5a #1f1f1f;
+            }
+            ::-webkit-scrollbar {
+                width: 14px;
+                height: 14px;
+            }
+            ::-webkit-scrollbar-track {
+                background: #1f1f1f;
+            }
+            ::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a;
+                border: 3px solid #1f1f1f;
+                border-radius: 8px;
+            }
+            ::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a;
+            }
+            ::-webkit-scrollbar-corner {
+                background: #1f1f1f;
+            }
+        )";
+    }
+
+    std::wstring additions = L"<base href=\"" + baseUri + L"\">";
+    if (!scrollbarCss.empty())
+    {
+        additions += L"<style id=\"fv-scrollbar-style\">";
+        additions += scrollbarCss;
+        additions += L"</style>";
+    }
+
+    std::wstring lower = sourceHtml;
+    std::transform(lower.begin(), lower.end(), lower.begin(), [](wchar_t ch) { return static_cast<wchar_t>(towlower(ch)); });
+
+    decoratedHtml = sourceHtml;
+    size_t headOpen = lower.find(L"<head");
+    if (headOpen != std::wstring::npos)
+    {
+        size_t headEnd = lower.find(L'>', headOpen);
+        if (headEnd != std::wstring::npos)
+        {
+            decoratedHtml.insert(headEnd + 1, additions);
+            return true;
+        }
+    }
+
+    size_t htmlOpen = lower.find(L"<html");
+    if (htmlOpen != std::wstring::npos)
+    {
+        size_t htmlEnd = lower.find(L'>', htmlOpen);
+        if (htmlEnd != std::wstring::npos)
+        {
+            decoratedHtml.insert(htmlEnd + 1, L"<head>" + additions + L"</head>");
+            return true;
+        }
+    }
+
+    decoratedHtml = L"<!DOCTYPE html><html><head>" + additions + L"</head><body>" + sourceHtml + L"</body></html>";
+    return true;
+}
+
 bool LoadHtmlFromFile(const wchar_t* path)
 {
     if (!path || !*path)
@@ -2629,8 +2705,9 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     g_fitToWindow = false;
     g_zoom = 1.0f;
-    std::wstring uri;
-    if (!BuildFileUri(path, uri))
+
+    std::string bytes;
+    if (!ReadFileBytes(path, bytes))
     {
         g_hasHtml = false;
         return false;
@@ -2639,8 +2716,9 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasHtml = true;
     g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
-    g_pendingHtmlUri = std::move(uri);
-    g_pendingHtmlIsUri = true;
+    g_pendingHtmlContent = std::move(decoratedHtml);
+    g_pendingHtmlUri.clear();
+    g_pendingHtmlIsUri = false;
     BeginPendingHtmlShowInternal(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
@@ -3075,13 +3153,19 @@ bool RetryPendingHtmlWithNavigateToStringInternal()
         return false;
     }
 
-    std::wstring content;
-    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    std::wstring sourceHtml;
+    if (!Utf8ToWide(bytes, sourceHtml) && !AnsiToWide(bytes, sourceHtml))
     {
         return false;
     }
 
-    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
+    std::wstring decoratedHtml;
+    if (!BuildHtmlDocumentForWebView(g_pendingHtmlFilePath.c_str(), sourceHtml, decoratedHtml))
+    {
+        return false;
+    }
+
+    return SUCCEEDED(g_webview->NavigateToString(decoratedHtml.c_str()));
 }
 
 void CompletePendingHtmlShowInternal(bool showWebView)
