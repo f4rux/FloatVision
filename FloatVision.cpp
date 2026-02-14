@@ -3163,35 +3163,48 @@ std::wstring BuildWebViewDocumentInjectionScript()
             return;
         }
 
-        const markInjected = () => {
-            window.__fvCssInjected = true;
-        };
-
         const tryInject = () => {
             if (window.__fvCssInjected) {
                 return true;
             }
-            if (insertStyle()) {
-                markInjected();
-                return true;
+            if (!insertStyle()) {
+                return false;
             }
-            return false;
+            window.__fvCssInjected = true;
+            return true;
         };
 
         if (tryInject()) {
             return;
         }
 
-        const onReadyStateChange = () => {
-            if (tryInject() || document.readyState === 'complete') {
-                document.removeEventListener('readystatechange', onReadyStateChange);
+        let observer = null;
+        const onReady = () => {
+            if (tryInject()) {
+                cleanup();
             }
         };
 
-        document.addEventListener('readystatechange', onReadyStateChange);
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', tryInject, { once: true });
-        }
+        const cleanup = () => {
+            document.removeEventListener('DOMContentLoaded', onReady);
+            window.removeEventListener('load', onReady);
+            if (observer) {
+                observer.disconnect();
+                observer = null;
+            }
+        };
+
+        document.addEventListener('DOMContentLoaded', onReady);
+        window.addEventListener('load', onReady);
+
+        observer = new MutationObserver(() => {
+            if (tryInject()) {
+                cleanup();
+            }
+        });
+        observer.observe(document, { childList: true, subtree: true });
+
+        setTimeout(cleanup, 3000);
     })(); )";
     return script;
 }
