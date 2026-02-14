@@ -90,9 +90,16 @@ std::wstring g_pendingHtmlContent;
 std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
 bool g_pendingInjectBaseStyle = false;
+std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
+int g_webviewPendingNavigationCount = 0;
+bool g_pendingHtmlFallbackAttempted = false;
+bool g_webviewCreationInProgress = false;
+bool g_webviewPendingTimerActive = false;
+ULONGLONG g_webviewPendingStartTick = 0;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
+EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
@@ -355,6 +362,9 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kWebViewPendingTimerId = 2002;
+constexpr UINT kWebViewPendingTimerIntervalMs = 100;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 1500;
 
 // =====================
 // 前方宣言
@@ -400,6 +410,7 @@ std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
 bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
+bool BuildFileUri(const wchar_t* path, std::wstring& uri);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
@@ -413,6 +424,10 @@ bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 void InjectBaseStyleIntoCurrentHtml();
+void BeginPendingHtmlShow(bool keepLayered);
+void CompletePendingHtmlShow(bool showWebView);
+void UpdateWebViewPendingTimeoutTimer();
+bool RetryPendingHtmlWithNavigateToString();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -1240,6 +1255,24 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         }
+        if (wParam == kWebViewPendingTimerId)
+        {
+            if (!g_hasHtml || !g_webviewPendingShow)
+            {
+                UpdateWebViewPendingTimeoutTimer();
+                return 0;
+            }
+            ULONGLONG now = GetTickCount64();
+            if (g_webviewPendingStartTick == 0)
+            {
+                g_webviewPendingStartTick = now;
+            }
+            if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
+            {
+                CompletePendingHtmlShow(true);
+            }
+            return 0;
+        }
         break;
     }
 
@@ -1702,6 +1735,63 @@ bool WideToUtf8(const std::wstring& text, std::string& bytes)
     bytes.assign(static_cast<size_t>(needed), '\0');
     WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), bytes.data(), needed, nullptr, nullptr);
     return true;
+}
+
+bool BuildFileUri(const wchar_t* path, std::wstring& uri)
+{
+    uri.clear();
+    if (!path || !*path)
+    {
+        return false;
+    }
+
+    std::error_code pathError;
+    std::filesystem::path absolute = std::filesystem::absolute(std::filesystem::path(path), pathError);
+    std::wstring absolutePath = pathError ? std::filesystem::path(path).wstring() : absolute.wstring();
+    if (absolutePath.empty())
+    {
+        return false;
+    }
+
+    for (wchar_t& ch : absolutePath)
+    {
+        if (ch == L'\\')
+        {
+            ch = L'/';
+        }
+    }
+
+    std::string utf8Path;
+    if (!WideToUtf8(absolutePath, utf8Path))
+    {
+        return false;
+    }
+
+    auto isUnreserved = [](unsigned char ch)
+    {
+        return (ch >= 'A' && ch <= 'Z')
+            || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9')
+            || ch == '-' || ch == '.' || ch == '_' || ch == '~'
+            || ch == '/' || ch == ':';
+    };
+
+    std::ostringstream encoded;
+    encoded << "file:///";
+    encoded << std::uppercase << std::hex;
+    for (unsigned char ch : utf8Path)
+    {
+        if (isUnreserved(ch))
+        {
+            encoded << static_cast<char>(ch);
+        }
+        else
+        {
+            encoded << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
+        }
+    }
+
+    return Utf8ToWide(encoded.str(), uri);
 }
 
 bool UpdateIniValue(std::wstring& content, const std::wstring& section, const std::wstring& key, const std::wstring& value)
@@ -2433,13 +2523,9 @@ bool ApplyHtmlContent(std::wstring html)
     g_fitToWindow = false;
     g_zoom = 1.0f;
     g_hasHtml = true;
+    g_pendingHtmlFilePath.clear();
     g_pendingHtmlContent = std::move(html);
-    g_webviewPendingShow = true;
-    g_keepLayeredWhileHtmlPending = keepLayered;
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
+    BeginPendingHtmlShow(keepLayered);
     ApplyTransparencyMode();
     if (g_hwnd)
     {
@@ -2489,54 +2575,22 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     g_fitToWindow = false;
     g_zoom = 1.0f;
-    g_hasHtml = true;
-
-    std::error_code pathError;
-    std::filesystem::path absolute = std::filesystem::absolute(std::filesystem::path(path), pathError);
-    std::wstring absolutePath = pathError ? std::filesystem::path(path).wstring() : absolute.wstring();
-    std::wstring uri = L"file:///";
-    uri.reserve(absolutePath.size() + 16);
-    for (wchar_t ch : absolutePath)
+    std::wstring uri;
+    if (!BuildFileUri(path, uri))
     {
-        if (ch == L'\\')
-        {
-            uri.push_back(L'/');
-            continue;
-        }
-        if (ch == L' ')
-        {
-            uri += L"%20";
-            continue;
-        }
-        if (ch == L'#')
-        {
-            uri += L"%23";
-            continue;
-        }
-        if (ch == L'%')
-        {
-            uri += L"%25";
-            continue;
-        }
-        if (ch == L'?')
-        {
-            uri += L"%3F";
-            continue;
-        }
-        uri.push_back(ch);
+        g_hasHtml = false;
+        return false;
     }
 
+    g_hasHtml = true;
+
     g_pendingHtmlContent.clear();
+    g_pendingHtmlFilePath = path;
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
     g_pendingInjectBaseStyle = true;
-    g_webviewPendingShow = true;
-    g_keepLayeredWhileHtmlPending = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
+    BeginPendingHtmlShow(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     ApplyTransparencyMode();
     if (g_hwnd)
     {
@@ -2677,6 +2731,11 @@ void HideWebView()
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
     }
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
 }
 
 void UpdateWebViewBounds()
@@ -2739,6 +2798,32 @@ void UpdateWebViewInputTimer()
     {
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
+    }
+}
+
+void UpdateWebViewPendingTimeoutTimer()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    if (g_hasHtml && g_webviewPendingShow)
+    {
+        if (g_webviewPendingStartTick == 0)
+        {
+            g_webviewPendingStartTick = GetTickCount64();
+        }
+        if (!g_webviewPendingTimerActive)
+        {
+            SetTimer(g_hwnd, kWebViewPendingTimerId, kWebViewPendingTimerIntervalMs, nullptr);
+            g_webviewPendingTimerActive = true;
+        }
+    }
+    else if (g_webviewPendingTimerActive)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+        g_webviewPendingStartTick = 0;
     }
 }
 
@@ -2941,6 +3026,71 @@ void InjectBaseStyleIntoCurrentHtml()
             }).Get());
 }
 
+void BeginPendingHtmlShow(bool keepLayered)
+{
+    g_webviewPendingShow = true;
+    g_webviewPendingNavigationCount = 0;
+    g_pendingHtmlFallbackAttempted = false;
+    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_webviewPendingStartTick = GetTickCount64();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
+    UpdateWebViewPendingTimeoutTimer();
+}
+
+bool RetryPendingHtmlWithNavigateToString()
+{
+    if (!g_webview || g_pendingHtmlFilePath.empty() || g_pendingHtmlFallbackAttempted)
+    {
+        return false;
+    }
+
+    g_pendingHtmlFallbackAttempted = true;
+    std::string bytes;
+    if (!ReadFileBytes(g_pendingHtmlFilePath.c_str(), bytes))
+    {
+        return false;
+    }
+
+    std::wstring content;
+    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    {
+        return false;
+    }
+
+    std::wstring html = InjectHtmlBaseStyles(content);
+    return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
+}
+
+void CompletePendingHtmlShow(bool showWebView)
+{
+    if (!g_webviewPendingShow)
+    {
+        return;
+    }
+
+    g_webviewPendingShow = false;
+    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingStartTick = 0;
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
+    g_keepLayeredWhileHtmlPending = false;
+    ApplyTransparencyMode();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(showWebView ? TRUE : FALSE);
+    }
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -2960,19 +3110,33 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewBounds();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
-            g_webviewPendingShow = true;
-            g_webviewController->put_IsVisible(FALSE);
-            g_webview->Navigate(g_pendingHtmlUri.c_str());
+            BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+            const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
             g_pendingHtmlUri.clear();
             g_pendingHtmlIsUri = false;
+            if (FAILED(navigateResult))
+            {
+                CompletePendingHtmlShow(true);
+                return false;
+            }
         }
         else if (!g_pendingHtmlContent.empty())
         {
-            g_webviewPendingShow = true;
-            g_webviewController->put_IsVisible(FALSE);
-            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+            BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+            const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             g_pendingHtmlContent.clear();
+            if (FAILED(navigateResult))
+            {
+                CompletePendingHtmlShow(true);
+                return false;
+            }
         }
+        return true;
+    }
+
+
+    if (g_webviewCreationInProgress)
+    {
         return true;
     }
 
@@ -2997,6 +3161,7 @@ bool EnsureWebView2(HWND hwnd)
         return false;
     }
 
+    g_webviewCreationInProgress = true;
     HRESULT hr = createEnv(
         nullptr,
         nullptr,
@@ -3006,6 +3171,8 @@ bool EnsureWebView2(HWND hwnd)
             {
                 if (FAILED(result) || !env)
                 {
+                    g_webviewCreationInProgress = false;
+                    CompletePendingHtmlShow(false);
                     return result;
                 }
                 return env->CreateCoreWebView2Controller(
@@ -3013,8 +3180,10 @@ bool EnsureWebView2(HWND hwnd)
                     Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT
                         {
+                            g_webviewCreationInProgress = false;
                             if (FAILED(result) || !controller)
                             {
+                                CompletePendingHtmlShow(false);
                                 return result;
                             }
                             g_webviewController = controller;
@@ -3025,9 +3194,20 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->add_NavigationStarting(
+                                Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    {
+                                        if (g_webviewPendingShow)
+                                        {
+                                            ++g_webviewPendingNavigationCount;
+                                        }
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewNavigationStartingToken);
                             g_webview->add_NavigationCompleted(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
                                         if (g_webviewController)
                                         {
@@ -3042,33 +3222,59 @@ bool EnsureWebView2(HWND hwnd)
                                             InjectBaseStyleIntoCurrentHtml();
                                             g_pendingInjectBaseStyle = false;
                                         }
-                                        if (g_webviewController && g_webviewPendingShow)
+                                        if (g_webviewPendingShow)
                                         {
-                                            g_webviewPendingShow = false;
-                                            g_keepLayeredWhileHtmlPending = false;
-                                            ApplyTransparencyMode();
-                                            g_webviewController->put_IsVisible(TRUE);
+                                            if (g_webviewPendingNavigationCount > 0)
+                                            {
+                                                --g_webviewPendingNavigationCount;
+                                                if (g_webviewPendingNavigationCount > 0)
+                                                {
+                                                    return S_OK;
+                                                }
+                                            }
+                                            BOOL isSuccess = TRUE;
+                                            if (args)
+                                            {
+                                                args->get_IsSuccess(&isSuccess);
+                                            }
+                                            if (isSuccess != TRUE && RetryPendingHtmlWithNavigateToString())
+                                            {
+                                                return S_OK;
+                                            }
+                                            CompletePendingHtmlShow(true);
                                         }
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
                             if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                             {
-                                g_webviewPendingShow = true;
-                                g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+                                const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                                 g_pendingHtmlUri.clear();
                                 g_pendingHtmlIsUri = false;
+                                if (FAILED(navigateResult))
+                                {
+                                    CompletePendingHtmlShow(false);
+                                }
                             }
                             else if (g_webview && !g_pendingHtmlContent.empty())
                             {
-                                g_webviewPendingShow = true;
-                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                                BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+                                const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 g_pendingHtmlContent.clear();
+                                if (FAILED(navigateResult))
+                                {
+                                    CompletePendingHtmlShow(false);
+                                }
                             }
                             return S_OK;
                         }).Get());
             }).Get());
 
+    if (FAILED(hr))
+    {
+        g_webviewCreationInProgress = false;
+    }
     return SUCCEEDED(hr);
 }
 
@@ -3083,12 +3289,22 @@ void CloseWebView()
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
     }
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
     g_pendingHtmlUri.clear();
     g_pendingHtmlIsUri = false;
     g_pendingInjectBaseStyle = false;
+    g_pendingHtmlFilePath.clear();
+    g_pendingHtmlFallbackAttempted = false;
+    g_webviewPendingNavigationCount = 0;
+    g_webviewCreationInProgress = false;
+    g_webviewPendingStartTick = 0;
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
@@ -4944,6 +5160,9 @@ void Render(HWND hwnd)
                 RECT rc{};
                 GetClientRect(hwnd, &rc);
                 FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, RGB(90, 90, 90));
+                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 ReleaseDC(hwnd, hdc);
             }
         }
