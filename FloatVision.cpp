@@ -87,6 +87,9 @@ UINT g_textWindowHeight = 600;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
+std::wstring g_pendingHtmlUri;
+bool g_pendingHtmlIsUri = false;
+bool g_pendingInjectBaseStyle = false;
 bool g_webviewPendingShow = false;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
@@ -409,6 +412,7 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
+void InjectBaseStyleIntoCurrentHtml();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -2456,20 +2460,102 @@ bool ApplyHtmlContent(std::wstring html)
 
 bool LoadHtmlFromFile(const wchar_t* path)
 {
-    std::string bytes;
-    if (!ReadFileBytes(path, bytes))
+    if (!path || !*path)
     {
         return false;
     }
 
-    std::wstring html;
-    if (!Utf8ToWide(bytes, html))
+    if (g_bitmap)
     {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+
+    g_imageWidth = 0;
+    g_imageHeight = 0;
+    g_imageHasAlpha = false;
+    g_hasText = false;
+    g_textContent.clear();
+    g_textScroll = 0.0f;
+    g_fitToWindow = false;
+    g_zoom = 1.0f;
+    g_hasHtml = true;
+
+    std::error_code pathError;
+    std::filesystem::path absolute = std::filesystem::absolute(std::filesystem::path(path), pathError);
+    std::wstring absolutePath = pathError ? std::filesystem::path(path).wstring() : absolute.wstring();
+    std::wstring uri = L"file:///";
+    uri.reserve(absolutePath.size() + 16);
+    for (wchar_t ch : absolutePath)
+    {
+        if (ch == L'\\')
+        {
+            uri.push_back(L'/');
+            continue;
+        }
+        if (ch == L' ')
+        {
+            uri += L"%20";
+            continue;
+        }
+        if (ch == L'#')
+        {
+            uri += L"%23";
+            continue;
+        }
+        if (ch == L'%')
+        {
+            uri += L"%25";
+            continue;
+        }
+        if (ch == L'?')
+        {
+            uri += L"%3F";
+            continue;
+        }
+        uri.push_back(ch);
+    }
+
+    g_pendingHtmlContent.clear();
+    g_pendingHtmlUri = std::move(uri);
+    g_pendingHtmlIsUri = true;
+    g_pendingInjectBaseStyle = true;
+    g_webviewPendingShow = true;
+    g_keepLayeredWhileHtmlPending = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
+
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
+    ApplyTransparencyMode();
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+
+    if (!EnsureWebView2(g_hwnd))
+    {
+        g_hasHtml = false;
+        g_pendingHtmlContent.clear();
+        g_pendingHtmlUri.clear();
+        g_pendingHtmlIsUri = false;
+        g_pendingInjectBaseStyle = false;
+        g_keepLayeredWhileHtmlPending = false;
         return false;
     }
 
-    html = InjectHtmlBaseStyles(html);
-    return ApplyHtmlContent(std::move(html));
+    ApplyDocumentWindowSize(g_hwnd);
+    return true;
 }
 
 bool LoadMarkdownFromFile(const wchar_t* path)
@@ -2821,6 +2907,40 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
     return false;
 }
 
+
+void InjectBaseStyleIntoCurrentHtml()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    const wchar_t* script =
+        LR"JS((() => {
+            const css = "html, body { background: #ffffff !important; margin: 0; width: 100%; height: 100%; overflow: auto; }";
+            const doc = document;
+            if (!doc) {
+                return;
+            }
+            const id = "floatvision-base-style";
+            let style = doc.getElementById(id);
+            if (!style) {
+                style = doc.createElement("style");
+                style.id = id;
+                (doc.head || doc.documentElement || doc.body || doc).appendChild(style);
+            }
+            style.textContent = css;
+        })(); )JS";
+
+    g_webview->ExecuteScript(
+        script,
+        Microsoft::WRL::Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
+            [](HRESULT, LPCWSTR) -> HRESULT
+            {
+                return S_OK;
+            }).Get());
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -2838,7 +2958,15 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputState();
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
-        if (!g_pendingHtmlContent.empty())
+        if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+        {
+            g_webviewPendingShow = true;
+            g_webviewController->put_IsVisible(FALSE);
+            g_webview->Navigate(g_pendingHtmlUri.c_str());
+            g_pendingHtmlUri.clear();
+            g_pendingHtmlIsUri = false;
+        }
+        else if (!g_pendingHtmlContent.empty())
         {
             g_webviewPendingShow = true;
             g_webviewController->put_IsVisible(FALSE);
@@ -2909,6 +3037,11 @@ bool EnsureWebView2(HWND hwnd)
                                                 g_htmlBaseZoomFactor = zoom;
                                             }
                                         }
+                                        if (g_pendingInjectBaseStyle)
+                                        {
+                                            InjectBaseStyleIntoCurrentHtml();
+                                            g_pendingInjectBaseStyle = false;
+                                        }
                                         if (g_webviewController && g_webviewPendingShow)
                                         {
                                             g_webviewPendingShow = false;
@@ -2919,7 +3052,14 @@ bool EnsureWebView2(HWND hwnd)
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
-                            if (g_webview && !g_pendingHtmlContent.empty())
+                            if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                            {
+                                g_webviewPendingShow = true;
+                                g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                g_pendingHtmlUri.clear();
+                                g_pendingHtmlIsUri = false;
+                            }
+                            else if (g_webview && !g_pendingHtmlContent.empty())
                             {
                                 g_webviewPendingShow = true;
                                 g_webview->NavigateToString(g_pendingHtmlContent.c_str());
@@ -2946,6 +3086,9 @@ void CloseWebView()
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
+    g_pendingHtmlUri.clear();
+    g_pendingHtmlIsUri = false;
+    g_pendingInjectBaseStyle = false;
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
