@@ -91,8 +91,10 @@ std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
 bool g_pendingInjectBaseStyle = false;
 bool g_webviewPendingShow = false;
+int g_webviewPendingNavigationCount = 0;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
+EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
@@ -2950,6 +2952,7 @@ void CompletePendingHtmlShow(bool showWebView)
     }
 
     g_webviewPendingShow = false;
+    g_webviewPendingNavigationCount = 0;
     g_keepLayeredWhileHtmlPending = false;
     ApplyTransparencyMode();
     if (g_webviewController)
@@ -2982,6 +2985,7 @@ bool EnsureWebView2(HWND hwnd)
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             g_webviewPendingShow = true;
+            g_webviewPendingNavigationCount = 0;
             g_webviewController->put_IsVisible(FALSE);
             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
             g_pendingHtmlUri.clear();
@@ -2995,6 +2999,7 @@ bool EnsureWebView2(HWND hwnd)
         else if (!g_pendingHtmlContent.empty())
         {
             g_webviewPendingShow = true;
+            g_webviewPendingNavigationCount = 0;
             g_webviewController->put_IsVisible(FALSE);
             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             g_pendingHtmlContent.clear();
@@ -3058,6 +3063,17 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->add_NavigationStarting(
+                                Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    {
+                                        if (g_webviewPendingShow)
+                                        {
+                                            ++g_webviewPendingNavigationCount;
+                                        }
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewNavigationStartingToken);
                             g_webview->add_NavigationCompleted(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
@@ -3077,6 +3093,15 @@ bool EnsureWebView2(HWND hwnd)
                                         }
                                         if (g_webviewPendingShow)
                                         {
+                                            if (g_webviewPendingNavigationCount <= 0)
+                                            {
+                                                return S_OK;
+                                            }
+                                            --g_webviewPendingNavigationCount;
+                                            if (g_webviewPendingNavigationCount > 0)
+                                            {
+                                                return S_OK;
+                                            }
                                             BOOL isSuccess = TRUE;
                                             if (args)
                                             {
@@ -3090,6 +3115,7 @@ bool EnsureWebView2(HWND hwnd)
                             if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                             {
                                 g_webviewPendingShow = true;
+                                g_webviewPendingNavigationCount = 0;
                                 const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                                 g_pendingHtmlUri.clear();
                                 g_pendingHtmlIsUri = false;
@@ -3101,6 +3127,7 @@ bool EnsureWebView2(HWND hwnd)
                             else if (g_webview && !g_pendingHtmlContent.empty())
                             {
                                 g_webviewPendingShow = true;
+                                g_webviewPendingNavigationCount = 0;
                                 const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 g_pendingHtmlContent.clear();
                                 if (FAILED(navigateResult))
@@ -3132,6 +3159,7 @@ void CloseWebView()
     g_pendingHtmlUri.clear();
     g_pendingHtmlIsUri = false;
     g_pendingInjectBaseStyle = false;
+    g_webviewPendingNavigationCount = 0;
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
