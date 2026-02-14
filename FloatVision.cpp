@@ -3091,7 +3091,8 @@ bool RetryPendingHtmlWithNavigateToStringInternal()
         return false;
     }
 
-    return SUCCEEDED(g_webview->NavigateToString(decoratedHtml.c_str()));
+    // NOTE: 以前の decoratedHtml 経路は削除済み。ここは失敗時の最小フォールバックのみ。
+    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
 }
 
 void CompletePendingHtmlShowInternal(bool showWebView)
