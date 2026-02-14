@@ -3127,7 +3127,7 @@ std::wstring BuildWebViewDocumentInjectionScript()
     )" : L"";
 
     std::wstring script = LR"((function() {
-        if (window.__fvCssInjected) {
+        if (window.__fvCssInjectorInstalled) {
             return;
         }
 
