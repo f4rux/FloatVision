@@ -3158,6 +3158,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
+                            RegisterWebViewDocumentStyleScript();
                             g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
