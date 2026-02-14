@@ -3082,10 +3082,21 @@ bool EnsureWebView2(HWND hwnd)
     }
 
     g_webviewCreationInProgress = true;
+    Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions> envOptions;
+    if (SUCCEEDED(CoCreateInstance(
+        CLSID_CoreWebView2EnvironmentOptions,
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        IID_PPV_ARGS(&envOptions)))
+        && envOptions)
+    {
+        envOptions->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar");
+    }
+
     HRESULT hr = createEnv(
         nullptr,
         nullptr,
-        nullptr,
+        envOptions.Get(),
         Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT
             {
@@ -3116,34 +3127,34 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewBounds();
                             if (IsDarkModeEnabled())
                             {
-                                g_webview->add_ContentLoading(
-                                    Microsoft::WRL::Callback<ICoreWebView2ContentLoadingEventHandler>(
-                                        [](ICoreWebView2* sender, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
-                                        {
-                                            if (!sender)
-                                            {
-                                                return S_OK;
+                                g_webview->AddScriptToExecuteOnDocumentCreated(
+                                    LR"((function() {
+                                        const css = `
+                                            html { scrollbar-color: #5a5a5a #1f1f1f !important; }
+                                            ::-webkit-scrollbar { width: 12px; height: 12px; }
+                                            ::-webkit-scrollbar-track { background: #1f1f1f; }
+                                            ::-webkit-scrollbar-thumb { background: #5a5a5a; }
+                                            ::-webkit-scrollbar-thumb:hover { background: #767676; }
+                                        `;
+
+                                        const insertStyle = () => {
+                                            if (!document.getElementById('scrollbar-style')) {
+                                                const style = document.createElement('style');
+                                                style.id = 'scrollbar-style';
+                                                style.textContent = css;
+                                                (document.head || document.body || document.documentElement).appendChild(style);
                                             }
-                                            sender->ExecuteScript(
-                                                LR"((function() {
-                                                    const style = document.createElement('style');
-                                                    style.id = 'floatvision-webview-style';
-                                                    style.textContent = `
-                                                        html { scrollbar-color: #5a5a5a #1f1f1f !important; }
-                                                        html::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
-                                                        html::-webkit-scrollbar-track { background: #1f1f1f !important; }
-                                                        html::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
-                                                        html::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
-                                                        html::-webkit-scrollbar-corner { background: #1f1f1f !important; }
-                                                    `;
-                                                    if (document.head) {
-                                                        document.head.appendChild(style);
-                                                    }
-                                                })();)",
-                                                nullptr);
-                                            return S_OK;
-                                        }).Get(),
-                                    &g_webviewContentLoadingToken);
+                                        };
+
+                                        insertStyle();
+                                        setTimeout(insertStyle, 0);
+                                        requestAnimationFrame(insertStyle);
+
+                                        if (document.readyState === 'loading') {
+                                            document.addEventListener('DOMContentLoaded', insertStyle, { once: true });
+                                        }
+                                    })();)",
+                                    nullptr);
                             }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
