@@ -3030,6 +3030,39 @@ void InjectBaseStyleIntoCurrentHtml()
             }).Get());
 }
 
+void RegisterWebViewDocumentStyleScript()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    const wchar_t* script =
+        LR"JS((() => {
+            const css = "html, body { color-scheme: light dark; background: Canvas !important; color: CanvasText; margin: 0; width: 100%; height: 100%; overflow: auto; }";
+            const doc = document;
+            if (!doc) {
+                return;
+            }
+            const id = "floatvision-base-style";
+            let style = doc.getElementById(id);
+            if (!style) {
+                style = doc.createElement("style");
+                style.id = id;
+                (doc.head || doc.documentElement || doc.body || doc).appendChild(style);
+            }
+            style.textContent = css;
+        })(); )JS";
+
+    g_webview->AddScriptToExecuteOnDocumentCreated(
+        script,
+        Microsoft::WRL::Callback<ICoreWebView2AddScriptToExecuteOnDocumentCreatedCompletedHandler>(
+            [](HRESULT, PCWSTR) -> HRESULT
+            {
+                return S_OK;
+            }).Get());
+}
+
 void BeginPendingHtmlShow(bool keepLayered)
 {
     g_webviewPendingShow = true;
@@ -3193,6 +3226,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
+                            RegisterWebViewDocumentStyleScript();
                             g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                             UpdateWebViewWindowHandle();
                             UpdateWebViewInputState();
@@ -3221,11 +3255,7 @@ bool EnsureWebView2(HWND hwnd)
                                                 g_htmlBaseZoomFactor = zoom;
                                             }
                                         }
-                                        if (g_pendingInjectBaseStyle)
-                                        {
-                                            InjectBaseStyleIntoCurrentHtml();
-                                            g_pendingInjectBaseStyle = false;
-                                        }
+                                        g_pendingInjectBaseStyle = false;
                                         if (g_webviewPendingShow)
                                         {
                                             if (g_webviewPendingNavigationCount > 0)
