@@ -3104,6 +3104,9 @@ std::wstring BuildWebViewDocumentInjectionScript()
         window.__fvCssInjected = true;
 
         const css = `
+            :root {
+                color-scheme: light !important;
+            }
             html, body {
                 background-color: #ffffff !important;
             }
@@ -3121,6 +3124,7 @@ std::wstring BuildWebViewDocumentInjectionScript()
             const html = document.documentElement;
             if (html) {
                 html.style.setProperty('background-color', '#ffffff', 'important');
+                html.style.setProperty('color-scheme', 'light', 'important');
             }
             const body = document.body;
             if (body) {
