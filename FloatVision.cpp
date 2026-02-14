@@ -3248,7 +3248,7 @@ bool EnsureWebView2(HWND hwnd)
                         }
                         return S_OK;
                     }).Get());
-        }).Get();
+        }).Get());
 
     if (FAILED(hr))
     {
