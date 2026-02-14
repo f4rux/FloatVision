@@ -3216,23 +3216,39 @@ bool EnsureWebView2(HWND hwnd)
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
-                            if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                            auto navigatePendingHtml = []()
                             {
-                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
-                                const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                                if (FAILED(navigateResult))
+                                if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                                 {
-                                    CompletePendingHtmlShowInternal(false);
+                                    BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
+                                    const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                    if (FAILED(navigateResult))
+                                    {
+                                        CompletePendingHtmlShowInternal(false);
+                                    }
                                 }
-                            }
-                            else if (g_webview && !g_pendingHtmlContent.empty())
+                                else if (g_webview && !g_pendingHtmlContent.empty())
+                                {
+                                    BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
+                                    const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                                    if (FAILED(navigateResult))
+                                    {
+                                        CompletePendingHtmlShowInternal(false);
+                                    }
+                                }
+                            };
+                            const HRESULT emulationResult = g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
+                                Microsoft::WRL::Callback<ICoreWebView2CallDevToolsProtocolMethodCompletedHandler>(
+                                    [navigatePendingHtml](HRESULT, LPCWSTR) -> HRESULT
+                                    {
+                                        navigatePendingHtml();
+                                        return S_OK;
+                                    }).Get());
+                            if (FAILED(emulationResult))
                             {
-                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
-                                const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                if (FAILED(navigateResult))
-                                {
-                                    CompletePendingHtmlShowInternal(false);
-                                }
+                                navigatePendingHtml();
                             }
                             return S_OK;
                         }).Get());
