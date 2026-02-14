@@ -2434,7 +2434,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     std::ostringstream style;
     style << R"(
         :root {
-            color-scheme: light dark;
+            color-scheme: light;
         }
         body {
             margin: 0;
@@ -3163,6 +3163,34 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
+                                nullptr);
+                            g_webview->AddScriptToExecuteOnDocumentCreated(
+                                LR"((() => {
+                                    document.documentElement.style.setProperty('color-scheme', 'light', 'important');
+                                    const style = document.createElement('style');
+                                    style.textContent = ':root { color-scheme: light !important; }';
+                                    document.documentElement.appendChild(style);
+                                })();)",
+                                nullptr);
+                            if (IsDarkModeEnabled())
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(
+                                    LR"((() => {
+                                        const scrollbarStyle = document.createElement('style');
+                                        scrollbarStyle.textContent = `
+                                            ::-webkit-scrollbar { width: 14px; height: 14px; }
+                                            ::-webkit-scrollbar-track { background: #1f1f1f; }
+                                            ::-webkit-scrollbar-thumb { background: #5a5a5a; border-radius: 8px; border: 3px solid #1f1f1f; }
+                                            ::-webkit-scrollbar-thumb:hover { background: #767676; }
+                                            ::-webkit-scrollbar-corner { background: #1f1f1f; }
+                                        `;
+                                        document.documentElement.appendChild(scrollbarStyle);
+                                    })();)",
+                                    nullptr);
+                            }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
