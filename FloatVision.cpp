@@ -414,7 +414,6 @@ bool BuildFileUri(const wchar_t* path, std::wstring& uri);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
-bool BuildHtmlDocumentForWebView(const wchar_t* sourcePath, const std::wstring& sourceHtml, std::wstring& decoratedHtml);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
@@ -2642,9 +2641,13 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasHtml = true;
     g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
-    g_pendingHtmlContent = std::move(decoratedHtml);
-    g_pendingHtmlUri.clear();
-    g_pendingHtmlIsUri = false;
+    if (!BuildFileUri(path, g_pendingHtmlUri))
+    {
+        g_hasHtml = false;
+        g_pendingHtmlFilePath.clear();
+        return false;
+    }
+    g_pendingHtmlIsUri = true;
     BeginPendingHtmlShowInternal(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
@@ -3085,14 +3088,8 @@ bool RetryPendingHtmlWithNavigateToStringInternal()
         return false;
     }
 
-    std::wstring decoratedHtml;
-    if (!BuildHtmlDocumentForWebView(g_pendingHtmlFilePath.c_str(), sourceHtml, decoratedHtml))
-    {
-        return false;
-    }
-
-    // NOTE: 以前の decoratedHtml 経路は削除済み。ここは失敗時の最小フォールバックのみ。
-    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
+    // file:// ナビゲーション失敗時の最小フォールバックとして、生HTMLを直接表示する。
+    return SUCCEEDED(g_webview->NavigateToString(sourceHtml.c_str()));
 }
 
 void CompletePendingHtmlShowInternal(bool showWebView)
