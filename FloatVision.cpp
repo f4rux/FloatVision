@@ -2368,7 +2368,7 @@ void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
 
 std::wstring InjectHtmlBaseStyles(const std::wstring& html)
 {
-    const std::wstring style = L"<style>html, body { background: #ffffff !important; margin: 0; width: 100%; height: 100%; overflow: auto; }</style>";
+    const std::wstring style = L"<style>html, body { color-scheme: light dark; background: Canvas !important; color: CanvasText; margin: 0; width: 100%; height: 100%; overflow: auto; }</style>";
     std::wstring lowered = html;
     std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::towlower);
     size_t headPos = lowered.find(L"<head");
@@ -2843,6 +2843,10 @@ WORD GetHtmlInputVirtualKey()
 
 void UpdateWebViewInputState()
 {
+    if (!g_webviewWindow || !IsWindow(g_webviewWindow))
+    {
+        UpdateWebViewWindowHandle();
+    }
     if (!g_webviewWindow)
     {
         return;
@@ -3002,7 +3006,7 @@ void InjectBaseStyleIntoCurrentHtml()
 
     const wchar_t* script =
         LR"JS((() => {
-            const css = "html, body { background: #ffffff !important; margin: 0; width: 100%; height: 100%; overflow: auto; }";
+            const css = "html, body { color-scheme: light dark; background: Canvas !important; color: CanvasText; margin: 0; width: 100%; height: 100%; overflow: auto; }";
             const doc = document;
             if (!doc) {
                 return;
