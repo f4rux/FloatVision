@@ -422,10 +422,10 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
-void BeginPendingHtmlShow(bool keepLayered);
-void CompletePendingHtmlShow(bool showWebView);
+void BeginPendingHtmlShowInternal(bool keepLayered);
+void CompletePendingHtmlShowInternal(bool showWebView);
 void UpdateWebViewPendingTimeoutTimer();
-bool RetryPendingHtmlWithNavigateToString();
+bool RetryPendingHtmlWithNavigateToStringInternal();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -1285,7 +1285,7 @@ LRESULT CALLBACK WndProc(
                         return 0;
                     }
                 }
-                CompletePendingHtmlShow(true);
+                CompletePendingHtmlShowInternal(true);
             }
             return 0;
         }
@@ -2522,7 +2522,7 @@ bool ApplyHtmlContent(std::wstring html)
     g_hasHtml = true;
     g_pendingHtmlFilePath.clear();
     g_pendingHtmlContent = std::move(html);
-    BeginPendingHtmlShow(keepLayered);
+    BeginPendingHtmlShowInternal(keepLayered);
     ApplyTransparencyMode();
     if (g_hwnd)
     {
@@ -2585,7 +2585,7 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_pendingHtmlFilePath = path;
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
-    BeginPendingHtmlShow(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
+    BeginPendingHtmlShowInternal(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
     if (g_hwnd)
@@ -2993,7 +2993,7 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 
 #ifndef FLOATVISION_PENDING_HTML_HELPERS_DEFINED
 #define FLOATVISION_PENDING_HTML_HELPERS_DEFINED
-void BeginPendingHtmlShow(bool keepLayered)
+void BeginPendingHtmlShowInternal(bool keepLayered)
 {
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
@@ -3008,7 +3008,7 @@ void BeginPendingHtmlShow(bool keepLayered)
     UpdateWebViewPendingTimeoutTimer();
 }
 
-bool RetryPendingHtmlWithNavigateToString()
+bool RetryPendingHtmlWithNavigateToStringInternal()
 {
     if (!g_webview || g_pendingHtmlFilePath.empty() || g_pendingHtmlFallbackAttempted)
     {
@@ -3031,7 +3031,7 @@ bool RetryPendingHtmlWithNavigateToString()
     return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
 }
 
-void CompletePendingHtmlShow(bool showWebView)
+void CompletePendingHtmlShowInternal(bool showWebView)
 {
     if (!g_webviewPendingShow)
     {
@@ -3082,21 +3082,21 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewBounds();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
-            BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+            BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
             if (FAILED(navigateResult))
             {
-                CompletePendingHtmlShow(true);
+                CompletePendingHtmlShowInternal(true);
                 return false;
             }
         }
         else if (!g_pendingHtmlContent.empty())
         {
-            BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+            BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             if (FAILED(navigateResult))
             {
-                CompletePendingHtmlShow(true);
+                CompletePendingHtmlShowInternal(true);
                 return false;
             }
         }
@@ -3141,7 +3141,7 @@ bool EnsureWebView2(HWND hwnd)
                 if (FAILED(result) || !env)
                 {
                     g_webviewCreationInProgress = false;
-                    CompletePendingHtmlShow(false);
+                    CompletePendingHtmlShowInternal(false);
                     return result;
                 }
                 return env->CreateCoreWebView2Controller(
@@ -3152,7 +3152,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewCreationInProgress = false;
                             if (FAILED(result) || !controller)
                             {
-                                CompletePendingHtmlShow(false);
+                                CompletePendingHtmlShowInternal(false);
                                 return result;
                             }
                             g_webviewController = controller;
@@ -3202,32 +3202,32 @@ bool EnsureWebView2(HWND hwnd)
                                             {
                                                 args->get_IsSuccess(&isSuccess);
                                             }
-                                            const bool retrySucceeded = RetryPendingHtmlWithNavigateToString();
+                                            const bool retrySucceeded = RetryPendingHtmlWithNavigateToStringInternal();
                                             if (isSuccess != TRUE && retrySucceeded)
                                             {
                                                 return S_OK;
                                             }
-                                            CompletePendingHtmlShow(true);
+                                            CompletePendingHtmlShowInternal(true);
                                         }
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
                             if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                             {
-                                BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                                 if (FAILED(navigateResult))
                                 {
-                                    CompletePendingHtmlShow(false);
+                                    CompletePendingHtmlShowInternal(false);
                                 }
                             }
                             else if (g_webview && !g_pendingHtmlContent.empty())
                             {
-                                BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
+                                BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 if (FAILED(navigateResult))
                                 {
-                                    CompletePendingHtmlShow(false);
+                                    CompletePendingHtmlShowInternal(false);
                                 }
                             }
                             return S_OK;
