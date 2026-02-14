@@ -3181,6 +3181,7 @@ bool EnsureWebView2(HWND hwnd)
     using CreateWebView2EnvironmentWithOptionsFn = HRESULT(WINAPI*)(
         PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions*,
         ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler*);
+    using CreateWebView2EnvironmentOptionsFn = HRESULT(WINAPI*)(ICoreWebView2EnvironmentOptions**);
     auto createEnv = reinterpret_cast<CreateWebView2EnvironmentWithOptionsFn>(
         GetProcAddress(g_webviewLoader, "CreateCoreWebView2EnvironmentWithOptions"));
     if (!createEnv)
@@ -3189,7 +3190,13 @@ bool EnsureWebView2(HWND hwnd)
         return false;
     }
 
-    auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions> options;
+    auto createOptions = reinterpret_cast<CreateWebView2EnvironmentOptionsFn>(
+        GetProcAddress(g_webviewLoader, "CreateCoreWebView2EnvironmentOptions"));
+    if (createOptions)
+    {
+        createOptions(&options);
+    }
     if (options)
     {
         options->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar");
