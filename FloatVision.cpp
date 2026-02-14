@@ -364,7 +364,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 500;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 2000;
 
 // =====================
 // 前方宣言
@@ -3141,27 +3141,25 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
-                            g_webview->AddScriptToExecuteOnDocumentCreated(
-                                LR"((() => {
-                                    document.documentElement.style.setProperty('color-scheme', 'light', 'important');
-                                    const style = document.createElement('style');
-                                    style.textContent = ':root { color-scheme: light !important; }';
-                                    document.documentElement.appendChild(style);
-                                })();)",
+                            g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
                                 nullptr);
-                            g_webview->AddScriptToExecuteOnDocumentCreated(
-                                LR"((() => {
-                                    const root = document.documentElement;
-                                    if (!root) {
-                                        return;
-                                    }
-                                    let scrollbarStyle = document.getElementById('floatvision-dark-scrollbar-style');
-                                    if (!scrollbarStyle) {
-                                        scrollbarStyle = document.createElement('style');
-                                        scrollbarStyle.id = 'floatvision-dark-scrollbar-style';
-                                    }
-                                    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-                                        scrollbarStyle.textContent = `
+                            if (IsDarkModeEnabled())
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(
+                                    LR"((() => {
+                                        const root = document.documentElement;
+                                        if (!root) {
+                                            return;
+                                        }
+                                        let style = document.getElementById('floatvision-webview-style');
+                                        if (!style) {
+                                            style = document.createElement('style');
+                                            style.id = 'floatvision-webview-style';
+                                        }
+                                        style.textContent = `
+                                            :root { color-scheme: light !important; }
                                             html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
                                             ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
                                             ::-webkit-scrollbar-track { background: #1f1f1f !important; }
@@ -3169,14 +3167,34 @@ bool EnsureWebView2(HWND hwnd)
                                             ::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
                                             ::-webkit-scrollbar-corner { background: #1f1f1f !important; }
                                         `;
-                                        if (!scrollbarStyle.parentNode) {
-                                            root.appendChild(scrollbarStyle);
+                                        if (!style.parentNode) {
+                                            root.appendChild(style);
                                         }
-                                    } else if (scrollbarStyle.parentNode) {
-                                        scrollbarStyle.remove();
-                                    }
-                                })();)",
-                                nullptr);
+                                        root.style.setProperty('color-scheme', 'light', 'important');
+                                    })();)",
+                                    nullptr);
+                            }
+                            else
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(
+                                    LR"((() => {
+                                        const root = document.documentElement;
+                                        if (!root) {
+                                            return;
+                                        }
+                                        let style = document.getElementById('floatvision-webview-style');
+                                        if (!style) {
+                                            style = document.createElement('style');
+                                            style.id = 'floatvision-webview-style';
+                                        }
+                                        style.textContent = ':root { color-scheme: light !important; }';
+                                        if (!style.parentNode) {
+                                            root.appendChild(style);
+                                        }
+                                        root.style.setProperty('color-scheme', 'light', 'important');
+                                    })();)",
+                                    nullptr);
+                            }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
