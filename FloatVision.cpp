@@ -2642,9 +2642,13 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasHtml = true;
     g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
-    g_pendingHtmlContent = std::move(decoratedHtml);
-    g_pendingHtmlUri.clear();
-    g_pendingHtmlIsUri = false;
+    if (!BuildFileUri(path, g_pendingHtmlUri))
+    {
+        g_hasHtml = false;
+        g_pendingHtmlFilePath.clear();
+        return false;
+    }
+    g_pendingHtmlIsUri = true;
     BeginPendingHtmlShowInternal(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
@@ -3092,7 +3096,7 @@ bool RetryPendingHtmlWithNavigateToStringInternal()
     }
 
     // NOTE: 以前の decoratedHtml 経路は削除済み。ここは失敗時の最小フォールバックのみ。
-    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
+    return SUCCEEDED(g_webview->NavigateToString(decoratedHtml.c_str()));
 }
 
 void CompletePendingHtmlShowInternal(bool showWebView)
