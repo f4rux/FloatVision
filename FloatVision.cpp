@@ -93,6 +93,8 @@ bool g_pendingInjectBaseStyle = false;
 bool g_webviewPendingShow = false;
 int g_webviewPendingNavigationCount = 0;
 bool g_webviewCreationInProgress = false;
+bool g_webviewPendingTimerActive = false;
+ULONGLONG g_webviewPendingStartTick = 0;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
@@ -358,6 +360,9 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kWebViewPendingTimerId = 2002;
+constexpr UINT kWebViewPendingTimerIntervalMs = 100;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 5000;
 
 // =====================
 // 前方宣言
@@ -416,7 +421,9 @@ bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 void InjectBaseStyleIntoCurrentHtml();
+void BeginPendingHtmlShow(bool keepLayered);
 void CompletePendingHtmlShow(bool showWebView);
+void UpdateWebViewPendingTimeoutTimer();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -1241,6 +1248,24 @@ LRESULT CALLBACK WndProc(
             else
             {
                 UpdateWebViewInputTimer();
+            }
+            return 0;
+        }
+        if (wParam == kWebViewPendingTimerId)
+        {
+            if (!g_hasHtml || !g_webviewPendingShow)
+            {
+                UpdateWebViewPendingTimeoutTimer();
+                return 0;
+            }
+            ULONGLONG now = GetTickCount64();
+            if (g_webviewPendingStartTick == 0)
+            {
+                g_webviewPendingStartTick = now;
+            }
+            if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
+            {
+                CompletePendingHtmlShow(true);
             }
             return 0;
         }
@@ -2438,12 +2463,7 @@ bool ApplyHtmlContent(std::wstring html)
     g_zoom = 1.0f;
     g_hasHtml = true;
     g_pendingHtmlContent = std::move(html);
-    g_webviewPendingShow = true;
-    g_keepLayeredWhileHtmlPending = keepLayered;
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
+    BeginPendingHtmlShow(keepLayered);
     ApplyTransparencyMode();
     if (g_hwnd)
     {
@@ -2534,13 +2554,8 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
     g_pendingInjectBaseStyle = true;
-    g_webviewPendingShow = true;
-    g_keepLayeredWhileHtmlPending = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
+    BeginPendingHtmlShow(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     ApplyTransparencyMode();
     if (g_hwnd)
     {
@@ -2681,6 +2696,11 @@ void HideWebView()
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
     }
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
 }
 
 void UpdateWebViewBounds()
@@ -2743,6 +2763,32 @@ void UpdateWebViewInputTimer()
     {
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
+    }
+}
+
+void UpdateWebViewPendingTimeoutTimer()
+{
+    if (!g_hwnd)
+    {
+        return;
+    }
+    if (g_hasHtml && g_webviewPendingShow)
+    {
+        if (g_webviewPendingStartTick == 0)
+        {
+            g_webviewPendingStartTick = GetTickCount64();
+        }
+        if (!g_webviewPendingTimerActive)
+        {
+            SetTimer(g_hwnd, kWebViewPendingTimerId, kWebViewPendingTimerIntervalMs, nullptr);
+            g_webviewPendingTimerActive = true;
+        }
+    }
+    else if (g_webviewPendingTimerActive)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+        g_webviewPendingStartTick = 0;
     }
 }
 
@@ -2945,6 +2991,19 @@ void InjectBaseStyleIntoCurrentHtml()
             }).Get());
 }
 
+void BeginPendingHtmlShow(bool keepLayered)
+{
+    g_webviewPendingShow = true;
+    g_webviewPendingNavigationCount = 0;
+    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_webviewPendingStartTick = GetTickCount64();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
+    UpdateWebViewPendingTimeoutTimer();
+}
+
 void CompletePendingHtmlShow(bool showWebView)
 {
     if (!g_webviewPendingShow)
@@ -2954,6 +3013,12 @@ void CompletePendingHtmlShow(bool showWebView)
 
     g_webviewPendingShow = false;
     g_webviewPendingNavigationCount = 0;
+    g_webviewPendingStartTick = 0;
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
     g_keepLayeredWhileHtmlPending = false;
     ApplyTransparencyMode();
     if (g_webviewController)
@@ -2985,9 +3050,7 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewBounds();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
-            g_webviewPendingShow = true;
-            g_webviewPendingNavigationCount = 0;
-            g_webviewController->put_IsVisible(FALSE);
+            BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
             g_pendingHtmlUri.clear();
             g_pendingHtmlIsUri = false;
@@ -2999,9 +3062,7 @@ bool EnsureWebView2(HWND hwnd)
         }
         else if (!g_pendingHtmlContent.empty())
         {
-            g_webviewPendingShow = true;
-            g_webviewPendingNavigationCount = 0;
-            g_webviewController->put_IsVisible(FALSE);
+            BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             g_pendingHtmlContent.clear();
             if (FAILED(navigateResult))
@@ -3124,8 +3185,7 @@ bool EnsureWebView2(HWND hwnd)
                                 &g_webviewNavigationToken);
                             if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                             {
-                                g_webviewPendingShow = true;
-                                g_webviewPendingNavigationCount = 0;
+                                BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                                 g_pendingHtmlUri.clear();
                                 g_pendingHtmlIsUri = false;
@@ -3136,8 +3196,7 @@ bool EnsureWebView2(HWND hwnd)
                             }
                             else if (g_webview && !g_pendingHtmlContent.empty())
                             {
-                                g_webviewPendingShow = true;
-                                g_webviewPendingNavigationCount = 0;
+                                BeginPendingHtmlShow(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 g_pendingHtmlContent.clear();
                                 if (FAILED(navigateResult))
@@ -3167,6 +3226,11 @@ void CloseWebView()
         KillTimer(g_hwnd, kWebViewInputTimerId);
         g_webviewInputTimerActive = false;
     }
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
     g_webviewController.Reset();
     g_webviewController2.Reset();
     g_webview.Reset();
@@ -3175,6 +3239,7 @@ void CloseWebView()
     g_pendingInjectBaseStyle = false;
     g_webviewPendingNavigationCount = 0;
     g_webviewCreationInProgress = false;
+    g_webviewPendingStartTick = 0;
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
@@ -5030,6 +5095,9 @@ void Render(HWND hwnd)
                 RECT rc{};
                 GetClientRect(hwnd, &rc);
                 FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
+                SetBkMode(hdc, TRANSPARENT);
+                SetTextColor(hdc, RGB(90, 90, 90));
+                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
                 ReleaseDC(hwnd, hdc);
             }
         }
