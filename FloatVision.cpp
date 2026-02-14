@@ -364,7 +364,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 500;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 2000;
 
 // =====================
 // 前方宣言
@@ -1267,24 +1267,6 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
-                if (!g_webviewPendingTimeoutRetried && g_webview)
-                {
-                    HRESULT retryHr = E_FAIL;
-                    if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
-                    {
-                        retryHr = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                    }
-                    else if (!g_pendingHtmlContent.empty())
-                    {
-                        retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                    }
-                    if (SUCCEEDED(retryHr))
-                    {
-                        g_webviewPendingTimeoutRetried = true;
-                        g_webviewPendingStartTick = now;
-                        return 0;
-                    }
-                }
                 CompletePendingHtmlShowInternal(true);
             }
             return 0;
@@ -2434,7 +2416,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     std::ostringstream style;
     style << R"(
         :root {
-            color-scheme: light dark;
+            color-scheme: light;
         }
         body {
             margin: 0;
@@ -2993,18 +2975,14 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 
 #ifndef FLOATVISION_PENDING_HTML_HELPERS_DEFINED
 #define FLOATVISION_PENDING_HTML_HELPERS_DEFINED
-void BeginPendingHtmlShowInternal(bool keepLayered)
+void BeginPendingHtmlShowInternal(bool /*keepLayered*/)
 {
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
-    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_keepLayeredWhileHtmlPending = false;
     g_webviewPendingStartTick = GetTickCount64();
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     UpdateWebViewPendingTimeoutTimer();
 }
 
@@ -3163,6 +3141,33 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            if (IsDarkModeEnabled())
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(
+                                    LR"((() => {
+                                        const root = document.documentElement;
+                                        if (!root) {
+                                            return;
+                                        }
+                                        let style = document.getElementById('floatvision-webview-style');
+                                        if (!style) {
+                                            style = document.createElement('style');
+                                            style.id = 'floatvision-webview-style';
+                                        }
+                                        style.textContent = `
+                                            html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
+                                            ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
+                                            ::-webkit-scrollbar-track { background: #1f1f1f !important; }
+                                            ::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
+                                            ::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
+                                            ::-webkit-scrollbar-corner { background: #1f1f1f !important; }
+                                        `;
+                                        if (!style.parentNode) {
+                                            root.appendChild(style);
+                                        }
+                                    })();)",
+                                    nullptr);
+                            }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
@@ -5114,20 +5119,6 @@ void Render(HWND hwnd)
 {
     if (g_hasHtml)
     {
-        if (g_webviewPendingShow)
-        {
-            HDC hdc = GetDC(hwnd);
-            if (hdc)
-            {
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, RGB(90, 90, 90));
-                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                ReleaseDC(hwnd, hdc);
-            }
-        }
         UpdateWebViewBounds();
         return;
     }
