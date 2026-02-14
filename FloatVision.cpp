@@ -89,7 +89,6 @@ bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
 std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
-bool g_pendingInjectBaseStyle = false;
 std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
 int g_webviewPendingNavigationCount = 0;
@@ -365,7 +364,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 1500;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 500;
 
 // =====================
 // 前方宣言
@@ -407,7 +406,6 @@ void ScrollTextBy(float delta);
 void ApplyDocumentWindowSize(HWND hwnd);
 bool LoadHtmlFromFile(const wchar_t* path);
 bool LoadMarkdownFromFile(const wchar_t* path);
-std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
 bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
@@ -424,8 +422,6 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
-void InjectBaseStyleIntoCurrentHtml();
-void RegisterWebViewDocumentStyleScript();
 void BeginPendingHtmlShow(bool keepLayered);
 void CompletePendingHtmlShow(bool showWebView);
 void UpdateWebViewPendingTimeoutTimer();
@@ -2386,25 +2382,6 @@ void LoadTextSettingsFromMarkdown(const std::filesystem::path& path)
     }
 }
 
-std::wstring InjectHtmlBaseStyles(const std::wstring& html)
-{
-    const std::wstring style = L"<style>html, body { color-scheme: light dark; background: Canvas !important; color: CanvasText; margin: 0; width: 100%; height: 100%; overflow: auto; }</style>";
-    std::wstring lowered = html;
-    std::transform(lowered.begin(), lowered.end(), lowered.begin(), ::towlower);
-    size_t headPos = lowered.find(L"<head");
-    if (headPos != std::wstring::npos)
-    {
-        size_t insertPos = lowered.find(L'>', headPos);
-        if (insertPos != std::wstring::npos)
-        {
-            std::wstring result = html;
-            result.insert(insertPos + 1, style);
-            return result;
-        }
-    }
-    return style + html;
-}
-
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
 {
     std::string body;
@@ -2608,7 +2585,6 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_pendingHtmlFilePath = path;
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
-    g_pendingInjectBaseStyle = false;
     BeginPendingHtmlShow(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
@@ -2623,7 +2599,6 @@ bool LoadHtmlFromFile(const wchar_t* path)
         g_pendingHtmlContent.clear();
         g_pendingHtmlUri.clear();
         g_pendingHtmlIsUri = false;
-        g_pendingInjectBaseStyle = false;
         g_keepLayeredWhileHtmlPending = false;
         return false;
     }
@@ -3017,37 +2992,73 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 }
 
 
-void InjectBaseStyleIntoCurrentHtml()
+void BeginPendingHtmlShow(bool keepLayered)
 {
-    if (!g_webview)
+    g_webviewPendingShow = true;
+    g_webviewPendingNavigationCount = 0;
+    g_pendingHtmlFallbackAttempted = false;
+    g_webviewPendingTimeoutRetried = false;
+    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_webviewPendingStartTick = GetTickCount64();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(FALSE);
+    }
+    UpdateWebViewPendingTimeoutTimer();
+}
+
+bool RetryPendingHtmlWithNavigateToString()
+{
+    if (!g_webview || g_pendingHtmlFilePath.empty() || g_pendingHtmlFallbackAttempted)
+    {
+        return false;
+    }
+
+    g_pendingHtmlFallbackAttempted = true;
+    std::string bytes;
+    if (!ReadFileBytes(g_pendingHtmlFilePath.c_str(), bytes))
+    {
+        return false;
+    }
+
+    std::wstring content;
+    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    {
+        return false;
+    }
+
+    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
+}
+
+void CompletePendingHtmlShow(bool showWebView)
+{
+    if (!g_webviewPendingShow)
     {
         return;
     }
 
-    const wchar_t* script =
-        LR"JS((() => {
-            const css = "html, body { color-scheme: light dark; background: Canvas !important; color: CanvasText; margin: 0; width: 100%; height: 100%; overflow: auto; }";
-            const doc = document;
-            if (!doc) {
-                return;
-            }
-            const id = "floatvision-base-style";
-            let style = doc.getElementById(id);
-            if (!style) {
-                style = doc.createElement("style");
-                style.id = id;
-                (doc.head || doc.documentElement || doc.body || doc).appendChild(style);
-            }
-            style.textContent = css;
-        })(); )JS";
-
-    g_webview->ExecuteScript(
-        script,
-        Microsoft::WRL::Callback<ICoreWebView2ExecuteScriptCompletedHandler>(
-            [](HRESULT, LPCWSTR) -> HRESULT
-            {
-                return S_OK;
-            }).Get());
+    g_webviewPendingShow = false;
+    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingTimeoutRetried = false;
+    g_webviewPendingStartTick = 0;
+    g_pendingHtmlContent.clear();
+    g_pendingHtmlUri.clear();
+    g_pendingHtmlIsUri = false;
+    if (g_webviewPendingTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kWebViewPendingTimerId);
+        g_webviewPendingTimerActive = false;
+    }
+    g_keepLayeredWhileHtmlPending = false;
+    ApplyTransparencyMode();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(showWebView ? TRUE : FALSE);
+    }
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
 }
 
 void RegisterWebViewDocumentStyleScript()
@@ -3249,7 +3260,6 @@ bool EnsureWebView2(HWND hwnd)
                                                 g_htmlBaseZoomFactor = zoom;
                                             }
                                         }
-                                        g_pendingInjectBaseStyle = false;
                                         if (g_webviewPendingShow)
                                         {
                                             if (g_webviewPendingNavigationCount > 0)
@@ -3324,7 +3334,6 @@ void CloseWebView()
     g_webview.Reset();
     g_pendingHtmlUri.clear();
     g_pendingHtmlIsUri = false;
-    g_pendingInjectBaseStyle = false;
     g_pendingHtmlFilePath.clear();
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
