@@ -3150,15 +3150,20 @@ std::wstring BuildWebViewDocumentInjectionScript()
             return;
         }
 
-        const css = `
+        const forceLightCss = `
+            :root {
+                color-scheme: light !important;
+            }
+            html,
+            body {
+                background: #ffffff !important;
+            }
+        `;
+        const css = forceLightCss + `
     )";
     script += scrollbarCss;
     script += LR"(
         `;
-
-        if (css.trim().length === 0) {
-            return;
-        }
 
         const insertStyle = () => {
             const root = document.head || document.documentElement || document.body;
@@ -3264,10 +3269,7 @@ bool EnsureWebView2(HWND hwnd)
 
     if (g_webviewController && g_webview)
     {
-        if (!g_webviewPendingShow)
-        {
-            g_webviewController->put_IsVisible(TRUE);
-        }
+        g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
         if (g_webviewController2)
         {
             COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
@@ -3370,7 +3372,7 @@ bool EnsureWebView2(HWND hwnd)
                             g_webviewController = controller;
                             g_webviewController->get_CoreWebView2(&g_webview);
                             g_webviewController.As(&g_webviewController2);
-                            g_webviewController->put_IsVisible(TRUE);
+                            g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                             if (g_webviewController2)
                             {
                                 COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
