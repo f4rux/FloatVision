@@ -3147,8 +3147,39 @@ bool EnsureWebView2(HWND hwnd)
                             }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    [](ICoreWebView2* sender, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                     {
+                                        if (IsDarkModeEnabled() && sender)
+                                        {
+                                            sender->AddScriptToExecuteOnDocumentCreated(
+                                                LR"((function() {
+const style = document.createElement('style');
+style.id = 'custom-scrollbar';
+style.textContent = `
+    html { scrollbar-color: #5a5a5a #1f1f1f !important; }
+    ::-webkit-scrollbar { width: 12px; height: 12px; }
+    ::-webkit-scrollbar-track { background: #1f1f1f; }
+    ::-webkit-scrollbar-thumb { background: #5a5a5a; }
+    ::-webkit-scrollbar-thumb:hover { background: #767676; }
+`;
+
+const tryInsert = () => {
+    if (document.documentElement && !document.getElementById('custom-scrollbar')) {
+        (document.head || document.documentElement).insertBefore(
+            style,
+            (document.head || document.documentElement).firstChild
+        );
+        return true;
+    }
+    return false;
+};
+
+if (!tryInsert()) {
+    setTimeout(tryInsert, 0);
+}
+})();)",
+                                                nullptr);
+                                        }
                                         if (g_webviewPendingShow)
                                         {
                                             ++g_webviewPendingNavigationCount;
