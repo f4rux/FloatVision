@@ -3163,28 +3163,35 @@ std::wstring BuildWebViewDocumentInjectionScript()
             return;
         }
 
-        let retryCount = 0;
-        const maxRetries = 8;
+        const markInjected = () => {
+            window.__fvCssInjected = true;
+        };
 
-        const retryInject = () => {
+        const tryInject = () => {
             if (window.__fvCssInjected) {
-                return;
+                return true;
             }
             if (insertStyle()) {
-                window.__fvCssInjected = true;
-                return;
+                markInjected();
+                return true;
             }
-            if (++retryCount < maxRetries) {
-                setTimeout(retryInject, 50);
+            return false;
+        };
+
+        if (tryInject()) {
+            return;
+        }
+
+        const onReadyStateChange = () => {
+            if (tryInject() || document.readyState === 'complete') {
+                document.removeEventListener('readystatechange', onReadyStateChange);
             }
         };
 
+        document.addEventListener('readystatechange', onReadyStateChange);
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', retryInject, { once: true });
+            document.addEventListener('DOMContentLoaded', tryInject, { once: true });
         }
-
-        requestAnimationFrame(retryInject);
-        setTimeout(retryInject, 0);
     })(); )";
     return script;
 }
