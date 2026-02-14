@@ -3100,74 +3100,48 @@ std::wstring BuildWebViewDocumentInjectionScript()
     )" : L"";
 
     std::wstring script = LR"((function() {
+        if (window.__fvCssInjected) {
+            return;
+        }
+        window.__fvCssInjected = true;
+
         const css = `
+            :root {
+                color-scheme: light !important;
+            }
             html, body {
-                background-color: rgb(255, 255, 255);
+                background-color: #ffffff !important;
+            }
+            @media (prefers-color-scheme: dark) {
+                html, body {
+                    background-color: #ffffff !important;
+                }
             }
     )";
     script += scrollbarCss;
     script += LR"(
         `;
 
-        const insertStyle = () => {
-            if (!document.getElementById('fv-webview-style')) {
-                const style = document.createElement('style');
-                style.id = 'fv-webview-style';
-                style.textContent = css;
-                (document.head || document.body || document.documentElement).appendChild(style);
-            }
-        };
+        const style = document.createElement('style');
+        style.id = 'fv-webview-style';
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
 
-        const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
-
-        const ensureWhiteBackground = () => {
+        const applyInlineBackground = () => {
             const html = document.documentElement;
-            const body = document.body;
-            if (!html) {
-                return;
-            }
-            const htmlBg = getComputedStyle(html).backgroundColor;
-            if (isTransparent(htmlBg)) {
+            if (html) {
                 html.style.setProperty('background-color', '#ffffff', 'important');
+                html.style.setProperty('color-scheme', 'light', 'important');
             }
-
+            const body = document.body;
             if (body) {
-                const bodyBg = getComputedStyle(body).backgroundColor;
-                if (isTransparent(bodyBg)) {
-                    body.style.setProperty('background-color', '#ffffff', 'important');
-                }
+                body.style.setProperty('background-color', '#ffffff', 'important');
             }
         };
 
-        const applyAll = () => {
-            insertStyle();
-            ensureWhiteBackground();
-        };
-
-        const startObserver = () => {
-            const root = document.documentElement;
-            if (!root || window.__fvBgObserver) {
-                return;
-            }
-            const observer = new MutationObserver(() => {
-                ensureWhiteBackground();
-            });
-            observer.observe(root, { attributes: true, childList: true, subtree: true });
-            window.__fvBgObserver = observer;
-        };
-
-        applyAll();
-        setTimeout(applyAll, 0);
-        requestAnimationFrame(applyAll);
-        window.addEventListener('load', applyAll, { once: true });
-
+        applyInlineBackground();
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', () => {
-                applyAll();
-                startObserver();
-            }, { once: true });
-        } else {
-            startObserver();
+            document.addEventListener('DOMContentLoaded', applyInlineBackground, { once: true });
         }
     })(); )";
     return script;
