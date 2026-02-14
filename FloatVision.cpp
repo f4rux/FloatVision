@@ -3117,32 +3117,24 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(
                                     LR"((() => {
-                                        const applyScrollbarStyle = () => {
-                                            const host = document.head || document.documentElement;
-                                            if (!host) {
-                                                return;
-                                            }
-                                            let style = document.getElementById('floatvision-webview-style');
-                                            if (!style) {
-                                                style = document.createElement('style');
-                                                style.id = 'floatvision-webview-style';
-                                                host.appendChild(style);
-                                            }
-                                            style.textContent = `
-                                                html { scrollbar-color: #5a5a5a #1f1f1f !important; }
-                                                html::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
-                                                html::-webkit-scrollbar-track { background: #1f1f1f !important; }
-                                                html::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
-                                                html::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
-                                                html::-webkit-scrollbar-corner { background: #1f1f1f !important; }
-                                            `;
-                                        };
-
-                                        if (document.readyState === 'loading') {
-                                            document.addEventListener('DOMContentLoaded', applyScrollbarStyle, { once: true });
-                                        } else {
-                                            applyScrollbarStyle();
+                                        const root = document.documentElement;
+                                        if (!root) {
+                                            return;
                                         }
+                                        let style = document.getElementById('floatvision-webview-style');
+                                        if (!style) {
+                                            style = document.createElement('style');
+                                            style.id = 'floatvision-webview-style';
+                                            root.appendChild(style);
+                                        }
+                                        style.textContent = `
+                                            html { scrollbar-color: #5a5a5a #1f1f1f !important; }
+                                            html::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
+                                            html::-webkit-scrollbar-track { background: #1f1f1f !important; }
+                                            html::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
+                                            html::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
+                                            html::-webkit-scrollbar-corner { background: #1f1f1f !important; }
+                                        `;
                                     })();)",
                                     nullptr);
                             }
