@@ -3103,27 +3103,32 @@ std::wstring BuildWebViewDocumentInjectionScript()
     const bool darkMode = IsDarkModeEnabled();
     const wchar_t* scrollbarCss = darkMode ? LR"(
             html::-webkit-scrollbar,
-            body::-webkit-scrollbar {
+            body::-webkit-scrollbar,
+            *::-webkit-scrollbar {
                 width: 14px;
                 height: 14px;
             }
             html::-webkit-scrollbar-track,
-            body::-webkit-scrollbar-track {
-                background: #1f1f1f;
+            body::-webkit-scrollbar-track,
+            *::-webkit-scrollbar-track {
+                background: #1f1f1f !important;
             }
             html::-webkit-scrollbar-thumb,
-            body::-webkit-scrollbar-thumb {
-                background-color: #5a5a5a;
-                border: 3px solid #1f1f1f;
+            body::-webkit-scrollbar-thumb,
+            *::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a !important;
+                border: 3px solid #1f1f1f !important;
                 border-radius: 8px;
             }
             html::-webkit-scrollbar-thumb:hover,
-            body::-webkit-scrollbar-thumb:hover {
-                background-color: #7a7a7a;
+            body::-webkit-scrollbar-thumb:hover,
+            *::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a !important;
             }
             html::-webkit-scrollbar-corner,
-            body::-webkit-scrollbar-corner {
-                background: #1f1f1f;
+            body::-webkit-scrollbar-corner,
+            *::-webkit-scrollbar-corner {
+                background: #1f1f1f !important;
             }
     )" : L"";
 
