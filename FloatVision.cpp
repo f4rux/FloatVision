@@ -418,6 +418,7 @@ void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
+void ReinforceWebViewWhiteBackground();
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
@@ -3185,6 +3186,38 @@ std::wstring BuildWebViewDocumentInjectionScript()
     return script;
 }
 
+void ReinforceWebViewWhiteBackground()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    constexpr wchar_t kForceWhiteScript[] = LR"((function() {
+        const apply = () => {
+            const html = document.documentElement;
+            if (html) {
+                html.style.setProperty('background-color', '#ffffff', 'important');
+            }
+            const body = document.body;
+            if (body) {
+                body.style.setProperty('background-color', '#ffffff', 'important');
+            }
+        };
+
+        apply();
+        if (!document.body && !window.__fvBgReinforcePending) {
+            window.__fvBgReinforcePending = true;
+            document.addEventListener('DOMContentLoaded', () => {
+                apply();
+                window.__fvBgReinforcePending = false;
+            }, { once: true });
+        }
+    })(); )";
+
+    g_webview->ExecuteScript(kForceWhiteScript, nullptr);
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -3207,6 +3240,7 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputState();
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
+        ReinforceWebViewWhiteBackground();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
@@ -3313,10 +3347,19 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(documentScript.c_str(), nullptr);
                             }
+                            g_webview->add_ContentLoading(
+                                Microsoft::WRL::Callback<ICoreWebView2ContentLoadingEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
+                                    {
+                                        ReinforceWebViewWhiteBackground();
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewContentLoadingToken);
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                     {
+                                        ReinforceWebViewWhiteBackground();
                                         if (g_webviewPendingShow)
                                         {
                                             ++g_webviewPendingNavigationCount;
@@ -3328,6 +3371,7 @@ bool EnsureWebView2(HWND hwnd)
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
+                                        ReinforceWebViewWhiteBackground();
                                         if (g_webviewController)
                                         {
                                             double zoom = 1.0;
