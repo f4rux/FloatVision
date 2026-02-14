@@ -414,6 +414,7 @@ bool BuildFileUri(const wchar_t* path, std::wstring& uri);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
+bool BuildHtmlDocumentForWebView(const wchar_t* sourcePath, const std::wstring& sourceHtml, std::wstring& decoratedHtml);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
@@ -2630,8 +2631,9 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_textScroll = 0.0f;
     g_fitToWindow = false;
     g_zoom = 1.0f;
-    std::wstring uri;
-    if (!BuildFileUri(path, uri))
+
+    std::string bytes;
+    if (!ReadFileBytes(path, bytes))
     {
         g_hasHtml = false;
         return false;
@@ -2640,8 +2642,9 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasHtml = true;
     g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
-    g_pendingHtmlUri = std::move(uri);
-    g_pendingHtmlIsUri = true;
+    g_pendingHtmlContent = std::move(decoratedHtml);
+    g_pendingHtmlUri.clear();
+    g_pendingHtmlIsUri = false;
     BeginPendingHtmlShowInternal(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
 
     ApplyTransparencyMode();
@@ -3076,13 +3079,19 @@ bool RetryPendingHtmlWithNavigateToStringInternal()
         return false;
     }
 
-    std::wstring content;
-    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    std::wstring sourceHtml;
+    if (!Utf8ToWide(bytes, sourceHtml) && !AnsiToWide(bytes, sourceHtml))
     {
         return false;
     }
 
-    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
+    std::wstring decoratedHtml;
+    if (!BuildHtmlDocumentForWebView(g_pendingHtmlFilePath.c_str(), sourceHtml, decoratedHtml))
+    {
+        return false;
+    }
+
+    return SUCCEEDED(g_webview->NavigateToString(decoratedHtml.c_str()));
 }
 
 void CompletePendingHtmlShowInternal(bool showWebView)
