@@ -3175,34 +3175,26 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(
                                     LR"((() => {
-                                        const styleId = 'floatvision-dark-scrollbar-style';
-                                        const ensureDarkScrollbarStyle = () => {
-                                            const root = document.documentElement;
-                                            if (!root) {
-                                                return;
-                                            }
-                                            let scrollbarStyle = document.getElementById(styleId);
-                                            if (!scrollbarStyle) {
-                                                scrollbarStyle = document.createElement('style');
-                                                scrollbarStyle.id = styleId;
-                                            }
-                                            scrollbarStyle.textContent = `
-                                                html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
-                                                ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
-                                                ::-webkit-scrollbar-track { background: #1f1f1f !important; }
-                                                ::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
-                                                ::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
-                                                ::-webkit-scrollbar-corner { background: #1f1f1f !important; }
-                                            `;
-                                            if (!scrollbarStyle.parentNode) {
-                                                root.appendChild(scrollbarStyle);
-                                            }
-                                        };
-                                        ensureDarkScrollbarStyle();
-                                        document.addEventListener('DOMContentLoaded', ensureDarkScrollbarStyle, { once: true });
-                                        window.addEventListener('load', ensureDarkScrollbarStyle, { once: true });
-                                        requestAnimationFrame(ensureDarkScrollbarStyle);
-                                        setTimeout(ensureDarkScrollbarStyle, 100);
+                                        const root = document.documentElement;
+                                        if (!root) {
+                                            return;
+                                        }
+                                        let scrollbarStyle = document.getElementById('floatvision-dark-scrollbar-style');
+                                        if (!scrollbarStyle) {
+                                            scrollbarStyle = document.createElement('style');
+                                            scrollbarStyle.id = 'floatvision-dark-scrollbar-style';
+                                        }
+                                        scrollbarStyle.textContent = `
+                                            html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
+                                            ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
+                                            ::-webkit-scrollbar-track { background: #1f1f1f !important; }
+                                            ::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
+                                            ::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
+                                            ::-webkit-scrollbar-corner { background: #1f1f1f !important; }
+                                        `;
+                                        if (!scrollbarStyle.parentNode) {
+                                            root.appendChild(scrollbarStyle);
+                                        }
                                     })();)",
                                     nullptr);
                             }
