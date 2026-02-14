@@ -1267,24 +1267,6 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
-                if (!g_webviewPendingTimeoutRetried && g_webview)
-                {
-                    HRESULT retryHr = E_FAIL;
-                    if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
-                    {
-                        retryHr = g_webview->Navigate(g_pendingHtmlUri.c_str());
-                    }
-                    else if (!g_pendingHtmlContent.empty())
-                    {
-                        retryHr = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                    }
-                    if (SUCCEEDED(retryHr))
-                    {
-                        g_webviewPendingTimeoutRetried = true;
-                        g_webviewPendingStartTick = now;
-                        return 0;
-                    }
-                }
                 CompletePendingHtmlShowInternal(true);
             }
             return 0;
@@ -3159,10 +3141,6 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
-                            g_webview->CallDevToolsProtocolMethod(
-                                L"Emulation.setEmulatedMedia",
-                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
-                                nullptr);
                             g_webview->AddScriptToExecuteOnDocumentCreated(
                                 LR"((() => {
                                     document.documentElement.style.setProperty('color-scheme', 'light', 'important');
@@ -3171,19 +3149,18 @@ bool EnsureWebView2(HWND hwnd)
                                     document.documentElement.appendChild(style);
                                 })();)",
                                 nullptr);
-                            if (IsDarkModeEnabled())
-                            {
-                                g_webview->AddScriptToExecuteOnDocumentCreated(
-                                    LR"((() => {
-                                        const root = document.documentElement;
-                                        if (!root) {
-                                            return;
-                                        }
-                                        let scrollbarStyle = document.getElementById('floatvision-dark-scrollbar-style');
-                                        if (!scrollbarStyle) {
-                                            scrollbarStyle = document.createElement('style');
-                                            scrollbarStyle.id = 'floatvision-dark-scrollbar-style';
-                                        }
+                            g_webview->AddScriptToExecuteOnDocumentCreated(
+                                LR"((() => {
+                                    const root = document.documentElement;
+                                    if (!root) {
+                                        return;
+                                    }
+                                    let scrollbarStyle = document.getElementById('floatvision-dark-scrollbar-style');
+                                    if (!scrollbarStyle) {
+                                        scrollbarStyle = document.createElement('style');
+                                        scrollbarStyle.id = 'floatvision-dark-scrollbar-style';
+                                    }
+                                    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
                                         scrollbarStyle.textContent = `
                                             html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
                                             ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
@@ -3195,9 +3172,11 @@ bool EnsureWebView2(HWND hwnd)
                                         if (!scrollbarStyle.parentNode) {
                                             root.appendChild(scrollbarStyle);
                                         }
-                                    })();)",
-                                    nullptr);
-                            }
+                                    } else if (scrollbarStyle.parentNode) {
+                                        scrollbarStyle.remove();
+                                    }
+                                })();)",
+                                nullptr);
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
