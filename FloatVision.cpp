@@ -425,6 +425,7 @@ bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 void InjectBaseStyleIntoCurrentHtml();
+void RegisterWebViewDocumentStyleScript();
 void BeginPendingHtmlShow(bool keepLayered);
 void CompletePendingHtmlShow(bool showWebView);
 void UpdateWebViewPendingTimeoutTimer();
@@ -3047,6 +3048,12 @@ void InjectBaseStyleIntoCurrentHtml()
             {
                 return S_OK;
             }).Get());
+}
+
+void RegisterWebViewDocumentStyleScript()
+{
+    // Legacy no-op compatibility hook.
+    // Kept to avoid build breaks if older call sites remain during cherry-picks.
 }
 
 void BeginPendingHtmlShow(bool keepLayered)
