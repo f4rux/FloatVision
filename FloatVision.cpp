@@ -101,6 +101,7 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
+EventRegistrationToken g_webviewContentLoadingToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
 {
@@ -2434,7 +2435,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     std::ostringstream style;
     style << R"(
         :root {
-            color-scheme: light dark;
+            color-scheme: light;
         }
         body {
             margin: 0;
@@ -3208,10 +3209,22 @@ bool EnsureWebView2(HWND hwnd)
                                             }
                                             CompletePendingHtmlShowInternal(true);
                                         }
-                                        return S_OK;
-                                    }).Get(),
-                                &g_webviewNavigationToken);
-                            if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                                        CompletePendingHtmlShowInternal(true);
+                                    }
+                                    return S_OK;
+                                }).Get(),
+                            &g_webviewNavigationToken);
+                        if (FAILED(navCompletedResult))
+                        {
+                            CompletePendingHtmlShowInternal(false);
+                            return navCompletedResult;
+                        }
+
+                        if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                        {
+                            BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
+                            const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
+                            if (FAILED(navigateResult))
                             {
                                 BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
@@ -3220,7 +3233,12 @@ bool EnsureWebView2(HWND hwnd)
                                     CompletePendingHtmlShowInternal(false);
                                 }
                             }
-                            else if (g_webview && !g_pendingHtmlContent.empty())
+                        }
+                        else if (!g_pendingHtmlContent.empty())
+                        {
+                            BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
+                            const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                            if (FAILED(navigateResult))
                             {
                                 BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
                                 const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
@@ -3229,9 +3247,16 @@ bool EnsureWebView2(HWND hwnd)
                                     CompletePendingHtmlShowInternal(false);
                                 }
                             }
-                            return S_OK;
-                        }).Get());
-            }).Get());
+                        }
+                        return S_OK;
+                    }).Get());
+        }).Get();
+
+    HRESULT hr = createEnv(
+        nullptr,
+        nullptr,
+        nullptr,
+        envCompletedHandler);
 
     if (FAILED(hr))
     {
@@ -3242,6 +3267,11 @@ bool EnsureWebView2(HWND hwnd)
 
 void CloseWebView()
 {
+    if (g_webview)
+    {
+        g_webview->remove_ContentLoading(g_webviewContentLoadingToken);
+        g_webviewContentLoadingToken = EventRegistrationToken{};
+    }
     if (g_webviewController)
     {
         g_webviewController->Close();
