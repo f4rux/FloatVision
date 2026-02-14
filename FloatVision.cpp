@@ -2433,14 +2433,19 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
         }
     }
 
+    const bool darkMode = IsDarkModeEnabled();
+
     std::string bodyBackground = toHex(g_textBackground);
     std::string bodyColor = toHex(g_textColor);
     const char* wrapValue = g_textWrap ? "normal" : "pre";
+    const char* colorScheme = darkMode ? "dark" : "light";
 
     std::ostringstream style;
     style << R"(
         :root {
-            color-scheme: light;
+            color-scheme: )"
+          << colorScheme
+          << R"(;
         }
         body {
             margin: 0;
