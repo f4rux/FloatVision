@@ -3104,13 +3104,21 @@ bool EnsureWebView2(HWND hwnd)
                             return result;
                         }
                         g_webviewController = controller;
-                        g_webviewController->get_CoreWebView2(&g_webview);
+
+                        HRESULT coreResult = g_webviewController->get_CoreWebView2(&g_webview);
+                        if (FAILED(coreResult) || !g_webview)
+                        {
+                            CompletePendingHtmlShowInternal(false);
+                            return FAILED(coreResult) ? coreResult : E_FAIL;
+                        }
+
                         g_webviewController.As(&g_webviewController2);
                         g_webviewController->put_IsVisible(g_webviewPendingShow ? FALSE : TRUE);
                         UpdateWebViewWindowHandle();
                         UpdateWebViewInputState();
                         UpdateWebViewInputTimer();
                         UpdateWebViewBounds();
+
                         if (IsDarkModeEnabled())
                         {
                             g_webview->AddScriptToExecuteOnDocumentCreated(
@@ -3142,7 +3150,8 @@ bool EnsureWebView2(HWND hwnd)
                                 })();)",
                                 nullptr);
                         }
-                        g_webview->add_NavigationStarting(
+
+                        HRESULT navStartResult = g_webview->add_NavigationStarting(
                             Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                 [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                 {
@@ -3153,9 +3162,15 @@ bool EnsureWebView2(HWND hwnd)
                                     return S_OK;
                                 }).Get(),
                             &g_webviewNavigationStartingToken);
-                        g_webview->add_NavigationCompleted(
+                        if (FAILED(navStartResult))
+                        {
+                            CompletePendingHtmlShowInternal(false);
+                            return navStartResult;
+                        }
+
+                        HRESULT navCompletedResult = g_webview->add_NavigationCompleted(
                             Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
+                                [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
                                 {
                                     if (g_webviewController)
                                     {
@@ -3180,7 +3195,13 @@ bool EnsureWebView2(HWND hwnd)
                                     return S_OK;
                                 }).Get(),
                             &g_webviewNavigationToken);
-                        if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
+                        if (FAILED(navCompletedResult))
+                        {
+                            CompletePendingHtmlShowInternal(false);
+                            return navCompletedResult;
+                        }
+
+                        if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                         {
                             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
                             const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
@@ -3189,7 +3210,7 @@ bool EnsureWebView2(HWND hwnd)
                                 CompletePendingHtmlShowInternal(false);
                             }
                         }
-                        else if (g_webview && !g_pendingHtmlContent.empty())
+                        else if (!g_pendingHtmlContent.empty())
                         {
                             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
                             const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
