@@ -3103,13 +3103,19 @@ std::wstring BuildWebViewDocumentInjectionScript()
         if (window.__fvCssInjected) {
             return;
         }
+        window.__fvCssInjected = true;
 
         const css = `
             :root {
-                color-scheme: light;
+                color-scheme: light !important;
             }
             html, body {
                 background-color: #ffffff !important;
+            }
+            @media (prefers-color-scheme: dark) {
+                html, body {
+                    background-color: #ffffff !important;
+                }
             }
     )";
     script += scrollbarCss;
@@ -3120,7 +3126,23 @@ std::wstring BuildWebViewDocumentInjectionScript()
         style.id = 'fv-webview-style';
         style.textContent = css;
         (document.head || document.documentElement).appendChild(style);
-        window.__fvCssInjected = true;
+
+        const applyInlineBackground = () => {
+            const html = document.documentElement;
+            if (html) {
+                html.style.setProperty('background-color', '#ffffff', 'important');
+                html.style.setProperty('color-scheme', 'light', 'important');
+            }
+            const body = document.body;
+            if (body) {
+                body.style.setProperty('background-color', '#ffffff', 'important');
+            }
+        };
+
+        applyInlineBackground();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', applyInlineBackground, { once: true });
+        }
     })(); )";
     return script;
 }
