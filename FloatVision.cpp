@@ -3064,6 +3064,59 @@ void CompletePendingHtmlShowInternal(bool showWebView)
 }
 #endif
 
+std::wstring BuildWebViewScrollbarInjectionScript()
+{
+    if (!IsDarkModeEnabled())
+    {
+        return L"";
+    }
+
+    return LR"((function() {
+        const css = `
+            html::-webkit-scrollbar,
+            body::-webkit-scrollbar {
+                width: 14px;
+                height: 14px;
+            }
+            html::-webkit-scrollbar-track,
+            body::-webkit-scrollbar-track {
+                background: #1f1f1f;
+            }
+            html::-webkit-scrollbar-thumb,
+            body::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a;
+                border: 3px solid #1f1f1f;
+                border-radius: 8px;
+            }
+            html::-webkit-scrollbar-thumb:hover,
+            body::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a;
+            }
+            html::-webkit-scrollbar-corner,
+            body::-webkit-scrollbar-corner {
+                background: #1f1f1f;
+            }
+        `;
+
+        const insertStyle = () => {
+            if (!document.getElementById('scrollbar-style')) {
+                const style = document.createElement('style');
+                style.id = 'scrollbar-style';
+                style.textContent = css;
+                (document.head || document.body || document.documentElement).appendChild(style);
+            }
+        };
+
+        insertStyle();
+        setTimeout(insertStyle, 0);
+        requestAnimationFrame(insertStyle);
+
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', insertStyle);
+        }
+    })(); )";
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -3131,11 +3184,17 @@ bool EnsureWebView2(HWND hwnd)
         return false;
     }
 
+    auto options = Microsoft::WRL::Make<CoreWebView2EnvironmentOptions>();
+    if (options)
+    {
+        options->put_AdditionalBrowserArguments(L"--disable-features=OverlayScrollbar");
+    }
+
     g_webviewCreationInProgress = true;
     HRESULT hr = createEnv(
         nullptr,
         nullptr,
-        nullptr,
+        options.Get(),
         Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler>(
             [hwnd](HRESULT result, ICoreWebView2Environment* env) -> HRESULT
             {
@@ -3164,6 +3223,11 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            std::wstring scrollbarScript = BuildWebViewScrollbarInjectionScript();
+                            if (!scrollbarScript.empty())
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(scrollbarScript.c_str(), nullptr);
+                            }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
@@ -5136,20 +5200,6 @@ void Render(HWND hwnd)
 {
     if (g_hasHtml)
     {
-        if (g_webviewPendingShow)
-        {
-            HDC hdc = GetDC(hwnd);
-            if (hdc)
-            {
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, RGB(90, 90, 90));
-                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                ReleaseDC(hwnd, hdc);
-            }
-        }
         UpdateWebViewBounds();
         return;
     }
