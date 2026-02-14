@@ -3155,7 +3155,6 @@ bool EnsureWebView2(HWND hwnd)
                                             style.id = 'floatvision-webview-style';
                                         }
                                         style.textContent = `
-                                            :root { color-scheme: only light !important; }
                                             html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
                                             ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
                                             ::-webkit-scrollbar-track { background: #1f1f1f !important; }
@@ -3166,28 +3165,6 @@ bool EnsureWebView2(HWND hwnd)
                                         if (!style.parentNode) {
                                             root.appendChild(style);
                                         }
-                                        root.style.setProperty('color-scheme', 'only light', 'important');
-                                    })();)",
-                                    nullptr);
-                            }
-                            else
-                            {
-                                g_webview->AddScriptToExecuteOnDocumentCreated(
-                                    LR"((() => {
-                                        const root = document.documentElement;
-                                        if (!root) {
-                                            return;
-                                        }
-                                        let style = document.getElementById('floatvision-webview-style');
-                                        if (!style) {
-                                            style = document.createElement('style');
-                                            style.id = 'floatvision-webview-style';
-                                        }
-                                        style.textContent = ':root { color-scheme: only light !important; }';
-                                        if (!style.parentNode) {
-                                            root.appendChild(style);
-                                        }
-                                        root.style.setProperty('color-scheme', 'only light', 'important');
                                     })();)",
                                     nullptr);
                             }
