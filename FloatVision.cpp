@@ -3141,10 +3141,6 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
-                            g_webview->CallDevToolsProtocolMethod(
-                                L"Emulation.setEmulatedMedia",
-                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
-                                nullptr);
                             if (IsDarkModeEnabled())
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(
@@ -3159,7 +3155,7 @@ bool EnsureWebView2(HWND hwnd)
                                             style.id = 'floatvision-webview-style';
                                         }
                                         style.textContent = `
-                                            :root { color-scheme: light !important; }
+                                            :root { color-scheme: only light !important; }
                                             html, body { scrollbar-color: #5a5a5a #1f1f1f !important; }
                                             ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
                                             ::-webkit-scrollbar-track { background: #1f1f1f !important; }
@@ -3170,7 +3166,7 @@ bool EnsureWebView2(HWND hwnd)
                                         if (!style.parentNode) {
                                             root.appendChild(style);
                                         }
-                                        root.style.setProperty('color-scheme', 'light', 'important');
+                                        root.style.setProperty('color-scheme', 'only light', 'important');
                                     })();)",
                                     nullptr);
                             }
@@ -3187,11 +3183,11 @@ bool EnsureWebView2(HWND hwnd)
                                             style = document.createElement('style');
                                             style.id = 'floatvision-webview-style';
                                         }
-                                        style.textContent = ':root { color-scheme: light !important; }';
+                                        style.textContent = ':root { color-scheme: only light !important; }';
                                         if (!style.parentNode) {
                                             root.appendChild(style);
                                         }
-                                        root.style.setProperty('color-scheme', 'light', 'important');
+                                        root.style.setProperty('color-scheme', 'only light', 'important');
                                     })();)",
                                     nullptr);
                             }
