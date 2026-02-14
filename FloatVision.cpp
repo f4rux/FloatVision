@@ -3100,9 +3100,14 @@ std::wstring BuildWebViewDocumentInjectionScript()
     )" : L"";
 
     std::wstring script = LR"((function() {
+        if (window.__fvBgInit) {
+            return;
+        }
+        window.__fvBgInit = true;
+
         const css = `
             html, body {
-                background-color: rgb(255, 255, 255);
+                background-color: #ffffff !important;
             }
     )";
     script += scrollbarCss;
@@ -3119,6 +3124,7 @@ std::wstring BuildWebViewDocumentInjectionScript()
         };
 
         const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
+        const isWhite = (value) => value === 'rgb(255, 255, 255)' || value === '#ffffff';
 
         const ensureWhiteBackground = () => {
             const html = document.documentElement;
@@ -3127,13 +3133,13 @@ std::wstring BuildWebViewDocumentInjectionScript()
                 return;
             }
             const htmlBg = getComputedStyle(html).backgroundColor;
-            if (isTransparent(htmlBg)) {
+            if (isTransparent(htmlBg) || !isWhite(htmlBg)) {
                 html.style.setProperty('background-color', '#ffffff', 'important');
             }
 
             if (body) {
                 const bodyBg = getComputedStyle(body).backgroundColor;
-                if (isTransparent(bodyBg)) {
+                if (isTransparent(bodyBg) || !isWhite(bodyBg)) {
                     body.style.setProperty('background-color', '#ffffff', 'important');
                 }
             }
@@ -3157,8 +3163,6 @@ std::wstring BuildWebViewDocumentInjectionScript()
         };
 
         applyAll();
-        setTimeout(applyAll, 0);
-        requestAnimationFrame(applyAll);
         window.addEventListener('load', applyAll, { once: true });
 
         if (document.readyState === 'loading') {
