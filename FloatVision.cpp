@@ -362,7 +362,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 5000;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 1500;
 
 // =====================
 // 前方宣言
@@ -408,6 +408,7 @@ std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
 bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
+bool BuildFileUri(const wchar_t* path, std::wstring& uri);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
@@ -1733,6 +1734,63 @@ bool WideToUtf8(const std::wstring& text, std::string& bytes)
     return true;
 }
 
+bool BuildFileUri(const wchar_t* path, std::wstring& uri)
+{
+    uri.clear();
+    if (!path || !*path)
+    {
+        return false;
+    }
+
+    std::error_code pathError;
+    std::filesystem::path absolute = std::filesystem::absolute(std::filesystem::path(path), pathError);
+    std::wstring absolutePath = pathError ? std::filesystem::path(path).wstring() : absolute.wstring();
+    if (absolutePath.empty())
+    {
+        return false;
+    }
+
+    for (wchar_t& ch : absolutePath)
+    {
+        if (ch == L'\\')
+        {
+            ch = L'/';
+        }
+    }
+
+    std::string utf8Path;
+    if (!WideToUtf8(absolutePath, utf8Path))
+    {
+        return false;
+    }
+
+    auto isUnreserved = [](unsigned char ch)
+    {
+        return (ch >= 'A' && ch <= 'Z')
+            || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9')
+            || ch == '-' || ch == '.' || ch == '_' || ch == '~'
+            || ch == '/' || ch == ':';
+    };
+
+    std::ostringstream encoded;
+    encoded << "file:///";
+    encoded << std::uppercase << std::hex;
+    for (unsigned char ch : utf8Path)
+    {
+        if (isUnreserved(ch))
+        {
+            encoded << static_cast<char>(ch);
+        }
+        else
+        {
+            encoded << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
+        }
+    }
+
+    return Utf8ToWide(encoded.str(), uri);
+}
+
 bool UpdateIniValue(std::wstring& content, const std::wstring& section, const std::wstring& key, const std::wstring& value)
 {
     std::wstringstream stream(content);
@@ -2515,39 +2573,10 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_zoom = 1.0f;
     g_hasHtml = true;
 
-    std::error_code pathError;
-    std::filesystem::path absolute = std::filesystem::absolute(std::filesystem::path(path), pathError);
-    std::wstring absolutePath = pathError ? std::filesystem::path(path).wstring() : absolute.wstring();
-    std::wstring uri = L"file:///";
-    uri.reserve(absolutePath.size() + 16);
-    for (wchar_t ch : absolutePath)
+    std::wstring uri;
+    if (!BuildFileUri(path, uri))
     {
-        if (ch == L'\\')
-        {
-            uri.push_back(L'/');
-            continue;
-        }
-        if (ch == L' ')
-        {
-            uri += L"%20";
-            continue;
-        }
-        if (ch == L'#')
-        {
-            uri += L"%23";
-            continue;
-        }
-        if (ch == L'%')
-        {
-            uri += L"%25";
-            continue;
-        }
-        if (ch == L'?')
-        {
-            uri += L"%3F";
-            continue;
-        }
-        uri.push_back(ch);
+        return false;
     }
 
     g_pendingHtmlContent.clear();
