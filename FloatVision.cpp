@@ -2993,18 +2993,14 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 
 #ifndef FLOATVISION_PENDING_HTML_HELPERS_DEFINED
 #define FLOATVISION_PENDING_HTML_HELPERS_DEFINED
-void BeginPendingHtmlShowInternal(bool keepLayered)
+void BeginPendingHtmlShowInternal(bool /*keepLayered*/)
 {
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
-    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_keepLayeredWhileHtmlPending = false;
     g_webviewPendingStartTick = GetTickCount64();
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     UpdateWebViewPendingTimeoutTimer();
 }
 
@@ -3163,10 +3159,6 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
-                            g_webview->CallDevToolsProtocolMethod(
-                                L"Emulation.setEmulatedMedia",
-                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
-                                nullptr);
                             g_webview->AddScriptToExecuteOnDocumentCreated(
                                 LR"((() => {
                                     document.documentElement.style.setProperty('color-scheme', 'light', 'important');
@@ -3181,6 +3173,7 @@ bool EnsureWebView2(HWND hwnd)
                                     LR"((() => {
                                         const scrollbarStyle = document.createElement('style');
                                         scrollbarStyle.textContent = `
+                                            html { scrollbar-color: #5a5a5a #1f1f1f; }
                                             ::-webkit-scrollbar { width: 14px; height: 14px; }
                                             ::-webkit-scrollbar-track { background: #1f1f1f; }
                                             ::-webkit-scrollbar-thumb { background: #5a5a5a; border-radius: 8px; border: 3px solid #1f1f1f; }
