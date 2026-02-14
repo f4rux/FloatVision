@@ -3093,21 +3093,21 @@ bool EnsureWebView2(HWND hwnd)
                                         }
                                         if (g_webviewPendingShow)
                                         {
-                                            if (g_webviewPendingNavigationCount <= 0)
-                                            {
-                                                return S_OK;
-                                            }
-                                            --g_webviewPendingNavigationCount;
                                             if (g_webviewPendingNavigationCount > 0)
                                             {
-                                                return S_OK;
+                                                --g_webviewPendingNavigationCount;
+                                                if (g_webviewPendingNavigationCount > 0)
+                                                {
+                                                    return S_OK;
+                                                }
                                             }
                                             BOOL isSuccess = TRUE;
                                             if (args)
                                             {
                                                 args->get_IsSuccess(&isSuccess);
                                             }
-                                            CompletePendingHtmlShow(isSuccess == TRUE);
+                                            (void)isSuccess;
+                                            CompletePendingHtmlShow(true);
                                         }
                                         return S_OK;
                                     }).Get(),
