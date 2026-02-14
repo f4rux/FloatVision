@@ -92,6 +92,7 @@ bool g_pendingHtmlIsUri = false;
 bool g_pendingInjectBaseStyle = false;
 bool g_webviewPendingShow = false;
 int g_webviewPendingNavigationCount = 0;
+bool g_webviewCreationInProgress = false;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
@@ -3012,6 +3013,12 @@ bool EnsureWebView2(HWND hwnd)
         return true;
     }
 
+
+    if (g_webviewCreationInProgress)
+    {
+        return true;
+    }
+
     if (!g_webviewLoader)
     {
         g_webviewLoader = LoadLibraryW(L"WebView2Loader.dll");
@@ -3033,6 +3040,7 @@ bool EnsureWebView2(HWND hwnd)
         return false;
     }
 
+    g_webviewCreationInProgress = true;
     HRESULT hr = createEnv(
         nullptr,
         nullptr,
@@ -3042,6 +3050,7 @@ bool EnsureWebView2(HWND hwnd)
             {
                 if (FAILED(result) || !env)
                 {
+                    g_webviewCreationInProgress = false;
                     CompletePendingHtmlShow(false);
                     return result;
                 }
@@ -3050,6 +3059,7 @@ bool EnsureWebView2(HWND hwnd)
                     Microsoft::WRL::Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
                         [](HRESULT result, ICoreWebView2Controller* controller) -> HRESULT
                         {
+                            g_webviewCreationInProgress = false;
                             if (FAILED(result) || !controller)
                             {
                                 CompletePendingHtmlShow(false);
@@ -3139,6 +3149,10 @@ bool EnsureWebView2(HWND hwnd)
                         }).Get());
             }).Get());
 
+    if (FAILED(hr))
+    {
+        g_webviewCreationInProgress = false;
+    }
     return SUCCEEDED(hr);
 }
 
@@ -3160,6 +3174,7 @@ void CloseWebView()
     g_pendingHtmlIsUri = false;
     g_pendingInjectBaseStyle = false;
     g_webviewPendingNavigationCount = 0;
+    g_webviewCreationInProgress = false;
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
