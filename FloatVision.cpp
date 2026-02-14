@@ -3145,60 +3145,31 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(
                                     LR"((() => {
-                                        const styleId = 'floatvision-webview-style';
-                                        const css = `
-                                            html, body, * { scrollbar-color: #5a5a5a #1f1f1f !important; }
-                                            ::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
-                                            ::-webkit-scrollbar-track { background: #1f1f1f !important; }
-                                            ::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
-                                            ::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
-                                            ::-webkit-scrollbar-corner { background: #1f1f1f !important; }
-                                        `;
-                                        const ensureStyle = () => {
+                                        const applyScrollbarStyle = () => {
                                             const host = document.head || document.documentElement;
                                             if (!host) {
                                                 return;
                                             }
-                                            let style = document.getElementById(styleId);
+                                            let style = document.getElementById('floatvision-webview-style');
                                             if (!style) {
                                                 style = document.createElement('style');
-                                                style.id = styleId;
-                                            }
-                                            if (style.textContent !== css) {
-                                                style.textContent = css;
-                                            }
-                                            if (style.parentNode !== host) {
+                                                style.id = 'floatvision-webview-style';
                                                 host.appendChild(style);
                                             }
-                                            else {
-                                                host.appendChild(style);
-                                            }
+                                            style.textContent = `
+                                                html { scrollbar-color: #5a5a5a #1f1f1f !important; }
+                                                html::-webkit-scrollbar { width: 14px !important; height: 14px !important; }
+                                                html::-webkit-scrollbar-track { background: #1f1f1f !important; }
+                                                html::-webkit-scrollbar-thumb { background: #5a5a5a !important; border-radius: 8px !important; border: 3px solid #1f1f1f !important; }
+                                                html::-webkit-scrollbar-thumb:hover { background: #767676 !important; }
+                                                html::-webkit-scrollbar-corner { background: #1f1f1f !important; }
+                                            `;
                                         };
 
-                                        let queued = false;
-                                        const scheduleEnsureStyle = () => {
-                                            if (queued) {
-                                                return;
-                                            }
-                                            queued = true;
-                                            requestAnimationFrame(() => {
-                                                queued = false;
-                                                ensureStyle();
-                                            });
-                                        };
-
-                                        ensureStyle();
-                                        document.addEventListener('DOMContentLoaded', ensureStyle);
-                                        window.addEventListener('load', ensureStyle);
-                                        setInterval(ensureStyle, 2000);
-                                        if (document.documentElement) {
-                                            const observer = new MutationObserver(scheduleEnsureStyle);
-                                            observer.observe(document.documentElement, {
-                                                childList: true,
-                                                subtree: true,
-                                                attributes: true,
-                                                characterData: true
-                                            });
+                                        if (document.readyState === 'loading') {
+                                            document.addEventListener('DOMContentLoaded', applyScrollbarStyle, { once: true });
+                                        } else {
+                                            applyScrollbarStyle();
                                         }
                                     })();)",
                                     nullptr);
