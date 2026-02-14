@@ -3082,9 +3082,8 @@ bool EnsureWebView2(HWND hwnd)
     }
 
     g_webviewCreationInProgress = true;
-    Microsoft::WRL::ComPtr<ICoreWebView2EnvironmentOptions> envOptions;
-    if (SUCCEEDED(CoCreateInstance(
-        CLSID_CoreWebView2EnvironmentOptions,
+
+    HRESULT hr = createEnv(
         nullptr,
         CLSCTX_INPROC_SERVER,
         IID_PPV_ARGS(&envOptions)))
