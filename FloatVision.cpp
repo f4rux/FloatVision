@@ -3175,7 +3175,7 @@ bool EnsureWebView2(HWND hwnd)
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationStartingToken);
-                            g_webview->add_NavigationCompleted(
+                            HRESULT navCompletedResult = g_webview->add_NavigationCompleted(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
@@ -3209,11 +3209,9 @@ bool EnsureWebView2(HWND hwnd)
                                             }
                                             CompletePendingHtmlShowInternal(true);
                                         }
-                                        CompletePendingHtmlShowInternal(true);
-                                    }
-                                    return S_OK;
-                                }).Get(),
-                            &g_webviewNavigationToken);
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewNavigationToken);
                         if (FAILED(navCompletedResult))
                         {
                             CompletePendingHtmlShowInternal(false);
@@ -3251,12 +3249,6 @@ bool EnsureWebView2(HWND hwnd)
                         return S_OK;
                     }).Get());
         }).Get();
-
-    HRESULT hr = createEnv(
-        nullptr,
-        nullptr,
-        nullptr,
-        envCompletedHandler);
 
     if (FAILED(hr))
     {
