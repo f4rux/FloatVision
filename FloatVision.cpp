@@ -2434,7 +2434,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     std::ostringstream style;
     style << R"(
         :root {
-            color-scheme: light dark;
+            color-scheme: light;
         }
         body {
             margin: 0;
@@ -2993,18 +2993,14 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 
 #ifndef FLOATVISION_PENDING_HTML_HELPERS_DEFINED
 #define FLOATVISION_PENDING_HTML_HELPERS_DEFINED
-void BeginPendingHtmlShowInternal(bool keepLayered)
+void BeginPendingHtmlShowInternal(bool /*keepLayered*/)
 {
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
-    g_keepLayeredWhileHtmlPending = keepLayered;
+    g_keepLayeredWhileHtmlPending = false;
     g_webviewPendingStartTick = GetTickCount64();
-    if (g_webviewController)
-    {
-        g_webviewController->put_IsVisible(FALSE);
-    }
     UpdateWebViewPendingTimeoutTimer();
 }
 
@@ -3163,6 +3159,35 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            g_webview->CallDevToolsProtocolMethod(
+                                L"Emulation.setEmulatedMedia",
+                                LR"({"features":[{"name":"prefers-color-scheme","value":"light"}]})",
+                                nullptr);
+                            g_webview->AddScriptToExecuteOnDocumentCreated(
+                                LR"((() => {
+                                    document.documentElement.style.setProperty('color-scheme', 'light', 'important');
+                                    const style = document.createElement('style');
+                                    style.textContent = ':root { color-scheme: light !important; }';
+                                    document.documentElement.appendChild(style);
+                                })();)",
+                                nullptr);
+                            if (IsDarkModeEnabled())
+                            {
+                                g_webview->AddScriptToExecuteOnDocumentCreated(
+                                    LR"((() => {
+                                        const scrollbarStyle = document.createElement('style');
+                                        scrollbarStyle.textContent = `
+                                            html { scrollbar-color: #5a5a5a #1f1f1f; }
+                                            ::-webkit-scrollbar { width: 14px; height: 14px; }
+                                            ::-webkit-scrollbar-track { background: #1f1f1f; }
+                                            ::-webkit-scrollbar-thumb { background: #5a5a5a; border-radius: 8px; border: 3px solid #1f1f1f; }
+                                            ::-webkit-scrollbar-thumb:hover { background: #767676; }
+                                            ::-webkit-scrollbar-corner { background: #1f1f1f; }
+                                        `;
+                                        document.documentElement.appendChild(scrollbarStyle);
+                                    })();)",
+                                    nullptr);
+                            }
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
@@ -5114,20 +5139,6 @@ void Render(HWND hwnd)
 {
     if (g_hasHtml)
     {
-        if (g_webviewPendingShow)
-        {
-            HDC hdc = GetDC(hwnd);
-            if (hdc)
-            {
-                RECT rc{};
-                GetClientRect(hwnd, &rc);
-                FillRect(hdc, &rc, static_cast<HBRUSH>(GetStockObject(WHITE_BRUSH)));
-                SetBkMode(hdc, TRANSPARENT);
-                SetTextColor(hdc, RGB(90, 90, 90));
-                DrawTextW(hdc, L"Loading...", -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-                ReleaseDC(hwnd, hdc);
-            }
-        }
         UpdateWebViewBounds();
         return;
     }
