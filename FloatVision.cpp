@@ -413,6 +413,7 @@ bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
 void UpdateWebViewWindowHandle();
 void InjectBaseStyleIntoCurrentHtml();
+void CompletePendingHtmlShow(bool showWebView);
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -2941,6 +2942,26 @@ void InjectBaseStyleIntoCurrentHtml()
             }).Get());
 }
 
+void CompletePendingHtmlShow(bool showWebView)
+{
+    if (!g_webviewPendingShow)
+    {
+        return;
+    }
+
+    g_webviewPendingShow = false;
+    g_keepLayeredWhileHtmlPending = false;
+    ApplyTransparencyMode();
+    if (g_webviewController)
+    {
+        g_webviewController->put_IsVisible(showWebView ? TRUE : FALSE);
+    }
+    if (g_hwnd)
+    {
+        InvalidateRect(g_hwnd, nullptr, TRUE);
+    }
+}
+
 bool EnsureWebView2(HWND hwnd)
 {
     if (!hwnd)
@@ -2962,16 +2983,26 @@ bool EnsureWebView2(HWND hwnd)
         {
             g_webviewPendingShow = true;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->Navigate(g_pendingHtmlUri.c_str());
+            const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
             g_pendingHtmlUri.clear();
             g_pendingHtmlIsUri = false;
+            if (FAILED(navigateResult))
+            {
+                CompletePendingHtmlShow(true);
+                return false;
+            }
         }
         else if (!g_pendingHtmlContent.empty())
         {
             g_webviewPendingShow = true;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+            const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
             g_pendingHtmlContent.clear();
+            if (FAILED(navigateResult))
+            {
+                CompletePendingHtmlShow(true);
+                return false;
+            }
         }
         return true;
     }
@@ -3006,6 +3037,7 @@ bool EnsureWebView2(HWND hwnd)
             {
                 if (FAILED(result) || !env)
                 {
+                    CompletePendingHtmlShow(false);
                     return result;
                 }
                 return env->CreateCoreWebView2Controller(
@@ -3015,6 +3047,7 @@ bool EnsureWebView2(HWND hwnd)
                         {
                             if (FAILED(result) || !controller)
                             {
+                                CompletePendingHtmlShow(false);
                                 return result;
                             }
                             g_webviewController = controller;
@@ -3027,7 +3060,7 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewBounds();
                             g_webview->add_NavigationCompleted(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
                                         if (g_webviewController)
                                         {
@@ -3042,12 +3075,14 @@ bool EnsureWebView2(HWND hwnd)
                                             InjectBaseStyleIntoCurrentHtml();
                                             g_pendingInjectBaseStyle = false;
                                         }
-                                        if (g_webviewController && g_webviewPendingShow)
+                                        if (g_webviewPendingShow)
                                         {
-                                            g_webviewPendingShow = false;
-                                            g_keepLayeredWhileHtmlPending = false;
-                                            ApplyTransparencyMode();
-                                            g_webviewController->put_IsVisible(TRUE);
+                                            BOOL isSuccess = TRUE;
+                                            if (args)
+                                            {
+                                                args->get_IsSuccess(&isSuccess);
+                                            }
+                                            CompletePendingHtmlShow(isSuccess == TRUE);
                                         }
                                         return S_OK;
                                     }).Get(),
@@ -3055,15 +3090,23 @@ bool EnsureWebView2(HWND hwnd)
                             if (g_webview && g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                const HRESULT navigateResult = g_webview->Navigate(g_pendingHtmlUri.c_str());
                                 g_pendingHtmlUri.clear();
                                 g_pendingHtmlIsUri = false;
+                                if (FAILED(navigateResult))
+                                {
+                                    CompletePendingHtmlShow(false);
+                                }
                             }
                             else if (g_webview && !g_pendingHtmlContent.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
+                                const HRESULT navigateResult = g_webview->NavigateToString(g_pendingHtmlContent.c_str());
                                 g_pendingHtmlContent.clear();
+                                if (FAILED(navigateResult))
+                                {
+                                    CompletePendingHtmlShow(false);
+                                }
                             }
                             return S_OK;
                         }).Get());
