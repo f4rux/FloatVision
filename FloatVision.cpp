@@ -89,10 +89,8 @@ bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
 std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
-std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
 int g_webviewPendingNavigationCount = 0;
-bool g_pendingHtmlFallbackAttempted = false;
 bool g_webviewPendingTimeoutRetried = false;
 bool g_webviewCreationInProgress = false;
 bool g_webviewPendingTimerActive = false;
@@ -425,7 +423,6 @@ void UpdateWebViewWindowHandle();
 void BeginPendingHtmlShowInternal(bool keepLayered);
 void CompletePendingHtmlShowInternal(bool showWebView);
 void UpdateWebViewPendingTimeoutTimer();
-bool RetryPendingHtmlWithNavigateToStringInternal();
 bool EnsureWebView2(HWND hwnd);
 void UpdateWebViewBounds();
 void HideWebView();
@@ -2502,7 +2499,6 @@ bool ApplyHtmlContent(std::wstring html)
     g_fitToWindow = false;
     g_zoom = 1.0f;
     g_hasHtml = true;
-    g_pendingHtmlFilePath.clear();
     g_pendingHtmlContent = std::move(html);
     BeginPendingHtmlShowInternal(keepLayered);
     ApplyTransparencyMode();
@@ -2564,7 +2560,6 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_hasHtml = true;
 
     g_pendingHtmlContent.clear();
-    g_pendingHtmlFilePath = path;
     g_pendingHtmlUri = std::move(uri);
     g_pendingHtmlIsUri = true;
     BeginPendingHtmlShowInternal(g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent);
@@ -2979,35 +2974,12 @@ void BeginPendingHtmlShowInternal(bool /*keepLayered*/)
 {
     g_webviewPendingShow = true;
     g_webviewPendingNavigationCount = 0;
-    g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
     g_keepLayeredWhileHtmlPending = false;
     g_webviewPendingStartTick = GetTickCount64();
     UpdateWebViewPendingTimeoutTimer();
 }
 
-bool RetryPendingHtmlWithNavigateToStringInternal()
-{
-    if (!g_webview || g_pendingHtmlFilePath.empty() || g_pendingHtmlFallbackAttempted)
-    {
-        return false;
-    }
-
-    g_pendingHtmlFallbackAttempted = true;
-    std::string bytes;
-    if (!ReadFileBytes(g_pendingHtmlFilePath.c_str(), bytes))
-    {
-        return false;
-    }
-
-    std::wstring content;
-    if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
-    {
-        return false;
-    }
-
-    return SUCCEEDED(g_webview->NavigateToString(content.c_str()));
-}
 
 void CompletePendingHtmlShowInternal(bool showWebView)
 {
@@ -3207,16 +3179,6 @@ bool EnsureWebView2(HWND hwnd)
                                                     return S_OK;
                                                 }
                                             }
-                                            BOOL isSuccess = TRUE;
-                                            if (args)
-                                            {
-                                                args->get_IsSuccess(&isSuccess);
-                                            }
-                                            const bool retrySucceeded = RetryPendingHtmlWithNavigateToStringInternal();
-                                            if (isSuccess != TRUE && retrySucceeded)
-                                            {
-                                                return S_OK;
-                                            }
                                             CompletePendingHtmlShowInternal(true);
                                         }
                                         return S_OK;
@@ -3288,8 +3250,6 @@ void CloseWebView()
     g_webview.Reset();
     g_pendingHtmlUri.clear();
     g_pendingHtmlIsUri = false;
-    g_pendingHtmlFilePath.clear();
-    g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
     g_webviewPendingNavigationCount = 0;
     g_webviewCreationInProgress = false;
