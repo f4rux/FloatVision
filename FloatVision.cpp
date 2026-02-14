@@ -418,6 +418,7 @@ void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
+void ReinforceWebViewWhiteBackground();
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
@@ -2434,11 +2435,36 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     }
 
     const bool darkMode = IsDarkModeEnabled();
+    const char* markdownScrollbarCss = darkMode ? R"(
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+            width: 14px;
+            height: 14px;
+        }
+        html::-webkit-scrollbar-track,
+        body::-webkit-scrollbar-track {
+            background: #1f1f1f;
+        }
+        html::-webkit-scrollbar-thumb,
+        body::-webkit-scrollbar-thumb {
+            background-color: #5a5a5a;
+            border: 3px solid #1f1f1f;
+            border-radius: 8px;
+        }
+        html::-webkit-scrollbar-thumb:hover,
+        body::-webkit-scrollbar-thumb:hover {
+            background-color: #7a7a7a;
+        }
+        html::-webkit-scrollbar-corner,
+        body::-webkit-scrollbar-corner {
+            background: #1f1f1f;
+        }
+    )" : "";
 
     std::string bodyBackground = toHex(g_textBackground);
     std::string bodyColor = toHex(g_textColor);
     const char* wrapValue = g_textWrap ? "normal" : "pre";
-    const char* colorScheme = darkMode ? "dark" : "light";
+    const char* colorScheme = "light";
 
     std::ostringstream style;
     style << R"(
@@ -2495,6 +2521,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
             color: #57606a;
         }
     )";
+    style << markdownScrollbarCss;
 
     html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>";
     html += style.str();
@@ -3100,77 +3127,91 @@ std::wstring BuildWebViewDocumentInjectionScript()
     )" : L"";
 
     std::wstring script = LR"((function() {
+        if (window.__fvCssInjected) {
+            return;
+        }
+        window.__fvCssInjected = true;
+
         const css = `
             html, body {
-                background-color: rgb(255, 255, 255);
+                background-color: #ffffff !important;
             }
     )";
     script += scrollbarCss;
     script += LR"(
         `;
 
-        const insertStyle = () => {
-            if (!document.getElementById('fv-webview-style')) {
-                const style = document.createElement('style');
-                style.id = 'fv-webview-style';
-                style.textContent = css;
-                (document.head || document.body || document.documentElement).appendChild(style);
-            }
-        };
+        const style = document.createElement('style');
+        style.id = 'fv-webview-style';
+        style.textContent = css;
+        (document.head || document.documentElement).appendChild(style);
 
-        const isTransparent = (value) => value === 'rgba(0, 0, 0, 0)' || value === 'transparent';
-
-        const ensureWhiteBackground = () => {
+        const forceWhiteBackground = () => {
             const html = document.documentElement;
-            const body = document.body;
-            if (!html) {
-                return;
-            }
-            const htmlBg = getComputedStyle(html).backgroundColor;
-            if (isTransparent(htmlBg)) {
+            if (html) {
                 html.style.setProperty('background-color', '#ffffff', 'important');
             }
-
+            const body = document.body;
             if (body) {
-                const bodyBg = getComputedStyle(body).backgroundColor;
-                if (isTransparent(bodyBg)) {
-                    body.style.setProperty('background-color', '#ffffff', 'important');
-                }
+                body.style.setProperty('background-color', '#ffffff', 'important');
             }
         };
 
-        const applyAll = () => {
-            insertStyle();
-            ensureWhiteBackground();
-        };
-
-        const startObserver = () => {
-            const root = document.documentElement;
-            if (!root || window.__fvBgObserver) {
+        const ensureObserver = () => {
+            if (window.__fvBgObserver) {
                 return;
             }
-            const observer = new MutationObserver(() => {
-                ensureWhiteBackground();
-            });
-            observer.observe(root, { attributes: true, childList: true, subtree: true });
+            const root = document.documentElement;
+            if (!root) {
+                return;
+            }
+            const observer = new MutationObserver(forceWhiteBackground);
+            observer.observe(root, { attributes: true, attributeFilter: ['class', 'style'], childList: true, subtree: true });
             window.__fvBgObserver = observer;
         };
 
-        applyAll();
-        setTimeout(applyAll, 0);
-        requestAnimationFrame(applyAll);
-        window.addEventListener('load', applyAll, { once: true });
-
+        forceWhiteBackground();
+        ensureObserver();
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', () => {
-                applyAll();
-                startObserver();
+                forceWhiteBackground();
+                ensureObserver();
             }, { once: true });
-        } else {
-            startObserver();
         }
     })(); )";
     return script;
+}
+
+void ReinforceWebViewWhiteBackground()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    constexpr wchar_t kForceWhiteScript[] = LR"((function() {
+        const apply = () => {
+            const html = document.documentElement;
+            if (html) {
+                html.style.setProperty('background-color', '#ffffff', 'important');
+            }
+            const body = document.body;
+            if (body) {
+                body.style.setProperty('background-color', '#ffffff', 'important');
+            }
+        };
+
+        apply();
+        if (!document.body && !window.__fvBgReinforcePending) {
+            window.__fvBgReinforcePending = true;
+            document.addEventListener('DOMContentLoaded', () => {
+                apply();
+                window.__fvBgReinforcePending = false;
+            }, { once: true });
+        }
+    })(); )";
+
+    g_webview->ExecuteScript(kForceWhiteScript, nullptr);
 }
 
 bool EnsureWebView2(HWND hwnd)
@@ -3195,6 +3236,7 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputState();
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
+        ReinforceWebViewWhiteBackground();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
@@ -3301,10 +3343,19 @@ bool EnsureWebView2(HWND hwnd)
                             {
                                 g_webview->AddScriptToExecuteOnDocumentCreated(documentScript.c_str(), nullptr);
                             }
+                            g_webview->add_ContentLoading(
+                                Microsoft::WRL::Callback<ICoreWebView2ContentLoadingEventHandler>(
+                                    [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
+                                    {
+                                        ReinforceWebViewWhiteBackground();
+                                        return S_OK;
+                                    }).Get(),
+                                &g_webviewContentLoadingToken);
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                     {
+                                        ReinforceWebViewWhiteBackground();
                                         if (g_webviewPendingShow)
                                         {
                                             ++g_webviewPendingNavigationCount;
@@ -3316,6 +3367,7 @@ bool EnsureWebView2(HWND hwnd)
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationCompletedEventHandler>(
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
+                                        ReinforceWebViewWhiteBackground();
                                         if (g_webviewController)
                                         {
                                             double zoom = 1.0;
