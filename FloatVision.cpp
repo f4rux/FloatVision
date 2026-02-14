@@ -2433,6 +2433,33 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
         }
     }
 
+    const bool darkMode = IsDarkModeEnabled();
+    const char* markdownScrollbarCss = darkMode ? R"(
+        html::-webkit-scrollbar,
+        body::-webkit-scrollbar {
+            width: 14px;
+            height: 14px;
+        }
+        html::-webkit-scrollbar-track,
+        body::-webkit-scrollbar-track {
+            background: #1f1f1f;
+        }
+        html::-webkit-scrollbar-thumb,
+        body::-webkit-scrollbar-thumb {
+            background-color: #5a5a5a;
+            border: 3px solid #1f1f1f;
+            border-radius: 8px;
+        }
+        html::-webkit-scrollbar-thumb:hover,
+        body::-webkit-scrollbar-thumb:hover {
+            background-color: #7a7a7a;
+        }
+        html::-webkit-scrollbar-corner,
+        body::-webkit-scrollbar-corner {
+            background: #1f1f1f;
+        }
+    )" : "";
+
     std::string bodyBackground = toHex(g_textBackground);
     std::string bodyColor = toHex(g_textColor);
     const char* wrapValue = g_textWrap ? "normal" : "pre";
@@ -2493,6 +2520,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
             color: #57606a;
         }
     )";
+    style << markdownScrollbarCss;
 
     html = "<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>";
     html += style.str();
@@ -3120,7 +3148,7 @@ std::wstring BuildWebViewDocumentInjectionScript()
         style.textContent = css;
         (document.head || document.documentElement).appendChild(style);
 
-        const applyInlineBackground = () => {
+        const forceWhiteBackground = () => {
             const html = document.documentElement;
             if (html) {
                 html.style.setProperty('background-color', '#ffffff', 'important');
@@ -3132,9 +3160,26 @@ std::wstring BuildWebViewDocumentInjectionScript()
             }
         };
 
-        applyInlineBackground();
+        const ensureObserver = () => {
+            if (window.__fvBgObserver) {
+                return;
+            }
+            const root = document.documentElement;
+            if (!root) {
+                return;
+            }
+            const observer = new MutationObserver(forceWhiteBackground);
+            observer.observe(root, { attributes: true, attributeFilter: ['class', 'style'], childList: true, subtree: true });
+            window.__fvBgObserver = observer;
+        };
+
+        forceWhiteBackground();
+        ensureObserver();
         if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', applyInlineBackground, { once: true });
+            document.addEventListener('DOMContentLoaded', () => {
+                forceWhiteBackground();
+                ensureObserver();
+            }, { once: true });
         }
     })(); )";
     return script;
