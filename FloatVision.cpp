@@ -99,6 +99,7 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
+EventRegistrationToken g_webviewContentLoadingToken{};
 bool g_webviewInputTimerActive = false;
 enum class HtmlInputKey
 {
@@ -3237,6 +3238,11 @@ bool EnsureWebView2(HWND hwnd)
 
 void CloseWebView()
 {
+    if (g_webview)
+    {
+        g_webview->remove_ContentLoading(g_webviewContentLoadingToken);
+        g_webviewContentLoadingToken = EventRegistrationToken{};
+    }
     if (g_webviewController)
     {
         g_webviewController->Close();
