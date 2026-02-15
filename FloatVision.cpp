@@ -365,7 +365,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 500;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 3000;
 
 // =====================
 // 前方宣言
@@ -1284,6 +1284,14 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
+                // WebView生成中やWebView未作成の段階でタイムアウト判定すると、
+                // pending状態を誤って解除して初回HTML表示が消えることがある。
+                if (g_webviewCreationInProgress || !g_webview)
+                {
+                    g_webviewPendingStartTick = now;
+                    return 0;
+                }
+
                 if (!g_webviewPendingTimeoutRetried && g_webview)
                 {
                     HRESULT retryHr = E_FAIL;
