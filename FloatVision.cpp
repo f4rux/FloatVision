@@ -2296,8 +2296,7 @@ body {
     background: #ffffff !important;
     margin: 0;
     min-height: 100%;
-    overflow: auto;
-    scrollbar-gutter: stable;
+    overflow: visible;
 }
 </style>)";
     std::wstring lowered = html;
@@ -2389,6 +2388,7 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
             white-space: )"
           << wrapValue
           << R"(;
+            overflow: visible;
         }
         .markdown-body {
             max-width: 960px;
