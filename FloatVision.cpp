@@ -3135,59 +3135,98 @@ std::wstring BuildWebViewDocumentInjectionScript()
                 color-scheme: light !important;
             }
             html::-webkit-scrollbar,
-            body::-webkit-scrollbar {
-                width: 14px;
-                height: 14px;
+            body::-webkit-scrollbar,
+            *::-webkit-scrollbar {
+                width: 14px !important;
+                height: 14px !important;
             }
             html::-webkit-scrollbar-track,
-            body::-webkit-scrollbar-track {
-                background: #1f1f1f;
+            body::-webkit-scrollbar-track,
+            *::-webkit-scrollbar-track {
+                background: #1f1f1f !important;
             }
             html::-webkit-scrollbar-thumb,
-            body::-webkit-scrollbar-thumb {
-                background-color: #5a5a5a;
-                border: 3px solid #1f1f1f;
-                border-radius: 8px;
+            body::-webkit-scrollbar-thumb,
+            *::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a !important;
+                border: 3px solid #1f1f1f !important;
+                border-radius: 8px !important;
             }
             html::-webkit-scrollbar-thumb:hover,
-            body::-webkit-scrollbar-thumb:hover {
-                background-color: #7a7a7a;
+            body::-webkit-scrollbar-thumb:hover,
+            *::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a !important;
             }
             html::-webkit-scrollbar-corner,
-            body::-webkit-scrollbar-corner {
-                background: #1f1f1f;
+            body::-webkit-scrollbar-corner,
+            *::-webkit-scrollbar-corner {
+                background: #1f1f1f !important;
             }
         `;
 
         const ensureStyle = () => {
             const root = document.documentElement;
-            if (!root || document.getElementById(styleId)) {
+            if (!root) {
                 return;
             }
 
-            const style = document.createElement('style');
-            style.id = styleId;
-            style.textContent = styleText;
-
-            if (document.head) {
-                document.head.appendChild(style);
-                return;
+            let style = document.getElementById(styleId);
+            if (!(style instanceof HTMLStyleElement)) {
+                style = document.createElement('style');
+                style.id = styleId;
+            }
+            if (style.textContent !== styleText) {
+                style.textContent = styleText;
             }
 
-            const observer = new MutationObserver(() => {
-                if (!document.getElementById(styleId) && document.head) {
-                    document.head.appendChild(style);
-                    observer.disconnect();
-                }
+            const parent = document.head || root;
+            if (style.parentNode !== parent || parent.lastChild !== style) {
+                parent.appendChild(style);
+            }
+        };
+
+        const tryStartObservers = () => {
+            const root = document.documentElement;
+            if (!root) {
+                return false;
+            }
+
+            const domObserver = new MutationObserver(() => {
+                ensureStyle();
             });
-            observer.observe(root, {
+            domObserver.observe(root, {
                 childList: true,
                 subtree: true
             });
+
+            if (document.head) {
+                const headObserver = new MutationObserver(() => {
+                    ensureStyle();
+                });
+                headObserver.observe(document.head, {
+                    childList: true
+                });
+            }
+            return true;
         };
 
         ensureStyle();
+        if (!tryStartObservers()) {
+            const rootWaitObserver = new MutationObserver(() => {
+                ensureStyle();
+                if (tryStartObservers()) {
+                    rootWaitObserver.disconnect();
+                }
+            });
+            rootWaitObserver.observe(document, {
+                childList: true,
+                subtree: true
+            });
+        }
+
+        document.addEventListener('readystatechange', ensureStyle);
         document.addEventListener('DOMContentLoaded', ensureStyle, { once: true });
+        window.addEventListener('load', ensureStyle, { once: true });
     })(); )JS";
 }
 
