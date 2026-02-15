@@ -70,7 +70,10 @@ bool g_imageHasAlpha = false;
 float g_zoom = 1.0f;
 bool g_fitToWindow = true;
 bool g_isEdgeDragging = false;
+bool g_isWindowDragging = false;
 POINT g_dragStartPoint{};
+POINT g_windowDragStartCursor{};
+POINT g_windowDragStartPos{};
 float g_dragStartZoom = 1.0f;
 float g_dragStartScale = 1.0f;
 float g_dragStartWidth = 0.0f;
@@ -382,6 +385,7 @@ void LoadSettings();
 void SaveSettings();
 void ApplyAlwaysOnTop();
 void LoadWindowPlacement();
+
 void SaveWindowPlacement();
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
@@ -1023,8 +1027,19 @@ LRESULT CALLBACK WndProc(
             SetCapture(hwnd);
             return 0;
         }
-        ReleaseCapture();
-        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, lParam);
+        POINT cursor{};
+        if (GetCursorPos(&cursor))
+        {
+            RECT windowRect{};
+            if (GetWindowRect(hwnd, &windowRect))
+            {
+                g_isWindowDragging = true;
+                g_windowDragStartCursor = cursor;
+                g_windowDragStartPos = POINT{ windowRect.left, windowRect.top };
+                SetCapture(hwnd);
+                return 0;
+            }
+        }
         return 0;
     }
 
@@ -1052,6 +1067,16 @@ LRESULT CALLBACK WndProc(
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
         }
+        else if (g_isWindowDragging && (wParam & MK_LBUTTON))
+        {
+            POINT cursor{};
+            if (GetCursorPos(&cursor))
+            {
+                int nextX = g_windowDragStartPos.x + (cursor.x - g_windowDragStartCursor.x);
+                int nextY = g_windowDragStartPos.y + (cursor.y - g_windowDragStartCursor.y);
+                SetWindowPos(hwnd, nullptr, nextX, nextY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
         else
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -1066,9 +1091,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONUP:
     {
-        if (g_isEdgeDragging)
+        if (g_isEdgeDragging || g_isWindowDragging)
         {
             g_isEdgeDragging = false;
+            g_isWindowDragging = false;
             ReleaseCapture();
         }
         return 0;
@@ -1709,6 +1735,34 @@ bool WideToUtf8(const std::wstring& text, std::string& bytes)
     return true;
 }
 
+bool TryReadIniValueUtf8Aware(const std::filesystem::path& path, const std::wstring& section, const std::wstring& key, std::wstring& value)
+{
+    std::string bytes;
+    if (!ReadFileBytesRaw(path.c_str(), bytes) || bytes.empty())
+    {
+        return false;
+    }
+
+    std::wstring content;
+    if (bytes.size() >= 3
+        && static_cast<unsigned char>(bytes[0]) == 0xEF
+        && static_cast<unsigned char>(bytes[1]) == 0xBB
+        && static_cast<unsigned char>(bytes[2]) == 0xBF)
+    {
+        bytes.erase(0, 3);
+        if (!Utf8ToWide(bytes, content))
+        {
+            return false;
+        }
+    }
+    else if (!Utf8ToWide(bytes, content) && !AnsiToWide(bytes, content))
+    {
+        return false;
+    }
+
+    return TryGetIniValueFromContent(content, section, key, value);
+}
+
 bool UpdateIniValue(std::wstring& content, const std::wstring& section, const std::wstring& key, const std::wstring& value)
 {
     std::wstringstream stream(content);
@@ -1749,8 +1803,11 @@ bool UpdateIniValue(std::wstring& content, const std::wstring& section, const st
                 std::wstring foundKey = TrimString(line.substr(0, eqPos));
                 if (_wcsicmp(foundKey.c_str(), key.c_str()) == 0)
                 {
-                    lines.push_back(key + L"=" + value);
-                    keyWritten = true;
+                    if (!keyWritten)
+                    {
+                        lines.push_back(key + L"=" + value);
+                        keyWritten = true;
+                    }
                     continue;
                 }
             }
@@ -4808,17 +4865,29 @@ void LoadWindowPlacement()
         return;
     }
 
-    wchar_t buffer[32]{};
-    GetPrivateProfileStringW(L"Window", L"X", L"", buffer, 32, g_iniPath.c_str());
-    if (buffer[0] != L'\0')
+    std::wstring xValue;
+    if (!TryReadIniValueUtf8Aware(g_iniPath, L"Window", L"X", xValue))
     {
-        g_windowPos.x = _wtoi(buffer);
+        wchar_t buffer[32]{};
+        GetPrivateProfileStringW(L"Window", L"X", L"", buffer, 32, g_iniPath.c_str());
+        xValue = buffer;
+    }
+    if (!xValue.empty())
+    {
+        g_windowPos.x = _wtoi(xValue.c_str());
         g_hasSavedWindowPos = true;
     }
-    GetPrivateProfileStringW(L"Window", L"Y", L"", buffer, 32, g_iniPath.c_str());
-    if (buffer[0] != L'\0')
+
+    std::wstring yValue;
+    if (!TryReadIniValueUtf8Aware(g_iniPath, L"Window", L"Y", yValue))
     {
-        g_windowPos.y = _wtoi(buffer);
+        wchar_t buffer[32]{};
+        GetPrivateProfileStringW(L"Window", L"Y", L"", buffer, 32, g_iniPath.c_str());
+        yValue = buffer;
+    }
+    if (!yValue.empty())
+    {
+        g_windowPos.y = _wtoi(yValue.c_str());
         g_hasSavedWindowPos = true;
     }
 }
@@ -4836,14 +4905,14 @@ void SaveWindowPlacement()
         return;
     }
 
-    int saveX = (rect.left < 0) ? 0 : static_cast<int>(rect.left);
-    int saveY = (rect.top < 0) ? 0 : static_cast<int>(rect.top);
+    int saveX = static_cast<int>(rect.left);
+    int saveY = static_cast<int>(rect.top);
 
     wchar_t buffer[32]{};
     _snwprintf_s(buffer, _TRUNCATE, L"%d", saveX);
-    WritePrivateProfileStringW(L"Window", L"X", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"X", buffer);
     _snwprintf_s(buffer, _TRUNCATE, L"%d", saveY);
-    WritePrivateProfileStringW(L"Window", L"Y", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"Y", buffer);
 }
 
 void UpdateLayeredStyle(bool enable)
