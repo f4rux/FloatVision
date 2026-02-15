@@ -86,7 +86,8 @@ UINT g_textWindowWidth = 800;
 UINT g_textWindowHeight = 600;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
-std::wstring g_pendingHtmlContent;
+std::wstring g_pendingHtmlUri;
+std::filesystem::path g_pendingHtmlTempPath;
 bool g_webviewPendingShow = false;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
@@ -399,6 +400,9 @@ bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
+bool WriteHtmlToTempFile(const std::wstring& html, std::filesystem::path& htmlPath);
+bool BuildFileUriFromPath(const std::filesystem::path& path, std::wstring& uri);
+void CleanupPendingHtmlFile();
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
@@ -1481,7 +1485,8 @@ bool LoadImageFromFile(const wchar_t* path)
     g_hasText = false;
     g_textContent.clear();
     g_hasHtml = false;
-    g_pendingHtmlContent.clear();
+    g_pendingHtmlUri.clear();
+    CleanupPendingHtmlFile();
     g_webviewPendingShow = false;
     g_keepLayeredWhileHtmlPending = false;
     HideWebView();
@@ -2402,6 +2407,126 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     return true;
 }
 
+bool WriteHtmlToTempFile(const std::wstring& html, std::filesystem::path& htmlPath)
+{
+    std::string utf8;
+    if (!WideToUtf8(html, utf8))
+    {
+        return false;
+    }
+
+    wchar_t tempDir[MAX_PATH]{};
+    DWORD tempDirLen = GetTempPathW(static_cast<DWORD>(std::size(tempDir)), tempDir);
+    if (tempDirLen == 0 || tempDirLen >= std::size(tempDir))
+    {
+        return false;
+    }
+
+    wchar_t tempFile[MAX_PATH]{};
+    if (GetTempFileNameW(tempDir, L"FVH", 0, tempFile) == 0)
+    {
+        return false;
+    }
+
+    std::filesystem::path tempPath(tempFile);
+    htmlPath = tempPath;
+    htmlPath.replace_extension(L".html");
+    if (!MoveFileExW(tempPath.c_str(), htmlPath.c_str(), MOVEFILE_REPLACE_EXISTING))
+    {
+        std::error_code ec;
+        std::filesystem::remove(tempPath, ec);
+        return false;
+    }
+
+    std::ofstream file(htmlPath, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        std::error_code ec;
+        std::filesystem::remove(htmlPath, ec);
+        return false;
+    }
+    file.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
+    if (!file.good())
+    {
+        file.close();
+        std::error_code ec;
+        std::filesystem::remove(htmlPath, ec);
+        return false;
+    }
+    return true;
+}
+
+bool BuildFileUriFromPath(const std::filesystem::path& path, std::wstring& uri)
+{
+    std::error_code ec;
+    std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+    if (ec)
+    {
+        return false;
+    }
+
+    std::wstring widePath = absolutePath.wstring();
+    if (widePath.empty())
+    {
+        return false;
+    }
+
+    std::replace(widePath.begin(), widePath.end(), L'\\', L'/');
+
+    std::string utf8Path;
+    if (!WideToUtf8(widePath, utf8Path))
+    {
+        return false;
+    }
+
+    auto isUnreserved = [](unsigned char ch)
+    {
+        return (ch >= 'A' && ch <= 'Z')
+            || (ch >= 'a' && ch <= 'z')
+            || (ch >= '0' && ch <= '9')
+            || ch == '-' || ch == '.' || ch == '_' || ch == '~';
+    };
+
+    std::string encoded;
+    encoded.reserve(utf8Path.size() * 3);
+    const char* hex = "0123456789ABCDEF";
+    for (unsigned char ch : utf8Path)
+    {
+        if (isUnreserved(ch) || ch == '/' || ch == ':')
+        {
+            encoded.push_back(static_cast<char>(ch));
+        }
+        else
+        {
+            encoded.push_back('%');
+            encoded.push_back(hex[(ch >> 4) & 0x0F]);
+            encoded.push_back(hex[ch & 0x0F]);
+        }
+    }
+
+    std::string uriUtf8;
+    if (widePath.size() >= 2 && widePath[0] == L'/' && widePath[1] == L'/')
+    {
+        uriUtf8 = "file:" + encoded;
+    }
+    else
+    {
+        uriUtf8 = "file:///" + encoded;
+    }
+
+    return Utf8ToWide(uriUtf8, uri);
+}
+
+void CleanupPendingHtmlFile()
+{
+    if (!g_pendingHtmlTempPath.empty())
+    {
+        std::error_code ec;
+        std::filesystem::remove(g_pendingHtmlTempPath, ec);
+        g_pendingHtmlTempPath.clear();
+    }
+}
+
 bool ApplyHtmlContent(std::wstring html)
 {
     bool keepLayered = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
@@ -2429,7 +2554,25 @@ bool ApplyHtmlContent(std::wstring html)
     g_fitToWindow = false;
     g_zoom = 1.0f;
     g_hasHtml = true;
-    g_pendingHtmlContent = std::move(html);
+    CleanupPendingHtmlFile();
+
+    std::filesystem::path tempHtmlPath;
+    if (!WriteHtmlToTempFile(html, tempHtmlPath))
+    {
+        g_hasHtml = false;
+        g_keepLayeredWhileHtmlPending = false;
+        return false;
+    }
+
+    if (!BuildFileUriFromPath(tempHtmlPath, g_pendingHtmlUri))
+    {
+        std::error_code ec;
+        std::filesystem::remove(tempHtmlPath, ec);
+        g_hasHtml = false;
+        g_keepLayeredWhileHtmlPending = false;
+        return false;
+    }
+    g_pendingHtmlTempPath = std::move(tempHtmlPath);
     g_webviewPendingShow = true;
     g_keepLayeredWhileHtmlPending = keepLayered;
     if (g_webviewController)
@@ -2445,7 +2588,8 @@ bool ApplyHtmlContent(std::wstring html)
     if (!EnsureWebView2(g_hwnd))
     {
         g_hasHtml = false;
-        g_pendingHtmlContent.clear();
+        g_pendingHtmlUri.clear();
+        CleanupPendingHtmlFile();
         g_keepLayeredWhileHtmlPending = false;
         return false;
     }
@@ -2838,12 +2982,12 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputState();
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
-        if (!g_pendingHtmlContent.empty())
+        if (!g_pendingHtmlUri.empty())
         {
             g_webviewPendingShow = true;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-            g_pendingHtmlContent.clear();
+            g_webview->Navigate(g_pendingHtmlUri.c_str());
+            g_pendingHtmlUri.clear();
         }
         return true;
     }
@@ -2919,11 +3063,11 @@ bool EnsureWebView2(HWND hwnd)
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
-                            if (g_webview && !g_pendingHtmlContent.empty())
+                            if (g_webview && !g_pendingHtmlUri.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                g_pendingHtmlContent.clear();
+                                g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                g_pendingHtmlUri.clear();
                             }
                             return S_OK;
                         }).Get());
@@ -2948,6 +3092,8 @@ void CloseWebView()
     g_webview.Reset();
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
+    CleanupPendingHtmlFile();
+    g_pendingHtmlUri.clear();
     if (g_webviewLoader)
     {
         FreeLibrary(g_webviewLoader);
