@@ -2813,21 +2813,19 @@ bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
         return false;
     }
 
-    std::string utf8Bytes;
-    if (!WideToUtf8(html, utf8Bytes))
-    {
-        return false;
-    }
-
     std::ofstream output(g_webviewTempHtmlPath, std::ios::binary | std::ios::trunc);
     if (!output)
     {
         return false;
     }
 
-    static constexpr unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+    // Avoid UTF-16 -> UTF-8 conversion for large HTML writes.
+    // WebView can decode UTF-16LE content reliably via BOM.
+    static constexpr unsigned char bom[] = { 0xFF, 0xFE };
     output.write(reinterpret_cast<const char*>(bom), sizeof(bom));
-    output.write(utf8Bytes.data(), static_cast<std::streamsize>(utf8Bytes.size()));
+    output.write(
+        reinterpret_cast<const char*>(html.data()),
+        static_cast<std::streamsize>(html.size() * sizeof(wchar_t)));
     if (!output.good())
     {
         output.close();
