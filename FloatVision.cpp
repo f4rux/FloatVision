@@ -2433,29 +2433,49 @@ bool WriteHtmlToTempFile(const std::wstring& html, std::filesystem::path& htmlPa
     std::filesystem::path tempPath(tempFile);
     htmlPath = tempPath;
     htmlPath.replace_extension(L".html");
-    MoveFileExW(tempPath.c_str(), htmlPath.c_str(), MOVEFILE_REPLACE_EXISTING);
+    if (!MoveFileExW(tempPath.c_str(), htmlPath.c_str(), MOVEFILE_REPLACE_EXISTING))
+    {
+        std::error_code ec;
+        std::filesystem::remove(tempPath, ec);
+        return false;
+    }
 
     std::ofstream file(htmlPath, std::ios::binary | std::ios::trunc);
     if (!file)
     {
+        std::error_code ec;
+        std::filesystem::remove(htmlPath, ec);
         return false;
     }
     file.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
-    return file.good();
+    if (!file.good())
+    {
+        file.close();
+        std::error_code ec;
+        std::filesystem::remove(htmlPath, ec);
+        return false;
+    }
+    return true;
 }
 
 bool BuildFileUriFromPath(const std::filesystem::path& path, std::wstring& uri)
 {
-    DWORD needed = 0;
-    HRESULT hr = UrlCreateFromPathW(path.c_str(), nullptr, &needed, 0);
-    if (hr != S_FALSE || needed == 0)
+    std::error_code ec;
+    std::filesystem::path absolutePath = std::filesystem::absolute(path, ec);
+    if (ec)
     {
         return false;
     }
 
-    std::vector<wchar_t> buffer(needed + 1, L'\0');
-    hr = UrlCreateFromPathW(path.c_str(), buffer.data(), &needed, 0);
-    if (FAILED(hr))
+    DWORD bufferSize = 2048;
+    std::vector<wchar_t> buffer(bufferSize, L'\0');
+    HRESULT hr = UrlCreateFromPathW(absolutePath.c_str(), buffer.data(), &bufferSize, 0);
+    while (hr == E_POINTER)
+    {
+        buffer.assign(bufferSize + 1, L'\0');
+        hr = UrlCreateFromPathW(absolutePath.c_str(), buffer.data(), &bufferSize, 0);
+    }
+    if (FAILED(hr) || bufferSize == 0)
     {
         return false;
     }
