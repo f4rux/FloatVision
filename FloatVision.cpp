@@ -3164,12 +3164,7 @@ std::wstring BuildWebViewDocumentInjectionScript()
             }
         `;
 
-        const ensureStyle = () => {
-            const root = document.documentElement;
-            if (!root) {
-                return;
-            }
-
+        const getOrCreateStyle = () => {
             let style = document.getElementById(styleId);
             if (!(style instanceof HTMLStyleElement)) {
                 style = document.createElement('style');
@@ -3178,55 +3173,66 @@ std::wstring BuildWebViewDocumentInjectionScript()
             if (style.textContent !== styleText) {
                 style.textContent = styleText;
             }
-
-            const parent = document.head || root;
-            if (style.parentNode !== parent || parent.lastChild !== style) {
-                parent.appendChild(style);
-            }
+            return style;
         };
 
-        const tryStartObservers = () => {
+        const ensureStyle = () => {
             const root = document.documentElement;
             if (!root) {
-                return false;
+                return null;
             }
-
-            const domObserver = new MutationObserver(() => {
-                ensureStyle();
-            });
-            domObserver.observe(root, {
-                childList: true,
-                subtree: true
-            });
-
-            if (document.head) {
-                const headObserver = new MutationObserver(() => {
-                    ensureStyle();
-                });
-                headObserver.observe(document.head, {
-                    childList: true
-                });
+            const style = getOrCreateStyle();
+            const parent = document.head || root;
+            if (style.parentNode !== parent) {
+                parent.appendChild(style);
             }
-            return true;
+            return style;
         };
 
-        ensureStyle();
-        if (!tryStartObservers()) {
-            const rootWaitObserver = new MutationObserver(() => {
-                ensureStyle();
-                if (tryStartObservers()) {
-                    rootWaitObserver.disconnect();
+        let keepAliveObserver = null;
+        const observeStyleContainer = () => {
+            const style = ensureStyle();
+            if (!style) {
+                return;
+            }
+            const parent = style.parentNode;
+            if (!(parent instanceof Node)) {
+                return;
+            }
+            if (keepAliveObserver) {
+                keepAliveObserver.disconnect();
+            }
+            keepAliveObserver = new MutationObserver(() => {
+                if (!document.getElementById(styleId)) {
+                    ensureStyle();
                 }
             });
-            rootWaitObserver.observe(document, {
-                childList: true,
-                subtree: true
-            });
+            keepAliveObserver.observe(parent, { childList: true });
+        };
+
+        const waitForHeadObserver = new MutationObserver(() => {
+            if (document.head) {
+                ensureStyle();
+                waitForHeadObserver.disconnect();
+            }
+        });
+
+        const root = document.documentElement;
+        if (root && !document.head) {
+            waitForHeadObserver.observe(root, { childList: true });
         }
 
+        ensureStyle();
+        observeStyleContainer();
         document.addEventListener('readystatechange', ensureStyle);
-        document.addEventListener('DOMContentLoaded', ensureStyle, { once: true });
-        window.addEventListener('load', ensureStyle, { once: true });
+        document.addEventListener('DOMContentLoaded', () => {
+            ensureStyle();
+            observeStyleContainer();
+        }, { once: true });
+        window.addEventListener('load', () => {
+            ensureStyle();
+            observeStyleContainer();
+        }, { once: true });
     })(); )JS";
 }
 
