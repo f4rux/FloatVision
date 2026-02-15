@@ -70,7 +70,10 @@ bool g_imageHasAlpha = false;
 float g_zoom = 1.0f;
 bool g_fitToWindow = true;
 bool g_isEdgeDragging = false;
+bool g_isWindowDragging = false;
 POINT g_dragStartPoint{};
+POINT g_windowDragStartCursor{};
+POINT g_windowDragStartPos{};
 float g_dragStartZoom = 1.0f;
 float g_dragStartScale = 1.0f;
 float g_dragStartWidth = 0.0f;
@@ -1023,8 +1026,19 @@ LRESULT CALLBACK WndProc(
             SetCapture(hwnd);
             return 0;
         }
-        ReleaseCapture();
-        SendMessage(hwnd, WM_NCLBUTTONDOWN, HTCAPTION, lParam);
+        POINT cursor{};
+        if (GetCursorPos(&cursor))
+        {
+            RECT windowRect{};
+            if (GetWindowRect(hwnd, &windowRect))
+            {
+                g_isWindowDragging = true;
+                g_windowDragStartCursor = cursor;
+                g_windowDragStartPos = POINT{ windowRect.left, windowRect.top };
+                SetCapture(hwnd);
+                return 0;
+            }
+        }
         return 0;
     }
 
@@ -1052,6 +1066,16 @@ LRESULT CALLBACK WndProc(
                 InvalidateRect(hwnd, nullptr, TRUE);
             }
         }
+        else if (g_isWindowDragging && (wParam & MK_LBUTTON))
+        {
+            POINT cursor{};
+            if (GetCursorPos(&cursor))
+            {
+                int nextX = g_windowDragStartPos.x + (cursor.x - g_windowDragStartCursor.x);
+                int nextY = g_windowDragStartPos.y + (cursor.y - g_windowDragStartCursor.y);
+                SetWindowPos(hwnd, nullptr, nextX, nextY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
         else
         {
             POINT pt{ GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
@@ -1066,9 +1090,10 @@ LRESULT CALLBACK WndProc(
 
     case WM_LBUTTONUP:
     {
-        if (g_isEdgeDragging)
+        if (g_isEdgeDragging || g_isWindowDragging)
         {
             g_isEdgeDragging = false;
+            g_isWindowDragging = false;
             ReleaseCapture();
         }
         return 0;
@@ -1749,8 +1774,11 @@ bool UpdateIniValue(std::wstring& content, const std::wstring& section, const st
                 std::wstring foundKey = TrimString(line.substr(0, eqPos));
                 if (_wcsicmp(foundKey.c_str(), key.c_str()) == 0)
                 {
-                    lines.push_back(key + L"=" + value);
-                    keyWritten = true;
+                    if (!keyWritten)
+                    {
+                        lines.push_back(key + L"=" + value);
+                        keyWritten = true;
+                    }
                     continue;
                 }
             }
@@ -4836,14 +4864,14 @@ void SaveWindowPlacement()
         return;
     }
 
-    int saveX = (rect.left < 0) ? 0 : static_cast<int>(rect.left);
-    int saveY = (rect.top < 0) ? 0 : static_cast<int>(rect.top);
+    int saveX = static_cast<int>(rect.left);
+    int saveY = static_cast<int>(rect.top);
 
     wchar_t buffer[32]{};
     _snwprintf_s(buffer, _TRUNCATE, L"%d", saveX);
-    WritePrivateProfileStringW(L"Window", L"X", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"X", buffer);
     _snwprintf_s(buffer, _TRUNCATE, L"%d", saveY);
-    WritePrivateProfileStringW(L"Window", L"Y", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"Y", buffer);
 }
 
 void UpdateLayeredStyle(bool enable)
