@@ -420,6 +420,7 @@ void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
 void EnsureWebViewBackgroundWhite();
 void ApplyWebViewLightModePreference();
+void ResetWebViewZoomForNewDocument();
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
@@ -2579,6 +2580,7 @@ bool ApplyHtmlContent(std::wstring html)
     g_zoom = 1.0f;
     g_hasHtml = true;
     g_pendingHtmlFilePath.clear();
+    ResetWebViewZoomForNewDocument();
     g_pendingHtmlContent = std::move(html);
     BeginPendingHtmlShowInternal(keepLayered);
     ApplyTransparencyMode();
@@ -2632,14 +2634,8 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_fitToWindow = false;
     g_zoom = 1.0f;
 
-    std::string bytes;
-    if (!ReadFileBytes(path, bytes))
-    {
-        g_hasHtml = false;
-        return false;
-    }
-
     g_hasHtml = true;
+    ResetWebViewZoomForNewDocument();
     g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
     if (!BuildFileUri(path, g_pendingHtmlUri))
@@ -3033,6 +3029,15 @@ bool SetWebViewZoomFactor(double factor)
     return SUCCEEDED(hr);
 }
 
+void ResetWebViewZoomForNewDocument()
+{
+    g_htmlBaseZoomFactor = 1.0;
+    if (g_webviewController)
+    {
+        g_webviewController->put_ZoomFactor(1.0);
+    }
+}
+
 bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 {
     double current = 1.0;
@@ -3183,14 +3188,14 @@ std::wstring BuildWebViewDocumentInjectionScript()
             }
             const style = getOrCreateStyle();
             const parent = document.head || root;
-            if (style.parentNode !== parent) {
+            if (style.parentNode !== parent || parent.lastChild !== style) {
                 parent.appendChild(style);
             }
             return style;
         };
 
         let keepAliveObserver = null;
-        const observeStyleContainer = () => {
+        const refreshObservers = () => {
             const style = ensureStyle();
             if (!style) {
                 return;
@@ -3203,35 +3208,45 @@ std::wstring BuildWebViewDocumentInjectionScript()
                 keepAliveObserver.disconnect();
             }
             keepAliveObserver = new MutationObserver(() => {
-                if (!document.getElementById(styleId)) {
-                    ensureStyle();
-                }
+                ensureStyle();
             });
             keepAliveObserver.observe(parent, { childList: true });
         };
 
+        const waitForRootObserver = new MutationObserver(() => {
+            if (document.documentElement) {
+                ensureStyle();
+                refreshObservers();
+                waitForRootObserver.disconnect();
+            }
+        });
+
+        if (!document.documentElement) {
+            waitForRootObserver.observe(document, { childList: true });
+        }
+
         const waitForHeadObserver = new MutationObserver(() => {
             if (document.head) {
                 ensureStyle();
+                refreshObservers();
                 waitForHeadObserver.disconnect();
             }
         });
 
-        const root = document.documentElement;
-        if (root && !document.head) {
-            waitForHeadObserver.observe(root, { childList: true });
+        if (document.documentElement && !document.head) {
+            waitForHeadObserver.observe(document.documentElement, { childList: true });
         }
 
         ensureStyle();
-        observeStyleContainer();
+        refreshObservers();
         document.addEventListener('readystatechange', ensureStyle);
         document.addEventListener('DOMContentLoaded', () => {
             ensureStyle();
-            observeStyleContainer();
+            refreshObservers();
         }, { once: true });
         window.addEventListener('load', () => {
             ensureStyle();
-            observeStyleContainer();
+            refreshObservers();
         }, { once: true });
     })(); )JS";
 }
