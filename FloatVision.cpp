@@ -99,6 +99,7 @@ bool g_webviewCreationInProgress = false;
 bool g_webviewPendingTimerActive = false;
 ULONGLONG g_webviewPendingStartTick = 0;
 double g_htmlBaseZoomFactor = 1.0;
+double g_htmlContentZoom = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
@@ -426,6 +427,7 @@ bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
+void ApplyWebViewContentZoom();
 void UpdateWebViewWindowHandle();
 void BeginPendingHtmlShowInternal(bool keepLayered);
 void CompletePendingHtmlShowInternal(bool showWebView);
@@ -3009,33 +3011,53 @@ bool HandleHtmlOverlayKeyDown(WPARAM wParam)
 
 bool GetWebViewZoomFactor(double& factor)
 {
-    factor = 1.0;
-    if (!g_webviewController)
-    {
-        return false;
-    }
-
-    double value = 1.0;
-    HRESULT hr = g_webviewController->get_ZoomFactor(&value);
-    if (FAILED(hr) || value <= 0.0)
-    {
-        return false;
-    }
-
-    factor = value;
+    factor = g_htmlContentZoom > 0.0 ? g_htmlContentZoom : 1.0;
     return true;
+}
+
+void ApplyWebViewContentZoom()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    std::wostringstream script;
+    script << L"(() => {"
+           << L"const zoom=" << g_htmlContentZoom << L";"
+           << L"const root=document.documentElement;"
+           << L"if(!root){return;}"
+           << L"root.style.setProperty('--floatvision-content-zoom', String(zoom));"
+           << L"const styleId='floatvision-content-zoom-style';"
+           << L"let style=document.getElementById(styleId);"
+           << L"if(!(style instanceof HTMLStyleElement)){style=document.createElement('style');style.id=styleId;}"
+           << L"style.textContent='body{zoom:var(--floatvision-content-zoom,1) !important;}';"
+           << L"(document.head||root).appendChild(style);"
+           << L"})();";
+    ExecuteWebViewScript(script.str().c_str());
 }
 
 bool SetWebViewZoomFactor(double factor)
 {
-    if (!g_webviewController || factor <= 0.0)
+    if (factor <= 0.0)
     {
         return false;
     }
 
-    double clamped = (std::max)(0.1, (std::min)(factor, 5.0));
-    HRESULT hr = g_webviewController->put_ZoomFactor(clamped);
-    return SUCCEEDED(hr);
+    g_htmlContentZoom = (std::max)(0.1, (std::min)(factor, 5.0));
+    ApplyWebViewContentZoom();
+    return true;
+}
+
+void ResetWebViewZoomForNewDocument()
+{
+    g_htmlBaseZoomFactor = 1.0;
+    g_htmlContentZoom = 1.0;
+    if (g_webviewController)
+    {
+        g_webviewController->put_ZoomFactor(1.0);
+    }
+    ApplyWebViewContentZoom();
 }
 
 void ResetWebViewZoomForNewDocument()
@@ -3315,6 +3337,11 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewBounds();
         EnsureWebViewBackgroundWhite();
         ApplyWebViewLightModePreference();
+        if (g_webviewController)
+        {
+            g_webviewController->put_ZoomFactor(1.0);
+        }
+        ApplyWebViewContentZoom();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
@@ -3417,6 +3444,8 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
                             ApplyWebViewLightModePreference();
+                            g_webviewController->put_ZoomFactor(1.0);
+                            ApplyWebViewContentZoom();
                             std::wstring documentScript = BuildWebViewDocumentInjectionScript();
                             if (!documentScript.empty())
                             {
@@ -3428,6 +3457,7 @@ bool EnsureWebView2(HWND hwnd)
                                     {
                                         EnsureWebViewBackgroundWhite();
                                         ApplyWebViewLightModePreference();
+                                        ApplyWebViewContentZoom();
                                         if (g_webviewPendingShow)
                                         {
                                             if (args && g_webviewPendingNavigationIdValid)
@@ -3467,14 +3497,7 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
-                                        if (g_webviewController)
-                                        {
-                                            double zoom = 1.0;
-                                            if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoom)) && zoom > 0.0)
-                                            {
-                                                g_htmlBaseZoomFactor = zoom;
-                                            }
-                                        }
+                                        ApplyWebViewContentZoom();
                                         if (g_webviewPendingShow)
                                         {
                                             if (args && g_webviewPendingNavigationIdValid)
@@ -3575,6 +3598,7 @@ void CloseWebView()
     g_webviewCreationInProgress = false;
     g_webviewPendingStartTick = 0;
     g_htmlBaseZoomFactor = 1.0;
+    g_htmlContentZoom = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
