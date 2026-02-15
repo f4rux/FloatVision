@@ -91,13 +91,15 @@ std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
 std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
-int g_webviewPendingNavigationCount = 0;
+UINT64 g_webviewPendingNavigationId = 0;
+bool g_webviewPendingNavigationIdValid = false;
 bool g_pendingHtmlFallbackAttempted = false;
 bool g_webviewPendingTimeoutRetried = false;
 bool g_webviewCreationInProgress = false;
 bool g_webviewPendingTimerActive = false;
 ULONGLONG g_webviewPendingStartTick = 0;
 double g_htmlBaseZoomFactor = 1.0;
+double g_htmlContentZoom = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationStartingToken{};
 EventRegistrationToken g_webviewNavigationToken{};
@@ -365,7 +367,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 500;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 1200;
 
 // =====================
 // 前方宣言
@@ -419,10 +421,13 @@ WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
 void EnsureWebViewBackgroundWhite();
+void ApplyWebViewLightModePreference();
+void ResetWebViewZoomForNewDocument();
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
 bool SetWebViewZoomFactor(double factor);
+void ApplyWebViewContentZoom();
 void UpdateWebViewWindowHandle();
 void BeginPendingHtmlShowInternal(bool keepLayered);
 void CompletePendingHtmlShowInternal(bool showWebView);
@@ -1282,6 +1287,14 @@ LRESULT CALLBACK WndProc(
             }
             if (now - g_webviewPendingStartTick >= kWebViewPendingTimeoutMs)
             {
+                // WebView生成中やWebView未作成の段階でタイムアウト判定すると、
+                // pending状態を誤って解除して初回HTML表示が消えることがある。
+                if (g_webviewCreationInProgress || !g_webview)
+                {
+                    g_webviewPendingStartTick = now;
+                    return 0;
+                }
+
                 if (!g_webviewPendingTimeoutRetried && g_webview)
                 {
                     HRESULT retryHr = E_FAIL;
@@ -2578,6 +2591,7 @@ bool ApplyHtmlContent(std::wstring html)
     g_zoom = 1.0f;
     g_hasHtml = true;
     g_pendingHtmlFilePath.clear();
+    ResetWebViewZoomForNewDocument();
     g_pendingHtmlContent = std::move(html);
     BeginPendingHtmlShowInternal(keepLayered);
     ApplyTransparencyMode();
@@ -2631,14 +2645,8 @@ bool LoadHtmlFromFile(const wchar_t* path)
     g_fitToWindow = false;
     g_zoom = 1.0f;
 
-    std::string bytes;
-    if (!ReadFileBytes(path, bytes))
-    {
-        g_hasHtml = false;
-        return false;
-    }
-
     g_hasHtml = true;
+    ResetWebViewZoomForNewDocument();
     g_pendingHtmlContent.clear();
     g_pendingHtmlFilePath = path;
     if (!BuildFileUri(path, g_pendingHtmlUri))
@@ -3003,33 +3011,53 @@ bool HandleHtmlOverlayKeyDown(WPARAM wParam)
 
 bool GetWebViewZoomFactor(double& factor)
 {
-    factor = 1.0;
-    if (!g_webviewController)
-    {
-        return false;
-    }
-
-    double value = 1.0;
-    HRESULT hr = g_webviewController->get_ZoomFactor(&value);
-    if (FAILED(hr) || value <= 0.0)
-    {
-        return false;
-    }
-
-    factor = value;
+    factor = g_htmlContentZoom > 0.0 ? g_htmlContentZoom : 1.0;
     return true;
+}
+
+void ApplyWebViewContentZoom()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    std::wostringstream script;
+    script << L"(() => {"
+           << L"const zoom=" << g_htmlContentZoom << L";"
+           << L"const root=document.documentElement;"
+           << L"if(!root){return;}"
+           << L"root.style.setProperty('--floatvision-content-zoom', String(zoom));"
+           << L"const styleId='floatvision-content-zoom-style';"
+           << L"let style=document.getElementById(styleId);"
+           << L"if(!(style instanceof HTMLStyleElement)){style=document.createElement('style');style.id=styleId;}"
+           << L"style.textContent='body{zoom:var(--floatvision-content-zoom,1) !important;}';"
+           << L"(document.head||root).appendChild(style);"
+           << L"})();";
+    ExecuteWebViewScript(script.str().c_str());
 }
 
 bool SetWebViewZoomFactor(double factor)
 {
-    if (!g_webviewController || factor <= 0.0)
+    if (factor <= 0.0)
     {
         return false;
     }
 
-    double clamped = (std::max)(0.1, (std::min)(factor, 5.0));
-    HRESULT hr = g_webviewController->put_ZoomFactor(clamped);
-    return SUCCEEDED(hr);
+    g_htmlContentZoom = (std::max)(0.1, (std::min)(factor, 5.0));
+    ApplyWebViewContentZoom();
+    return true;
+}
+
+void ResetWebViewZoomForNewDocument()
+{
+    g_htmlBaseZoomFactor = 1.0;
+    g_htmlContentZoom = 1.0;
+    if (g_webviewController)
+    {
+        g_webviewController->put_ZoomFactor(1.0);
+    }
+    ApplyWebViewContentZoom();
 }
 
 bool HandleHtmlOverlayShortcutKeyDown(WORD key)
@@ -3060,7 +3088,8 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 void BeginPendingHtmlShowInternal(bool keepLayered)
 {
     g_webviewPendingShow = true;
-    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingNavigationId = 0;
+    g_webviewPendingNavigationIdValid = false;
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
     g_keepLayeredWhileHtmlPending = keepLayered;
@@ -3100,7 +3129,8 @@ void CompletePendingHtmlShowInternal(bool showWebView)
     }
 
     g_webviewPendingShow = false;
-    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingNavigationId = 0;
+    g_webviewPendingNavigationIdValid = false;
     g_webviewPendingTimeoutRetried = false;
     g_webviewPendingStartTick = 0;
     g_pendingHtmlContent.clear();
@@ -3126,9 +3156,123 @@ void CompletePendingHtmlShowInternal(bool showWebView)
 
 std::wstring BuildWebViewDocumentInjectionScript()
 {
-    // CSS/JS injectionによる初回表示フラッシュや副作用を避けるため、
-    // WebView2側の設定（ブラウザ引数・背景色設定）のみを利用する。
-    return L"";
+    // HTML本文は常にライト配色のまま維持し、スクロールバーのみダーク調に寄せる。
+    return LR"JS((() => {
+        const styleId = 'floatvision-webview-style';
+        const styleText = `
+            :root {
+                color-scheme: light !important;
+            }
+            html::-webkit-scrollbar,
+            body::-webkit-scrollbar,
+            *::-webkit-scrollbar {
+                width: 14px !important;
+                height: 14px !important;
+            }
+            html::-webkit-scrollbar-track,
+            body::-webkit-scrollbar-track,
+            *::-webkit-scrollbar-track {
+                background: #1f1f1f !important;
+            }
+            html::-webkit-scrollbar-thumb,
+            body::-webkit-scrollbar-thumb,
+            *::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a !important;
+                border: 3px solid #1f1f1f !important;
+                border-radius: 8px !important;
+            }
+            html::-webkit-scrollbar-thumb:hover,
+            body::-webkit-scrollbar-thumb:hover,
+            *::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a !important;
+            }
+            html::-webkit-scrollbar-corner,
+            body::-webkit-scrollbar-corner,
+            *::-webkit-scrollbar-corner {
+                background: #1f1f1f !important;
+            }
+        `;
+
+        const getOrCreateStyle = () => {
+            let style = document.getElementById(styleId);
+            if (!(style instanceof HTMLStyleElement)) {
+                style = document.createElement('style');
+                style.id = styleId;
+            }
+            if (style.textContent !== styleText) {
+                style.textContent = styleText;
+            }
+            return style;
+        };
+
+        const ensureStyle = () => {
+            const root = document.documentElement;
+            if (!root) {
+                return null;
+            }
+            const style = getOrCreateStyle();
+            const parent = document.head || root;
+            if (style.parentNode !== parent || parent.lastChild !== style) {
+                parent.appendChild(style);
+            }
+            return style;
+        };
+
+        let keepAliveObserver = null;
+        const refreshObservers = () => {
+            const style = ensureStyle();
+            if (!style) {
+                return;
+            }
+            const parent = style.parentNode;
+            if (!(parent instanceof Node)) {
+                return;
+            }
+            if (keepAliveObserver) {
+                keepAliveObserver.disconnect();
+            }
+            keepAliveObserver = new MutationObserver(() => {
+                ensureStyle();
+            });
+            keepAliveObserver.observe(parent, { childList: true });
+        };
+
+        const waitForRootObserver = new MutationObserver(() => {
+            if (document.documentElement) {
+                ensureStyle();
+                refreshObservers();
+                waitForRootObserver.disconnect();
+            }
+        });
+
+        if (!document.documentElement) {
+            waitForRootObserver.observe(document, { childList: true });
+        }
+
+        const waitForHeadObserver = new MutationObserver(() => {
+            if (document.head) {
+                ensureStyle();
+                refreshObservers();
+                waitForHeadObserver.disconnect();
+            }
+        });
+
+        if (document.documentElement && !document.head) {
+            waitForHeadObserver.observe(document.documentElement, { childList: true });
+        }
+
+        ensureStyle();
+        refreshObservers();
+        document.addEventListener('readystatechange', ensureStyle);
+        document.addEventListener('DOMContentLoaded', () => {
+            ensureStyle();
+            refreshObservers();
+        }, { once: true });
+        window.addEventListener('load', () => {
+            ensureStyle();
+            refreshObservers();
+        }, { once: true });
+    })(); )JS";
 }
 
 
@@ -3141,6 +3285,23 @@ void EnsureWebViewBackgroundWhite()
 
     COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
     g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
+}
+
+void ApplyWebViewLightModePreference()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    g_webview->CallDevToolsProtocolMethod(
+        L"Emulation.setAutoDarkModeOverride",
+        L"{\"enabled\":false}",
+        nullptr);
+    g_webview->CallDevToolsProtocolMethod(
+        L"Emulation.setEmulatedMedia",
+        L"{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"light\"}]}",
+        nullptr);
 }
 
 
@@ -3166,6 +3327,12 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
         EnsureWebViewBackgroundWhite();
+        ApplyWebViewLightModePreference();
+        if (g_webviewController)
+        {
+            g_webviewController->put_ZoomFactor(1.0);
+        }
+        ApplyWebViewContentZoom();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
@@ -3267,6 +3434,9 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            ApplyWebViewLightModePreference();
+                            g_webviewController->put_ZoomFactor(1.0);
+                            ApplyWebViewContentZoom();
                             std::wstring documentScript = BuildWebViewDocumentInjectionScript();
                             if (!documentScript.empty())
                             {
@@ -3274,20 +3444,41 @@ bool EnsureWebView2(HWND hwnd)
                             }
                             g_webview->add_ContentLoading(
                                 Microsoft::WRL::Callback<ICoreWebView2ContentLoadingEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
+                                        ApplyWebViewLightModePreference();
+                                        ApplyWebViewContentZoom();
+                                        if (g_webviewPendingShow)
+                                        {
+                                            if (args && g_webviewPendingNavigationIdValid)
+                                            {
+                                                UINT64 loadingNavigationId = 0;
+                                                if (SUCCEEDED(args->get_NavigationId(&loadingNavigationId))
+                                                    && loadingNavigationId != g_webviewPendingNavigationId)
+                                                {
+                                                    return S_OK;
+                                                }
+                                            }
+                                            CompletePendingHtmlShowInternal(true);
+                                        }
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewContentLoadingToken);
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
-                                        if (g_webviewPendingShow)
+                                        ApplyWebViewLightModePreference();
+                                        if (g_webviewPendingShow && args)
                                         {
-                                            ++g_webviewPendingNavigationCount;
+                                            UINT64 navigationId = 0;
+                                            if (SUCCEEDED(args->get_NavigationId(&navigationId)))
+                                            {
+                                                g_webviewPendingNavigationId = navigationId;
+                                                g_webviewPendingNavigationIdValid = true;
+                                            }
                                         }
                                         return S_OK;
                                     }).Get(),
@@ -3297,24 +3488,19 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2NavigationCompletedEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
-                                        if (g_webviewController)
-                                        {
-                                            double zoom = 1.0;
-                                            if (SUCCEEDED(g_webviewController->get_ZoomFactor(&zoom)) && zoom > 0.0)
-                                            {
-                                                g_htmlBaseZoomFactor = zoom;
-                                            }
-                                        }
+                                        ApplyWebViewContentZoom();
                                         if (g_webviewPendingShow)
                                         {
-                                            if (g_webviewPendingNavigationCount > 0)
+                                            if (args && g_webviewPendingNavigationIdValid)
                                             {
-                                                --g_webviewPendingNavigationCount;
-                                                if (g_webviewPendingNavigationCount > 0)
+                                                UINT64 completedNavigationId = 0;
+                                                if (SUCCEEDED(args->get_NavigationId(&completedNavigationId))
+                                                    && completedNavigationId != g_webviewPendingNavigationId)
                                                 {
                                                     return S_OK;
                                                 }
                                             }
+
                                             BOOL isSuccess = TRUE;
                                             if (args)
                                             {
@@ -3325,6 +3511,7 @@ bool EnsureWebView2(HWND hwnd)
                                                 const bool retrySucceeded = RetryPendingHtmlWithNavigateToStringInternal();
                                                 if (retrySucceeded)
                                                 {
+                                                    g_webviewPendingNavigationIdValid = false;
                                                     return S_OK;
                                                 }
                                             }
@@ -3397,10 +3584,12 @@ void CloseWebView()
     g_pendingHtmlFilePath.clear();
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
-    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingNavigationId = 0;
+    g_webviewPendingNavigationIdValid = false;
     g_webviewCreationInProgress = false;
     g_webviewPendingStartTick = 0;
     g_htmlBaseZoomFactor = 1.0;
+    g_htmlContentZoom = 1.0;
     g_webviewWindow = nullptr;
     if (g_webviewLoader)
     {
