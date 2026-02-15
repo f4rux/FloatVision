@@ -1,0 +1,115 @@
+name: Build and Release FloatVision
+
+on:
+  push:
+    tags:
+      - 'v*'   # v1.0.0, v1.2.3, ...
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      # -------------------------
+      # Checkout
+      # -------------------------
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # -------------------------
+      # Toolchain
+      # -------------------------
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+        with:
+          vs-version: 'latest'
+
+      - name: Setup NuGet
+        uses: NuGet/setup-nuget@v2
+
+      - name: Restore NuGet packages
+        run: nuget restore FloatVision.slnx
+
+      # =========================================================
+      # x86 BUILD
+      # =========================================================
+      - name: Build x86
+        run: |
+          msbuild FloatVision.slnx `
+            /p:Configuration=Release `
+            /p:Platform=x86 `
+            /p:OutDir=build\x86\ `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0
+
+      - name: Collect x86 artifacts
+        shell: pwsh
+        run: |
+          $dist = "publish_dist/x86/FloatVision"
+          New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
+
+          Copy-Item build/x86/FloatVision.exe $dist
+          Copy-Item build/x86/WebView2Loader.dll $dist
+
+          Copy-Item res/FloatVision.png $dist/res/
+          Copy-Item res/ss1.png        $dist/res/
+          Copy-Item res/ss2.png        $dist/res/
+          Copy-Item res/ss3.png        $dist/res/
+          Copy-Item README.md          $dist/
+
+      - name: Archive x86
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path publish_dist/x86/FloatVision `
+            -DestinationPath FloatVision-x86-${{ github.ref_name }}.zip
+
+      # =========================================================
+      # x64 BUILD
+      # =========================================================
+      - name: Build x64
+        run: |
+          msbuild FloatVision.slnx `
+            /p:Configuration=Release `
+            /p:Platform=x64 `
+            /p:OutDir=build\x64\ `
+            /p:PlatformToolset=v143 `
+            /p:WindowsTargetPlatformVersion=10.0
+
+      - name: Collect x64 artifacts
+        shell: pwsh
+        run: |
+          $dist = "publish_dist/x64/FloatVision"
+          New-Item -ItemType Directory -Path "$dist/res" -Force | Out-Null
+
+          Copy-Item build/x64/FloatVision.exe $dist
+          Copy-Item build/x64/WebView2Loader.dll $dist
+
+          Copy-Item res/FloatVision.png $dist/res/
+          Copy-Item res/ss1.png        $dist/res/
+          Copy-Item res/ss2.png        $dist/res/
+          Copy-Item res/ss3.png        $dist/res/
+          Copy-Item README.md          $dist/
+
+      - name: Archive x64
+        shell: pwsh
+        run: |
+          Compress-Archive `
+            -Path publish_dist/x64/FloatVision `
+            -DestinationPath FloatVision-x64-${{ github.ref_name }}.zip
+
+      # =========================================================
+      # GitHub Release (latest auto-updated)
+      # =========================================================
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            FloatVision-x86-${{ github.ref_name }}.zip
+            FloatVision-x64-${{ github.ref_name }}.zip
+          generate_release_notes: true
+          body: |
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

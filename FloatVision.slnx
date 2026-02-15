@@ -1,0 +1,7 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="FloatVision.vcxproj" Id="5d66230a-84a5-4829-850d-0976dacb91aa" />
+</Solution>
