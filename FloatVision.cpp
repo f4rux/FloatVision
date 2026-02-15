@@ -9,6 +9,7 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+#include <shlwapi.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -33,6 +34,7 @@
 #pragma comment(lib, "UxTheme.lib")
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Shlwapi.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #ifndef FLOATVISION_GLOBALS_DEFINED
@@ -86,7 +88,8 @@ UINT g_textWindowWidth = 800;
 UINT g_textWindowHeight = 600;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
-std::wstring g_pendingHtmlContent;
+std::wstring g_pendingHtmlUri;
+std::filesystem::path g_pendingHtmlTempPath;
 bool g_webviewPendingShow = false;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
@@ -399,6 +402,9 @@ bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
+bool WriteHtmlToTempFile(const std::wstring& html, std::filesystem::path& htmlPath);
+bool BuildFileUriFromPath(const std::filesystem::path& path, std::wstring& uri);
+void CleanupPendingHtmlFile();
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
 void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
@@ -1481,7 +1487,8 @@ bool LoadImageFromFile(const wchar_t* path)
     g_hasText = false;
     g_textContent.clear();
     g_hasHtml = false;
-    g_pendingHtmlContent.clear();
+    g_pendingHtmlUri.clear();
+    CleanupPendingHtmlFile();
     g_webviewPendingShow = false;
     g_keepLayeredWhileHtmlPending = false;
     HideWebView();
@@ -2402,6 +2409,71 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     return true;
 }
 
+bool WriteHtmlToTempFile(const std::wstring& html, std::filesystem::path& htmlPath)
+{
+    std::string utf8;
+    if (!WideToUtf8(html, utf8))
+    {
+        return false;
+    }
+
+    wchar_t tempDir[MAX_PATH]{};
+    DWORD tempDirLen = GetTempPathW(static_cast<DWORD>(std::size(tempDir)), tempDir);
+    if (tempDirLen == 0 || tempDirLen >= std::size(tempDir))
+    {
+        return false;
+    }
+
+    wchar_t tempFile[MAX_PATH]{};
+    if (GetTempFileNameW(tempDir, L"FVH", 0, tempFile) == 0)
+    {
+        return false;
+    }
+
+    std::filesystem::path tempPath(tempFile);
+    htmlPath = tempPath;
+    htmlPath.replace_extension(L".html");
+    MoveFileExW(tempPath.c_str(), htmlPath.c_str(), MOVEFILE_REPLACE_EXISTING);
+
+    std::ofstream file(htmlPath, std::ios::binary | std::ios::trunc);
+    if (!file)
+    {
+        return false;
+    }
+    file.write(utf8.data(), static_cast<std::streamsize>(utf8.size()));
+    return file.good();
+}
+
+bool BuildFileUriFromPath(const std::filesystem::path& path, std::wstring& uri)
+{
+    DWORD needed = 0;
+    HRESULT hr = UrlCreateFromPathW(path.c_str(), nullptr, &needed, 0);
+    if (hr != S_FALSE || needed == 0)
+    {
+        return false;
+    }
+
+    std::vector<wchar_t> buffer(needed + 1, L'\0');
+    hr = UrlCreateFromPathW(path.c_str(), buffer.data(), &needed, 0);
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    uri.assign(buffer.data());
+    return !uri.empty();
+}
+
+void CleanupPendingHtmlFile()
+{
+    if (!g_pendingHtmlTempPath.empty())
+    {
+        std::error_code ec;
+        std::filesystem::remove(g_pendingHtmlTempPath, ec);
+        g_pendingHtmlTempPath.clear();
+    }
+}
+
 bool ApplyHtmlContent(std::wstring html)
 {
     bool keepLayered = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
@@ -2429,7 +2501,25 @@ bool ApplyHtmlContent(std::wstring html)
     g_fitToWindow = false;
     g_zoom = 1.0f;
     g_hasHtml = true;
-    g_pendingHtmlContent = std::move(html);
+    CleanupPendingHtmlFile();
+
+    std::filesystem::path tempHtmlPath;
+    if (!WriteHtmlToTempFile(html, tempHtmlPath))
+    {
+        g_hasHtml = false;
+        g_keepLayeredWhileHtmlPending = false;
+        return false;
+    }
+
+    if (!BuildFileUriFromPath(tempHtmlPath, g_pendingHtmlUri))
+    {
+        std::error_code ec;
+        std::filesystem::remove(tempHtmlPath, ec);
+        g_hasHtml = false;
+        g_keepLayeredWhileHtmlPending = false;
+        return false;
+    }
+    g_pendingHtmlTempPath = std::move(tempHtmlPath);
     g_webviewPendingShow = true;
     g_keepLayeredWhileHtmlPending = keepLayered;
     if (g_webviewController)
@@ -2445,7 +2535,8 @@ bool ApplyHtmlContent(std::wstring html)
     if (!EnsureWebView2(g_hwnd))
     {
         g_hasHtml = false;
-        g_pendingHtmlContent.clear();
+        g_pendingHtmlUri.clear();
+        CleanupPendingHtmlFile();
         g_keepLayeredWhileHtmlPending = false;
         return false;
     }
@@ -2838,12 +2929,12 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputState();
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
-        if (!g_pendingHtmlContent.empty())
+        if (!g_pendingHtmlUri.empty())
         {
             g_webviewPendingShow = true;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-            g_pendingHtmlContent.clear();
+            g_webview->Navigate(g_pendingHtmlUri.c_str());
+            g_pendingHtmlUri.clear();
         }
         return true;
     }
@@ -2919,11 +3010,11 @@ bool EnsureWebView2(HWND hwnd)
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewNavigationToken);
-                            if (g_webview && !g_pendingHtmlContent.empty())
+                            if (g_webview && !g_pendingHtmlUri.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                g_pendingHtmlContent.clear();
+                                g_webview->Navigate(g_pendingHtmlUri.c_str());
+                                g_pendingHtmlUri.clear();
                             }
                             return S_OK;
                         }).Get());
@@ -2948,6 +3039,8 @@ void CloseWebView()
     g_webview.Reset();
     g_htmlBaseZoomFactor = 1.0;
     g_webviewWindow = nullptr;
+    CleanupPendingHtmlFile();
+    g_pendingHtmlUri.clear();
     if (g_webviewLoader)
     {
         FreeLibrary(g_webviewLoader);
