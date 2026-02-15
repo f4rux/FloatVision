@@ -4836,8 +4836,8 @@ void SaveWindowPlacement()
         return;
     }
 
-    int saveX = (std::max)(0, rect.left);
-    int saveY = (std::max)(0, rect.top);
+    int saveX = (rect.left < 0) ? 0 : static_cast<int>(rect.left);
+    int saveY = (rect.top < 0) ? 0 : static_cast<int>(rect.top);
 
     wchar_t buffer[32]{};
     _snwprintf_s(buffer, _TRUNCATE, L"%d", saveX);
