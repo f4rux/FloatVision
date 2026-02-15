@@ -2464,6 +2464,7 @@ bool ApplyHtmlContent(std::wstring html)
     if (g_webviewController)
     {
         g_webviewController->put_IsVisible(FALSE);
+        SetWebViewZoomFactor(g_htmlBaseZoomFactor > 0.0 ? g_htmlBaseZoomFactor : 1.0);
     }
     ApplyTransparencyMode();
     if (g_hwnd)
