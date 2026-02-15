@@ -3130,45 +3130,64 @@ std::wstring BuildWebViewDocumentInjectionScript()
     // HTML本文は常にライト配色のまま維持し、スクロールバーのみダーク調に寄せる。
     return LR"JS((() => {
         const styleId = 'floatvision-webview-style';
-        const applyStyle = () => {
-            const target = document.documentElement;
-            if (!target || document.getElementById(styleId)) {
+        const styleText = `
+            :root {
+                color-scheme: light !important;
+            }
+            html::-webkit-scrollbar,
+            body::-webkit-scrollbar {
+                width: 14px;
+                height: 14px;
+            }
+            html::-webkit-scrollbar-track,
+            body::-webkit-scrollbar-track {
+                background: #1f1f1f;
+            }
+            html::-webkit-scrollbar-thumb,
+            body::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a;
+                border: 3px solid #1f1f1f;
+                border-radius: 8px;
+            }
+            html::-webkit-scrollbar-thumb:hover,
+            body::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a;
+            }
+            html::-webkit-scrollbar-corner,
+            body::-webkit-scrollbar-corner {
+                background: #1f1f1f;
+            }
+        `;
+
+        const ensureStyle = () => {
+            const root = document.documentElement;
+            if (!root || document.getElementById(styleId)) {
                 return;
             }
+
             const style = document.createElement('style');
             style.id = styleId;
-            style.textContent = `
-                :root {
-                    color-scheme: light !important;
+            style.textContent = styleText;
+
+            if (document.head) {
+                document.head.appendChild(style);
+                return;
+            }
+
+            const observer = new MutationObserver(() => {
+                if (!document.getElementById(styleId) && document.head) {
+                    document.head.appendChild(style);
+                    observer.disconnect();
                 }
-                html::-webkit-scrollbar,
-                body::-webkit-scrollbar {
-                    width: 14px;
-                    height: 14px;
-                }
-                html::-webkit-scrollbar-track,
-                body::-webkit-scrollbar-track {
-                    background: #1f1f1f;
-                }
-                html::-webkit-scrollbar-thumb,
-                body::-webkit-scrollbar-thumb {
-                    background-color: #5a5a5a;
-                    border: 3px solid #1f1f1f;
-                    border-radius: 8px;
-                }
-                html::-webkit-scrollbar-thumb:hover,
-                body::-webkit-scrollbar-thumb:hover {
-                    background-color: #7a7a7a;
-                }
-                html::-webkit-scrollbar-corner,
-                body::-webkit-scrollbar-corner {
-                    background: #1f1f1f;
-                }
-            `;
-            (document.head || target).appendChild(style);
+            });
+            observer.observe(root, {
+                childList: true,
+                subtree: true
+            });
         };
-        applyStyle();
-        document.addEventListener('DOMContentLoaded', applyStyle, { once: true });
+
+        ensureStyle();
+        document.addEventListener('DOMContentLoaded', ensureStyle, { once: true });
     })(); )JS";
 }
 
