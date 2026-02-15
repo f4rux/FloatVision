@@ -3424,10 +3424,23 @@ bool EnsureWebView2(HWND hwnd)
                             }
                             g_webview->add_ContentLoading(
                                 Microsoft::WRL::Callback<ICoreWebView2ContentLoadingEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
                                         ApplyWebViewLightModePreference();
+                                        if (g_webviewPendingShow)
+                                        {
+                                            if (args && g_webviewPendingNavigationIdValid)
+                                            {
+                                                UINT64 loadingNavigationId = 0;
+                                                if (SUCCEEDED(args->get_NavigationId(&loadingNavigationId))
+                                                    && loadingNavigationId != g_webviewPendingNavigationId)
+                                                {
+                                                    return S_OK;
+                                                }
+                                            }
+                                            CompletePendingHtmlShowInternal(true);
+                                        }
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewContentLoadingToken);
