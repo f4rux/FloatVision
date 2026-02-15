@@ -2846,6 +2846,17 @@ bool NavigateWebViewHtml(const std::wstring& html)
         return false;
     }
 
+    // NavigateToString is usually faster for small/medium documents,
+    // so prefer it for first paint and fall back to file navigation for large content.
+    constexpr size_t kNavigateToStringMaxChars = 900000;
+    if (html.size() <= kNavigateToStringMaxChars)
+    {
+        if (SUCCEEDED(g_webview->NavigateToString(html.c_str())))
+        {
+            return true;
+        }
+    }
+
     std::wstring tempPath;
     if (!WriteHtmlToTempFile(html, tempPath))
     {
