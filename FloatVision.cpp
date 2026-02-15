@@ -3060,15 +3060,6 @@ void ResetWebViewZoomForNewDocument()
     ApplyWebViewContentZoom();
 }
 
-void ResetWebViewZoomForNewDocument()
-{
-    g_htmlBaseZoomFactor = 1.0;
-    if (g_webviewController)
-    {
-        g_webviewController->put_ZoomFactor(1.0);
-    }
-}
-
 bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 {
     double current = 1.0;
