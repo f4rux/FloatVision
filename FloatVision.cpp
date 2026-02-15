@@ -90,6 +90,7 @@ float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
 std::wstring g_webviewTempHtmlPath;
+std::wstring g_webviewTempHtmlUrl;
 bool g_webviewPendingShow = false;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
@@ -409,6 +410,7 @@ WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
 bool BuildFileUrlFromPath(const std::wstring& path, std::wstring& url);
+bool EnsureWebViewTempHtmlTarget();
 bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path);
 bool NavigateWebViewHtml(const std::wstring& html);
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
@@ -2765,8 +2767,13 @@ bool BuildFileUrlFromPath(const std::wstring& path, std::wstring& url)
     return false;
 }
 
-bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
+bool EnsureWebViewTempHtmlTarget()
 {
+    if (!g_webviewTempHtmlPath.empty() && !g_webviewTempHtmlUrl.empty())
+    {
+        return true;
+    }
+
     wchar_t tempDir[MAX_PATH]{};
     DWORD dirLength = GetTempPathW(MAX_PATH, tempDir);
     if (dirLength == 0 || dirLength >= MAX_PATH)
@@ -2788,13 +2795,31 @@ bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
     std::wstring htmlPath = tempFile;
     htmlPath += L".html";
 
+    std::wstring url;
+    if (!BuildFileUrlFromPath(htmlPath, url))
+    {
+        return false;
+    }
+
+    g_webviewTempHtmlPath = std::move(htmlPath);
+    g_webviewTempHtmlUrl = std::move(url);
+    return true;
+}
+
+bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
+{
+    if (!EnsureWebViewTempHtmlTarget())
+    {
+        return false;
+    }
+
     std::string utf8Bytes;
     if (!WideToUtf8(html, utf8Bytes))
     {
         return false;
     }
 
-    std::ofstream output(htmlPath, std::ios::binary | std::ios::trunc);
+    std::ofstream output(g_webviewTempHtmlPath, std::ios::binary | std::ios::trunc);
     if (!output)
     {
         return false;
@@ -2806,12 +2831,11 @@ bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
     if (!output.good())
     {
         output.close();
-        DeleteFileW(htmlPath.c_str());
         return false;
     }
     output.close();
 
-    path = std::move(htmlPath);
+    path = g_webviewTempHtmlPath;
     return true;
 }
 
@@ -2828,27 +2852,17 @@ bool NavigateWebViewHtml(const std::wstring& html)
         return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
     }
 
-    std::wstring url;
-    if (!BuildFileUrlFromPath(tempPath, url))
+    if (g_webviewTempHtmlUrl.empty())
     {
-        DeleteFileW(tempPath.c_str());
         return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
     }
 
-    if (!g_webviewTempHtmlPath.empty())
-    {
-        DeleteFileW(g_webviewTempHtmlPath.c_str());
-        g_webviewTempHtmlPath.clear();
-    }
-
-    HRESULT hr = g_webview->Navigate(url.c_str());
+    HRESULT hr = g_webview->Navigate(g_webviewTempHtmlUrl.c_str());
     if (FAILED(hr))
     {
-        DeleteFileW(tempPath.c_str());
         return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
     }
 
-    g_webviewTempHtmlPath = std::move(tempPath);
     return true;
 }
 
@@ -3072,6 +3086,7 @@ void CloseWebView()
         DeleteFileW(g_webviewTempHtmlPath.c_str());
         g_webviewTempHtmlPath.clear();
     }
+    g_webviewTempHtmlUrl.clear();
     if (g_webviewController)
     {
         g_webviewController->Close();
