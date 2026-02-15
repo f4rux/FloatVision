@@ -2737,25 +2737,32 @@ bool BuildFileUrlFromPath(const std::wstring& path, std::wstring& url)
         return false;
     }
 
-    DWORD length = UrlCreateFromPathW(path.c_str(), nullptr, 0, 0);
-    if (length == 0)
+    DWORD length = static_cast<DWORD>((std::max<size_t>)(512, path.size() * 3 + 16));
+    for (int attempt = 0; attempt < 4; ++attempt)
     {
-        return false;
+        std::wstring buffer(length, L'\0');
+        DWORD written = length;
+        HRESULT hr = UrlCreateFromPathW(path.c_str(), buffer.data(), &written, 0);
+        if (SUCCEEDED(hr) && written > 0)
+        {
+            if (buffer[written - 1] == L'\0')
+            {
+                --written;
+            }
+            buffer.resize(written);
+            url = std::move(buffer);
+            return !url.empty();
+        }
+
+        if (hr == S_FALSE && written > length)
+        {
+            length = written;
+            continue;
+        }
+        break;
     }
 
-    std::wstring buffer(length, L'\0');
-    if (FAILED(UrlCreateFromPathW(path.c_str(), buffer.data(), &length, 0)) || length == 0)
-    {
-        return false;
-    }
-
-    if (length > 0 && buffer[length - 1] == L'\0')
-    {
-        --length;
-    }
-    buffer.resize(length);
-    url = std::move(buffer);
-    return true;
+    return false;
 }
 
 bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
@@ -2818,14 +2825,14 @@ bool NavigateWebViewHtml(const std::wstring& html)
     std::wstring tempPath;
     if (!WriteHtmlToTempFile(html, tempPath))
     {
-        return false;
+        return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
     }
 
     std::wstring url;
     if (!BuildFileUrlFromPath(tempPath, url))
     {
         DeleteFileW(tempPath.c_str());
-        return false;
+        return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
     }
 
     if (!g_webviewTempHtmlPath.empty())
@@ -2838,7 +2845,7 @@ bool NavigateWebViewHtml(const std::wstring& html)
     if (FAILED(hr))
     {
         DeleteFileW(tempPath.c_str());
-        return false;
+        return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
     }
 
     g_webviewTempHtmlPath = std::move(tempPath);
