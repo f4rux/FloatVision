@@ -9,6 +9,7 @@
 #include <commctrl.h>
 #include <uxtheme.h>
 #include <dwmapi.h>
+#include <shlwapi.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -32,6 +33,7 @@
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "UxTheme.lib")
 #pragma comment(lib, "Dwmapi.lib")
+#pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Advapi32.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
@@ -87,6 +89,8 @@ UINT g_textWindowHeight = 600;
 float g_textScroll = 0.0f;
 bool g_hasHtml = false;
 std::wstring g_pendingHtmlContent;
+std::wstring g_webviewTempHtmlPath;
+std::wstring g_webviewTempHtmlUrl;
 bool g_webviewPendingShow = false;
 double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
@@ -397,6 +401,7 @@ std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
 bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
 bool Utf8ToWide(const std::string& bytes, std::wstring& text);
+bool WideToUtf8(const std::wstring& text, std::string& bytes);
 std::wstring TrimString(const std::wstring& value);
 bool ApplyHtmlContent(std::wstring html);
 bool RenderMarkdownToHtml(const std::string& markdown, std::string& html);
@@ -404,6 +409,10 @@ void UpdateWebViewInputTimer();
 WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
+bool BuildFileUrlFromPath(const std::wstring& path, std::wstring& url);
+bool EnsureWebViewTempHtmlTarget();
+bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path);
+bool NavigateWebViewHtml(const std::wstring& html);
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
@@ -2723,6 +2732,151 @@ bool ExecuteWebViewScript(const wchar_t* script)
     return SUCCEEDED(hr);
 }
 
+bool BuildFileUrlFromPath(const std::wstring& path, std::wstring& url)
+{
+    if (path.empty())
+    {
+        return false;
+    }
+
+    DWORD length = static_cast<DWORD>((std::max<size_t>)(512, path.size() * 3 + 16));
+    for (int attempt = 0; attempt < 4; ++attempt)
+    {
+        std::wstring buffer(length, L'\0');
+        DWORD written = length;
+        HRESULT hr = UrlCreateFromPathW(path.c_str(), buffer.data(), &written, 0);
+        if (SUCCEEDED(hr) && written > 0)
+        {
+            if (buffer[written - 1] == L'\0')
+            {
+                --written;
+            }
+            buffer.resize(written);
+            url = std::move(buffer);
+            return !url.empty();
+        }
+
+        if (hr == S_FALSE && written > length)
+        {
+            length = written;
+            continue;
+        }
+        break;
+    }
+
+    return false;
+}
+
+bool EnsureWebViewTempHtmlTarget()
+{
+    if (!g_webviewTempHtmlPath.empty() && !g_webviewTempHtmlUrl.empty())
+    {
+        return true;
+    }
+
+    wchar_t tempDir[MAX_PATH]{};
+    DWORD dirLength = GetTempPathW(MAX_PATH, tempDir);
+    if (dirLength == 0 || dirLength >= MAX_PATH)
+    {
+        return false;
+    }
+
+    wchar_t tempFile[MAX_PATH]{};
+    if (GetTempFileNameW(tempDir, L"flv", 0, tempFile) == 0)
+    {
+        return false;
+    }
+
+    if (!DeleteFileW(tempFile))
+    {
+        return false;
+    }
+
+    std::wstring htmlPath = tempFile;
+    htmlPath += L".html";
+
+    std::wstring url;
+    if (!BuildFileUrlFromPath(htmlPath, url))
+    {
+        return false;
+    }
+
+    g_webviewTempHtmlPath = std::move(htmlPath);
+    g_webviewTempHtmlUrl = std::move(url);
+    return true;
+}
+
+bool WriteHtmlToTempFile(const std::wstring& html, std::wstring& path)
+{
+    if (!EnsureWebViewTempHtmlTarget())
+    {
+        return false;
+    }
+
+    std::string utf8Bytes;
+    if (!WideToUtf8(html, utf8Bytes))
+    {
+        return false;
+    }
+
+    std::ofstream output(g_webviewTempHtmlPath, std::ios::binary | std::ios::trunc);
+    if (!output)
+    {
+        return false;
+    }
+
+    static constexpr unsigned char bom[] = { 0xEF, 0xBB, 0xBF };
+    output.write(reinterpret_cast<const char*>(bom), sizeof(bom));
+    output.write(utf8Bytes.data(), static_cast<std::streamsize>(utf8Bytes.size()));
+    if (!output.good())
+    {
+        output.close();
+        return false;
+    }
+    output.close();
+
+    path = g_webviewTempHtmlPath;
+    return true;
+}
+
+bool NavigateWebViewHtml(const std::wstring& html)
+{
+    if (!g_webview)
+    {
+        return false;
+    }
+
+    // NavigateToString is usually faster for small/medium documents,
+    // so prefer it for first paint and fall back to file navigation for large content.
+    constexpr size_t kNavigateToStringMaxChars = 900000;
+    if (html.size() <= kNavigateToStringMaxChars)
+    {
+        if (SUCCEEDED(g_webview->NavigateToString(html.c_str())))
+        {
+            return true;
+        }
+    }
+
+    std::wstring tempPath;
+    if (!WriteHtmlToTempFile(html, tempPath))
+    {
+        return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
+    }
+
+    if (g_webviewTempHtmlUrl.empty())
+    {
+        return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
+    }
+
+    HRESULT hr = g_webview->Navigate(g_webviewTempHtmlUrl.c_str());
+    if (FAILED(hr))
+    {
+        return SUCCEEDED(g_webview->NavigateToString(html.c_str()));
+    }
+
+    return true;
+}
+
 bool HandleHtmlOverlayKeyDown(WPARAM wParam)
 {
     bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
@@ -2842,8 +2996,10 @@ bool EnsureWebView2(HWND hwnd)
         {
             g_webviewPendingShow = true;
             g_webviewController->put_IsVisible(FALSE);
-            g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-            g_pendingHtmlContent.clear();
+            if (NavigateWebViewHtml(g_pendingHtmlContent))
+            {
+                g_pendingHtmlContent.clear();
+            }
         }
         return true;
     }
@@ -2922,8 +3078,10 @@ bool EnsureWebView2(HWND hwnd)
                             if (g_webview && !g_pendingHtmlContent.empty())
                             {
                                 g_webviewPendingShow = true;
-                                g_webview->NavigateToString(g_pendingHtmlContent.c_str());
-                                g_pendingHtmlContent.clear();
+                                if (NavigateWebViewHtml(g_pendingHtmlContent))
+                                {
+                                    g_pendingHtmlContent.clear();
+                                }
                             }
                             return S_OK;
                         }).Get());
@@ -2934,6 +3092,12 @@ bool EnsureWebView2(HWND hwnd)
 
 void CloseWebView()
 {
+    if (!g_webviewTempHtmlPath.empty())
+    {
+        DeleteFileW(g_webviewTempHtmlPath.c_str());
+        g_webviewTempHtmlPath.clear();
+    }
+    g_webviewTempHtmlUrl.clear();
     if (g_webviewController)
     {
         g_webviewController->Close();
