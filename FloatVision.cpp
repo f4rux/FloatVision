@@ -4836,10 +4836,13 @@ void SaveWindowPlacement()
         return;
     }
 
+    int saveX = (rect.left < 0) ? 0 : static_cast<int>(rect.left);
+    int saveY = (rect.top < 0) ? 0 : static_cast<int>(rect.top);
+
     wchar_t buffer[32]{};
-    _snwprintf_s(buffer, _TRUNCATE, L"%d", rect.left);
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", saveX);
     WritePrivateProfileStringW(L"Window", L"X", buffer, g_iniPath.c_str());
-    _snwprintf_s(buffer, _TRUNCATE, L"%d", rect.top);
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", saveY);
     WritePrivateProfileStringW(L"Window", L"Y", buffer, g_iniPath.c_str());
 }
 
