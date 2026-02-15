@@ -419,6 +419,7 @@ WORD GetHtmlInputVirtualKey();
 void UpdateWebViewInputState();
 bool ExecuteWebViewScript(const wchar_t* script);
 void EnsureWebViewBackgroundWhite();
+void ApplyWebViewLightModePreference();
 bool HandleHtmlOverlayKeyDown(WPARAM wParam);
 bool HandleHtmlOverlayShortcutKeyDown(WORD key);
 bool GetWebViewZoomFactor(double& factor);
@@ -3126,9 +3127,68 @@ void CompletePendingHtmlShowInternal(bool showWebView)
 
 std::wstring BuildWebViewDocumentInjectionScript()
 {
-    // CSS/JS injectionによる初回表示フラッシュや副作用を避けるため、
-    // WebView2側の設定（ブラウザ引数・背景色設定）のみを利用する。
-    return L"";
+    // HTML本文は常にライト配色のまま維持し、スクロールバーのみダーク調に寄せる。
+    return LR"JS((() => {
+        const styleId = 'floatvision-webview-style';
+        const styleText = `
+            :root {
+                color-scheme: light !important;
+            }
+            html::-webkit-scrollbar,
+            body::-webkit-scrollbar {
+                width: 14px;
+                height: 14px;
+            }
+            html::-webkit-scrollbar-track,
+            body::-webkit-scrollbar-track {
+                background: #1f1f1f;
+            }
+            html::-webkit-scrollbar-thumb,
+            body::-webkit-scrollbar-thumb {
+                background-color: #5a5a5a;
+                border: 3px solid #1f1f1f;
+                border-radius: 8px;
+            }
+            html::-webkit-scrollbar-thumb:hover,
+            body::-webkit-scrollbar-thumb:hover {
+                background-color: #7a7a7a;
+            }
+            html::-webkit-scrollbar-corner,
+            body::-webkit-scrollbar-corner {
+                background: #1f1f1f;
+            }
+        `;
+
+        const ensureStyle = () => {
+            const root = document.documentElement;
+            if (!root || document.getElementById(styleId)) {
+                return;
+            }
+
+            const style = document.createElement('style');
+            style.id = styleId;
+            style.textContent = styleText;
+
+            if (document.head) {
+                document.head.appendChild(style);
+                return;
+            }
+
+            const observer = new MutationObserver(() => {
+                if (!document.getElementById(styleId) && document.head) {
+                    document.head.appendChild(style);
+                    observer.disconnect();
+                }
+            });
+            observer.observe(root, {
+                childList: true,
+                subtree: true
+            });
+        };
+
+        ensureStyle();
+        document.addEventListener('DOMContentLoaded', ensureStyle, { once: true });
+    })(); )JS";
 }
 
 
@@ -3141,6 +3201,23 @@ void EnsureWebViewBackgroundWhite()
 
     COREWEBVIEW2_COLOR backgroundColor{ 255, 255, 255, 255 };
     g_webviewController2->put_DefaultBackgroundColor(backgroundColor);
+}
+
+void ApplyWebViewLightModePreference()
+{
+    if (!g_webview)
+    {
+        return;
+    }
+
+    g_webview->CallDevToolsProtocolMethod(
+        L"Emulation.setAutoDarkModeOverride",
+        L"{\"enabled\":false}",
+        nullptr);
+    g_webview->CallDevToolsProtocolMethod(
+        L"Emulation.setEmulatedMedia",
+        L"{\"features\":[{\"name\":\"prefers-color-scheme\",\"value\":\"light\"}]}",
+        nullptr);
 }
 
 
@@ -3166,6 +3243,7 @@ bool EnsureWebView2(HWND hwnd)
         UpdateWebViewInputTimer();
         UpdateWebViewBounds();
         EnsureWebViewBackgroundWhite();
+        ApplyWebViewLightModePreference();
         if (g_pendingHtmlIsUri && !g_pendingHtmlUri.empty())
         {
             BeginPendingHtmlShowInternal(g_keepLayeredWhileHtmlPending);
@@ -3267,6 +3345,7 @@ bool EnsureWebView2(HWND hwnd)
                             UpdateWebViewInputState();
                             UpdateWebViewInputTimer();
                             UpdateWebViewBounds();
+                            ApplyWebViewLightModePreference();
                             std::wstring documentScript = BuildWebViewDocumentInjectionScript();
                             if (!documentScript.empty())
                             {
@@ -3277,6 +3356,7 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2ContentLoadingEventArgs*) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
+                                        ApplyWebViewLightModePreference();
                                         return S_OK;
                                     }).Get(),
                                 &g_webviewContentLoadingToken);
@@ -3285,6 +3365,7 @@ bool EnsureWebView2(HWND hwnd)
                                     [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
+                                        ApplyWebViewLightModePreference();
                                         if (g_webviewPendingShow)
                                         {
                                             ++g_webviewPendingNavigationCount;
