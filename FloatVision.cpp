@@ -91,7 +91,8 @@ std::wstring g_pendingHtmlUri;
 bool g_pendingHtmlIsUri = false;
 std::wstring g_pendingHtmlFilePath;
 bool g_webviewPendingShow = false;
-int g_webviewPendingNavigationCount = 0;
+UINT64 g_webviewPendingNavigationId = 0;
+bool g_webviewPendingNavigationIdValid = false;
 bool g_pendingHtmlFallbackAttempted = false;
 bool g_webviewPendingTimeoutRetried = false;
 bool g_webviewCreationInProgress = false;
@@ -365,7 +366,7 @@ constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kWebViewPendingTimerId = 2002;
 constexpr UINT kWebViewPendingTimerIntervalMs = 100;
-constexpr ULONGLONG kWebViewPendingTimeoutMs = 3000;
+constexpr ULONGLONG kWebViewPendingTimeoutMs = 1200;
 
 // =====================
 // 前方宣言
@@ -3074,7 +3075,8 @@ bool HandleHtmlOverlayShortcutKeyDown(WORD key)
 void BeginPendingHtmlShowInternal(bool keepLayered)
 {
     g_webviewPendingShow = true;
-    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingNavigationId = 0;
+    g_webviewPendingNavigationIdValid = false;
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
     g_keepLayeredWhileHtmlPending = keepLayered;
@@ -3114,7 +3116,8 @@ void CompletePendingHtmlShowInternal(bool showWebView)
     }
 
     g_webviewPendingShow = false;
-    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingNavigationId = 0;
+    g_webviewPendingNavigationIdValid = false;
     g_webviewPendingTimeoutRetried = false;
     g_webviewPendingStartTick = 0;
     g_pendingHtmlContent.clear();
@@ -3430,13 +3433,18 @@ bool EnsureWebView2(HWND hwnd)
                                 &g_webviewContentLoadingToken);
                             g_webview->add_NavigationStarting(
                                 Microsoft::WRL::Callback<ICoreWebView2NavigationStartingEventHandler>(
-                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs*) -> HRESULT
+                                    [](ICoreWebView2*, ICoreWebView2NavigationStartingEventArgs* args) -> HRESULT
                                     {
                                         EnsureWebViewBackgroundWhite();
                                         ApplyWebViewLightModePreference();
-                                        if (g_webviewPendingShow)
+                                        if (g_webviewPendingShow && args)
                                         {
-                                            ++g_webviewPendingNavigationCount;
+                                            UINT64 navigationId = 0;
+                                            if (SUCCEEDED(args->get_NavigationId(&navigationId)))
+                                            {
+                                                g_webviewPendingNavigationId = navigationId;
+                                                g_webviewPendingNavigationIdValid = true;
+                                            }
                                         }
                                         return S_OK;
                                     }).Get(),
@@ -3456,14 +3464,16 @@ bool EnsureWebView2(HWND hwnd)
                                         }
                                         if (g_webviewPendingShow)
                                         {
-                                            if (g_webviewPendingNavigationCount > 0)
+                                            if (args && g_webviewPendingNavigationIdValid)
                                             {
-                                                --g_webviewPendingNavigationCount;
-                                                if (g_webviewPendingNavigationCount > 0)
+                                                UINT64 completedNavigationId = 0;
+                                                if (SUCCEEDED(args->get_NavigationId(&completedNavigationId))
+                                                    && completedNavigationId != g_webviewPendingNavigationId)
                                                 {
                                                     return S_OK;
                                                 }
                                             }
+
                                             BOOL isSuccess = TRUE;
                                             if (args)
                                             {
@@ -3474,6 +3484,7 @@ bool EnsureWebView2(HWND hwnd)
                                                 const bool retrySucceeded = RetryPendingHtmlWithNavigateToStringInternal();
                                                 if (retrySucceeded)
                                                 {
+                                                    g_webviewPendingNavigationIdValid = false;
                                                     return S_OK;
                                                 }
                                             }
@@ -3546,7 +3557,8 @@ void CloseWebView()
     g_pendingHtmlFilePath.clear();
     g_pendingHtmlFallbackAttempted = false;
     g_webviewPendingTimeoutRetried = false;
-    g_webviewPendingNavigationCount = 0;
+    g_webviewPendingNavigationId = 0;
+    g_webviewPendingNavigationIdValid = false;
     g_webviewCreationInProgress = false;
     g_webviewPendingStartTick = 0;
     g_htmlBaseZoomFactor = 1.0;
