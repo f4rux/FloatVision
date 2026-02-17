@@ -338,6 +338,14 @@ bool g_alwaysOnTop = false;
 std::wstring g_iniPath;
 POINT g_windowPos{ CW_USEDEFAULT, CW_USEDEFAULT };
 bool g_hasSavedWindowPos = false;
+enum class WindowPositionMode
+{
+    Previous = 0,
+    Center = 1,
+    Custom = 2
+};
+WindowPositionMode g_windowPositionMode = WindowPositionMode::Previous;
+POINT g_customWindowPos{ 0, 0 };
 TransparencyMode g_transparencyMode = TransparencyMode::Transparent;
 COLORREF g_customColor = RGB(32, 32, 32);
 
@@ -387,6 +395,7 @@ void ApplyAlwaysOnTop();
 void LoadWindowPlacement();
 
 void SaveWindowPlacement();
+POINT CalculateCenteredWindowPosition(HWND hwnd);
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
@@ -3320,6 +3329,9 @@ namespace
     constexpr int kIdWrap = 2008;
     constexpr int kIdTextWindowWidth = 2010;
     constexpr int kIdTextWindowHeight = 2011;
+    constexpr int kIdWindowPositionMode = 2012;
+    constexpr int kIdWindowPosX = 2013;
+    constexpr int kIdWindowPosY = 2014;
     constexpr int kIdKeyNext = 2101;
     constexpr int kIdKeyPrev = 2102;
     constexpr int kIdKeyZoomIn = 2103;
@@ -3622,11 +3634,11 @@ void ShowSettingsDialog(HWND hwnd)
     DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
     appendDword(tmpl, dialogStyle);
     appendDword(tmpl, 0);
-    appendWord(tmpl, 41);
+    appendWord(tmpl, 47);
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(460));
-    appendWord(tmpl, scale(236));
+    appendWord(tmpl, scale(284));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -3648,6 +3660,16 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(376), scale(110), scale(36), scale(12), 0xFFFF, 0x0082, L"Height");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
         scale(403), scale(108), scale(36), scale(12), kIdTextWindowHeight, 0x0081, L"");
+
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(220), scale(140), scale(232), scale(58), 0xFFFF, 0x0080, L"Window");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(228), scale(156), scale(44), scale(12), 0xFFFF, 0x0082, L"Position");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | CBS_DROPDOWNLIST | CBS_OWNERDRAWFIXED | CBS_HASSTRINGS, scale(276), scale(154), scale(164), scale(80), kIdWindowPositionMode, 0x0085, L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(228), scale(174), scale(12), scale(12), 0xFFFF, 0x0082, L"X");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+        scale(242), scale(172), scale(60), scale(12), kIdWindowPosX, 0x0081, L"0");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(310), scale(174), scale(12), scale(12), 0xFFFF, 0x0082, L"Y");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+        scale(324), scale(172), scale(60), scale(12), kIdWindowPosY, 0x0081, L"0");
 
     addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(202), scale(223), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(22), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
@@ -3677,8 +3699,8 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll right");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(212), scale(88), scale(12), kIdKeyScrollRight, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(205), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(205), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(251), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(251), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -3692,6 +3714,8 @@ void ShowSettingsDialog(HWND hwnd)
         bool wrap;
         UINT textWindowWidth;
         UINT textWindowHeight;
+        WindowPositionMode windowPositionMode;
+        POINT customWindowPos;
         WORD keyNext;
         WORD keyPrev;
         WORD keyZoomIn;
@@ -3711,7 +3735,7 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF controlBackgroundColor;
         COLORREF dialogTextColor;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontFaceName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
-        g_textWindowWidth, g_textWindowHeight,
+        g_textWindowWidth, g_textWindowHeight, g_windowPositionMode, g_customWindowPos,
         g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOriginalSize, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyReload,
         g_keyScrollUp, g_keyScrollDown, g_keyScrollLeft, g_keyScrollRight,
         nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
@@ -3888,6 +3912,9 @@ void ShowSettingsDialog(HWND hwnd)
             SetWindowTheme(GetDlgItem(dlg, kIdBackColor), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdTextWindowWidth), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, kIdTextWindowHeight), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdWindowPositionMode), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdWindowPosX), themeName, nullptr);
+            SetWindowTheme(GetDlgItem(dlg, kIdWindowPosY), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, IDOK), themeName, nullptr);
             SetWindowTheme(GetDlgItem(dlg, IDCANCEL), themeName, nullptr);
             if (darkMode)
@@ -3913,13 +3940,22 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Transparent"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Checkerboard"));
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Solid color"));
+            SendDlgItemMessage(dlg, kIdWindowPositionMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Previous position"));
+            SendDlgItemMessage(dlg, kIdWindowPositionMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Center screen"));
+            SendDlgItemMessage(dlg, kIdWindowPositionMode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(L"Custom position"));
             int selection = (dialogState->mode == TransparencyMode::Transparent) ? 0
                 : (dialogState->mode == TransparencyMode::Checkerboard) ? 1 : 2;
             SendDlgItemMessage(dlg, kIdTransparencySelect, CB_SETCURSEL, selection, 0);
+            SendDlgItemMessage(dlg, kIdWindowPositionMode, CB_SETCURSEL, static_cast<WPARAM>(dialogState->windowPositionMode), 0);
             EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
+            BOOL customPosEnabled = (dialogState->windowPositionMode == WindowPositionMode::Custom) ? TRUE : FALSE;
+            EnableWindow(GetDlgItem(dlg, kIdWindowPosX), customPosEnabled);
+            EnableWindow(GetDlgItem(dlg, kIdWindowPosY), customPosEnabled);
             CheckDlgButton(dlg, kIdWrap, dialogState->wrap ? BST_CHECKED : BST_UNCHECKED);
             SetDlgItemInt(dlg, kIdTextWindowWidth, dialogState->textWindowWidth, FALSE);
             SetDlgItemInt(dlg, kIdTextWindowHeight, dialogState->textWindowHeight, FALSE);
+            SetDlgItemInt(dlg, kIdWindowPosX, static_cast<UINT>(dialogState->customWindowPos.x), TRUE);
+            SetDlgItemInt(dlg, kIdWindowPosY, static_cast<UINT>(dialogState->customWindowPos.y), TRUE);
             SendDlgItemMessage(dlg, kIdKeyNext, HKM_SETHOTKEY, MAKEWORD(dialogState->keyNext, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyPrev, HKM_SETHOTKEY, MAKEWORD(dialogState->keyPrev, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyZoomIn, HKM_SETHOTKEY, MAKEWORD(dialogState->keyZoomIn, 0), 0);
@@ -4018,11 +4054,11 @@ void ShowSettingsDialog(HWND hwnd)
         case WM_MEASUREITEM:
         {
             auto* measureItem = reinterpret_cast<MEASUREITEMSTRUCT*>(lParam);
-            if (!measureItem || measureItem->CtlID != kIdTransparencySelect)
+            if (!measureItem || (measureItem->CtlID != kIdTransparencySelect && measureItem->CtlID != kIdWindowPositionMode))
             {
                 break;
             }
-            HWND combo = GetDlgItem(dlg, kIdTransparencySelect);
+            HWND combo = GetDlgItem(dlg, static_cast<int>(measureItem->CtlID));
             UINT itemHeight = 16;
             HFONT font = reinterpret_cast<HFONT>(SendMessage(combo, WM_GETFONT, 0, 0));
             HDC hdc = GetDC(combo);
@@ -4043,7 +4079,7 @@ void ShowSettingsDialog(HWND hwnd)
         case WM_DRAWITEM:
         {
             auto* drawItem = reinterpret_cast<DRAWITEMSTRUCT*>(lParam);
-            if (!dialogState || !drawItem || drawItem->CtlID != kIdTransparencySelect)
+            if (!dialogState || !drawItem || (drawItem->CtlID != kIdTransparencySelect && drawItem->CtlID != kIdWindowPositionMode))
             {
                 break;
             }
@@ -4104,11 +4140,11 @@ void ShowSettingsDialog(HWND hwnd)
         case WM_COMMAND:
         {
             int id = LOWORD(wParam);
-            if (id == kIdTransparencySelect && HIWORD(wParam) == CBN_DROPDOWN)
+            if ((id == kIdTransparencySelect || id == kIdWindowPositionMode) && HIWORD(wParam) == CBN_DROPDOWN)
             {
                 COMBOBOXINFO comboInfo{};
                 comboInfo.cbSize = sizeof(comboInfo);
-                if (GetComboBoxInfo(GetDlgItem(dlg, kIdTransparencySelect), &comboInfo))
+                if (GetComboBoxInfo(GetDlgItem(dlg, id), &comboInfo))
                 {
                     const wchar_t* themeName = IsDarkModeEnabled() ? L"DarkMode_Explorer" : L"Explorer";
                     if (comboInfo.hwndList != nullptr)
@@ -4124,6 +4160,19 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->mode = (selection == 0) ? TransparencyMode::Transparent
                     : (selection == 1) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
                 EnableWindow(GetDlgItem(dlg, kIdColor), dialogState->mode == TransparencyMode::SolidColor);
+                return TRUE;
+            }
+            if (id == kIdWindowPositionMode && HIWORD(wParam) == CBN_SELCHANGE)
+            {
+                int selection = static_cast<int>(SendDlgItemMessage(dlg, kIdWindowPositionMode, CB_GETCURSEL, 0, 0));
+                if (selection < 0)
+                {
+                    selection = 0;
+                }
+                dialogState->windowPositionMode = static_cast<WindowPositionMode>(selection);
+                BOOL customPosEnabled = (dialogState->windowPositionMode == WindowPositionMode::Custom) ? TRUE : FALSE;
+                EnableWindow(GetDlgItem(dlg, kIdWindowPosX), customPosEnabled);
+                EnableWindow(GetDlgItem(dlg, kIdWindowPosY), customPosEnabled);
                 return TRUE;
             }
             if (id == kIdColor || id == kIdFontColor || id == kIdBackColor)
@@ -4195,6 +4244,24 @@ void ShowSettingsDialog(HWND hwnd)
                     : (selection == 1) ? TransparencyMode::Checkerboard : TransparencyMode::SolidColor;
                 dialogState->wrap = (IsDlgButtonChecked(dlg, kIdWrap) == BST_CHECKED);
                 {
+                    int positionSelection = static_cast<int>(SendDlgItemMessage(dlg, kIdWindowPositionMode, CB_GETCURSEL, 0, 0));
+                    if (positionSelection < 0)
+                    {
+                        positionSelection = 0;
+                    }
+                    dialogState->windowPositionMode = static_cast<WindowPositionMode>(positionSelection);
+                    BOOL parsedPosX = FALSE;
+                    UINT posX = GetDlgItemInt(dlg, kIdWindowPosX, &parsedPosX, TRUE);
+                    if (parsedPosX)
+                    {
+                        dialogState->customWindowPos.x = static_cast<int>(posX);
+                    }
+                    BOOL parsedPosY = FALSE;
+                    UINT posY = GetDlgItemInt(dlg, kIdWindowPosY, &parsedPosY, TRUE);
+                    if (parsedPosY)
+                    {
+                        dialogState->customWindowPos.y = static_cast<int>(posY);
+                    }
                     BOOL parsedWidth = FALSE;
                     UINT width = GetDlgItemInt(dlg, kIdTextWindowWidth, &parsedWidth, FALSE);
                     if (parsedWidth)
@@ -4259,6 +4326,8 @@ void ShowSettingsDialog(HWND hwnd)
         g_textWrap = state.wrap;
         g_textWindowWidth = state.textWindowWidth;
         g_textWindowHeight = state.textWindowHeight;
+        g_windowPositionMode = state.windowPositionMode;
+        g_customWindowPos = state.customWindowPos;
         g_keyNextFile = state.keyNext;
         g_keyPrevFile = state.keyPrev;
         g_keyZoomIn = state.keyZoomIn;
@@ -4680,6 +4749,19 @@ void LoadSettings()
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
+    GetPrivateProfileStringW(L"Window", L"PositionMode", L"0", buffer, 32, g_iniPath.c_str());
+    int windowPositionMode = _wtoi(buffer);
+    if (windowPositionMode < 0 || windowPositionMode > 2)
+    {
+        windowPositionMode = 0;
+    }
+    g_windowPositionMode = static_cast<WindowPositionMode>(windowPositionMode);
+
+    GetPrivateProfileStringW(L"Window", L"CustomX", L"0", buffer, 32, g_iniPath.c_str());
+    g_customWindowPos.x = _wtoi(buffer);
+    GetPrivateProfileStringW(L"Window", L"CustomY", L"0", buffer, 32, g_iniPath.c_str());
+    g_customWindowPos.y = _wtoi(buffer);
+
     std::wstring normalizedFontName;
     bool loadedUtf8FontName = false;
     std::string iniBytes;
@@ -4784,6 +4866,13 @@ void SaveSettings()
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_customColor));
     WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
 
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_windowPositionMode));
+    WritePrivateProfileStringW(L"Window", L"PositionMode", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_customWindowPos.x);
+    WritePrivateProfileStringW(L"Window", L"CustomX", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%d", g_customWindowPos.y);
+    WritePrivateProfileStringW(L"Window", L"CustomY", buffer, g_iniPath.c_str());
+
     std::wstring fontNameToSave = GetFontFamilyNameForSave(g_textFontName);
     WritePrivateProfileStringW(L"Text", L"FontName", fontNameToSave.c_str(), g_iniPath.c_str());
     WritePrivateProfileStringW(L"Text", L"FontSize", nullptr, g_iniPath.c_str());
@@ -4856,6 +4945,34 @@ void ApplyDocumentWindowSize(HWND hwnd)
     UINT height = (std::max)(200u, g_textWindowHeight);
     SetWindowPos(hwnd, nullptr, 0, 0, static_cast<int>(width), static_cast<int>(height),
         SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+}
+
+POINT CalculateCenteredWindowPosition(HWND hwnd)
+{
+    RECT windowRect{};
+    if (!hwnd || !GetWindowRect(hwnd, &windowRect))
+    {
+        return POINT{ CW_USEDEFAULT, CW_USEDEFAULT };
+    }
+
+    int windowWidth = windowRect.right - windowRect.left;
+    int windowHeight = windowRect.bottom - windowRect.top;
+
+    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor && GetMonitorInfo(monitor, &info))
+    {
+        int workWidth = info.rcWork.right - info.rcWork.left;
+        int workHeight = info.rcWork.bottom - info.rcWork.top;
+        int x = info.rcWork.left + ((workWidth - windowWidth) / 2);
+        int y = info.rcWork.top + ((workHeight - windowHeight) / 2);
+        return POINT{ x, y };
+    }
+
+    int x = (GetSystemMetrics(SM_CXSCREEN) - windowWidth) / 2;
+    int y = (GetSystemMetrics(SM_CYSCREEN) - windowHeight) / 2;
+    return POINT{ x, y };
 }
 
 void LoadWindowPlacement()
@@ -5308,13 +5425,33 @@ int WINAPI wWinMain(
     ApplyTransparencyMode();
     UpdateTextFormat();
     UpdateTextBrush();
-    if (g_hasSavedWindowPos)
+    POINT startupPos{ CW_USEDEFAULT, CW_USEDEFAULT };
+    bool shouldApplyWindowPos = false;
+    if (g_windowPositionMode == WindowPositionMode::Previous)
+    {
+        if (g_hasSavedWindowPos)
+        {
+            startupPos = g_windowPos;
+            shouldApplyWindowPos = true;
+        }
+    }
+    else if (g_windowPositionMode == WindowPositionMode::Center)
+    {
+        // Center mode is applied after the first file is loaded and the final window size is known.
+    }
+    else
+    {
+        startupPos = g_customWindowPos;
+        shouldApplyWindowPos = true;
+    }
+
+    if (shouldApplyWindowPos)
     {
         SetWindowPos(
             hwnd,
             nullptr,
-            g_windowPos.x,
-            g_windowPos.y,
+            startupPos.x,
+            startupPos.y,
             0,
             0,
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
@@ -5401,6 +5538,24 @@ int WINAPI wWinMain(
     {
         UpdateLayeredStyle(g_imageHasAlpha);
     }
+
+    if (g_windowPositionMode == WindowPositionMode::Center)
+    {
+        POINT centeredPos = CalculateCenteredWindowPosition(hwnd);
+        if (centeredPos.x != CW_USEDEFAULT && centeredPos.y != CW_USEDEFAULT)
+        {
+            SetWindowPos(
+                hwnd,
+                nullptr,
+                centeredPos.x,
+                centeredPos.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        }
+    }
+
     InvalidateRect(hwnd, nullptr, TRUE);
 
     MSG msg{};
