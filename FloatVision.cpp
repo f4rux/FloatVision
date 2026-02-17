@@ -4763,18 +4763,34 @@ void LoadSettings()
     GetPrivateProfileStringW(L"Settings", L"TransparencyColor", L"0", buffer, 32, g_iniPath.c_str());
     g_customColor = static_cast<COLORREF>(_wtoi(buffer));
 
-    GetPrivateProfileStringW(L"Window", L"PositionMode", L"0", buffer, 32, g_iniPath.c_str());
-    int windowPositionMode = _wtoi(buffer);
+    std::wstring windowPositionModeValue;
+    if (!TryReadIniValueUtf8Aware(g_iniPath, L"Window", L"PositionMode", windowPositionModeValue))
+    {
+        GetPrivateProfileStringW(L"Window", L"PositionMode", L"0", buffer, 32, g_iniPath.c_str());
+        windowPositionModeValue = buffer;
+    }
+    int windowPositionMode = _wtoi(windowPositionModeValue.c_str());
     if (windowPositionMode < 0 || windowPositionMode > 2)
     {
         windowPositionMode = 0;
     }
     g_windowPositionMode = static_cast<WindowPositionMode>(windowPositionMode);
 
-    GetPrivateProfileStringW(L"Window", L"CustomX", L"0", buffer, 32, g_iniPath.c_str());
-    g_customWindowPos.x = _wtoi(buffer);
-    GetPrivateProfileStringW(L"Window", L"CustomY", L"0", buffer, 32, g_iniPath.c_str());
-    g_customWindowPos.y = _wtoi(buffer);
+    std::wstring customXValue;
+    if (!TryReadIniValueUtf8Aware(g_iniPath, L"Window", L"CustomX", customXValue))
+    {
+        GetPrivateProfileStringW(L"Window", L"CustomX", L"0", buffer, 32, g_iniPath.c_str());
+        customXValue = buffer;
+    }
+    g_customWindowPos.x = _wtoi(customXValue.c_str());
+
+    std::wstring customYValue;
+    if (!TryReadIniValueUtf8Aware(g_iniPath, L"Window", L"CustomY", customYValue))
+    {
+        GetPrivateProfileStringW(L"Window", L"CustomY", L"0", buffer, 32, g_iniPath.c_str());
+        customYValue = buffer;
+    }
+    g_customWindowPos.y = _wtoi(customYValue.c_str());
 
     std::wstring normalizedFontName;
     bool loadedUtf8FontName = false;
