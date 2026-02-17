@@ -74,7 +74,7 @@ To interact with document content using your mouse, hold the **Alt** key:
 
 ## Settings
 
-![](res/ss3.png)
+![](res/ss3.png?v=2)
 
 Right-click the window to open the **Context Menu**, then select **Settings**.
 
