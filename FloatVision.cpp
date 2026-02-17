@@ -518,7 +518,7 @@ void ShowAboutDialog(HWND hwnd)
     appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision ver 1.1.0");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision ver 1.1.0 ");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(28), scale(250), scale(12), 0xFFFF, 0x0082, L"Author: f4rux");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(44), scale(250), scale(12), 0xFFFF, 0x0082, L"https://github.com/f4rux/FloatVision");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, scale(12), scale(62), scale(98), scale(18), kIdAboutOpenLink, 0x0080, L"Open project page");
