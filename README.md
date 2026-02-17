@@ -2,9 +2,10 @@
 
 # FloatVision
 
-**FloatVision** is a minimalist, frameless viewer for images, text, Markdown, and HTML.
+**FloatVision** is a **frameless image viewer for Windows**.  
+It is designed as a lightweight **quick viewer**, specialized for displaying images instantly without window frames.
 
-By keeping your images or notes pinned to the top of your screen, it serves as a powerful reference tool for any workflow.
+In addition to images, it also supports viewing **text, Markdown, and HTML documents**.
 
 ![](res/ss1.png)
 
