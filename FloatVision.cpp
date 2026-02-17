@@ -5437,8 +5437,7 @@ int WINAPI wWinMain(
     }
     else if (g_windowPositionMode == WindowPositionMode::Center)
     {
-        startupPos = CalculateCenteredWindowPosition(hwnd);
-        shouldApplyWindowPos = (startupPos.x != CW_USEDEFAULT && startupPos.y != CW_USEDEFAULT);
+        // Center mode is applied after the first file is loaded and the final window size is known.
     }
     else
     {
@@ -5539,6 +5538,24 @@ int WINAPI wWinMain(
     {
         UpdateLayeredStyle(g_imageHasAlpha);
     }
+
+    if (g_windowPositionMode == WindowPositionMode::Center)
+    {
+        POINT centeredPos = CalculateCenteredWindowPosition(hwnd);
+        if (centeredPos.x != CW_USEDEFAULT && centeredPos.y != CW_USEDEFAULT)
+        {
+            SetWindowPos(
+                hwnd,
+                nullptr,
+                centeredPos.x,
+                centeredPos.y,
+                0,
+                0,
+                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+            );
+        }
+    }
+
     InvalidateRect(hwnd, nullptr, TRUE);
 
     MSG msg{};
