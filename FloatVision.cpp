@@ -3643,7 +3643,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(460));
-    appendWord(tmpl, scale(284));
+    appendWord(tmpl, scale(234));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -3704,8 +3704,8 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll right");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(212), scale(88), scale(12), kIdKeyScrollRight, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(251), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(251), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(206), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(206), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
