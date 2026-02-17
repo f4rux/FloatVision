@@ -396,6 +396,7 @@ void LoadWindowPlacement();
 
 void SaveWindowPlacement();
 POINT CalculateCenteredWindowPosition(HWND hwnd);
+void ApplyWindowPositionModeAfterContentLoad(HWND hwnd);
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
@@ -757,6 +758,7 @@ LRESULT CALLBACK WndProc(
                     if (LoadMarkdownFromFile(path.c_str()))
                     {
                         RefreshImageList(path);
+                        ApplyWindowPositionModeAfterContentLoad(hwnd);
                         InvalidateRect(hwnd, nullptr, TRUE);
                     }
                 }
@@ -765,6 +767,7 @@ LRESULT CALLBACK WndProc(
                     if (LoadHtmlFromFile(path.c_str()))
                     {
                         RefreshImageList(path);
+                        ApplyWindowPositionModeAfterContentLoad(hwnd);
                         InvalidateRect(hwnd, nullptr, TRUE);
                     }
                 }
@@ -773,6 +776,7 @@ LRESULT CALLBACK WndProc(
                     if (LoadTextFromFile(path.c_str()))
                     {
                         RefreshImageList(path);
+                        ApplyWindowPositionModeAfterContentLoad(hwnd);
                         InvalidateRect(hwnd, nullptr, TRUE);
                     }
                 }
@@ -780,6 +784,7 @@ LRESULT CALLBACK WndProc(
                 {
                     RefreshImageList(path);
                     UpdateZoomToFitScreen(hwnd);
+                    ApplyWindowPositionModeAfterContentLoad(hwnd);
                     InvalidateRect(hwnd, nullptr, TRUE);
                 }
             }
@@ -4428,6 +4433,7 @@ void ReloadCurrentFile(bool reloadSettings)
         }
         if (result && g_hwnd)
         {
+            ApplyWindowPositionModeAfterContentLoad(g_hwnd);
             InvalidateRect(g_hwnd, nullptr, TRUE);
         }
         return;
@@ -4534,6 +4540,10 @@ bool LoadImageByIndex(size_t index)
             }
         }
     }
+    if (result && g_hwnd)
+    {
+        ApplyWindowPositionModeAfterContentLoad(g_hwnd);
+    }
     return result;
 }
 
@@ -4578,6 +4588,7 @@ bool ShowOpenImageDialog(HWND hwnd)
         if (LoadMarkdownFromFile(filePath))
         {
             RefreshImageList(filePath);
+            ApplyWindowPositionModeAfterContentLoad(hwnd);
             return true;
         }
     }
@@ -4586,6 +4597,7 @@ bool ShowOpenImageDialog(HWND hwnd)
         if (LoadHtmlFromFile(filePath))
         {
             RefreshImageList(filePath);
+            ApplyWindowPositionModeAfterContentLoad(hwnd);
             return true;
         }
     }
@@ -4594,6 +4606,7 @@ bool ShowOpenImageDialog(HWND hwnd)
         if (LoadTextFromFile(filePath))
         {
             RefreshImageList(filePath);
+            ApplyWindowPositionModeAfterContentLoad(hwnd);
             return true;
         }
     }
@@ -4601,6 +4614,7 @@ bool ShowOpenImageDialog(HWND hwnd)
     {
         RefreshImageList(filePath);
         UpdateZoomToFitScreen(hwnd);
+        ApplyWindowPositionModeAfterContentLoad(hwnd);
         return true;
     }
     return false;
@@ -4974,6 +4988,31 @@ POINT CalculateCenteredWindowPosition(HWND hwnd)
     int y = (GetSystemMetrics(SM_CYSCREEN) - windowHeight) / 2;
     return POINT{ x, y };
 }
+
+void ApplyWindowPositionModeAfterContentLoad(HWND hwnd)
+{
+    if (!hwnd || g_windowPositionMode != WindowPositionMode::Center)
+    {
+        return;
+    }
+
+    POINT centeredPos = CalculateCenteredWindowPosition(hwnd);
+    if (centeredPos.x == CW_USEDEFAULT || centeredPos.y == CW_USEDEFAULT)
+    {
+        return;
+    }
+
+    SetWindowPos(
+        hwnd,
+        nullptr,
+        centeredPos.x,
+        centeredPos.y,
+        0,
+        0,
+        SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
+    );
+}
+
 
 void LoadWindowPlacement()
 {
@@ -5539,22 +5578,7 @@ int WINAPI wWinMain(
         UpdateLayeredStyle(g_imageHasAlpha);
     }
 
-    if (g_windowPositionMode == WindowPositionMode::Center)
-    {
-        POINT centeredPos = CalculateCenteredWindowPosition(hwnd);
-        if (centeredPos.x != CW_USEDEFAULT && centeredPos.y != CW_USEDEFAULT)
-        {
-            SetWindowPos(
-                hwnd,
-                nullptr,
-                centeredPos.x,
-                centeredPos.y,
-                0,
-                0,
-                SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
-            );
-        }
-    }
+    ApplyWindowPositionModeAfterContentLoad(hwnd);
 
     InvalidateRect(hwnd, nullptr, TRUE);
 
