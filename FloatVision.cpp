@@ -5484,9 +5484,6 @@ int WINAPI wWinMain(
         shouldApplyWindowPos = true;
     }
 
-    ShowWindow(hwnd, nCmdShow);
-    UpdateWindow(hwnd);
-
     if (shouldApplyWindowPos)
     {
         SetWindowPos(
@@ -5499,6 +5496,9 @@ int WINAPI wWinMain(
             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE
         );
     }
+
+    ShowWindow(hwnd, nCmdShow);
+    UpdateWindow(hwnd);
 
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
