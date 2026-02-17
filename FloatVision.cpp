@@ -4881,11 +4881,11 @@ void SaveSettings()
     WritePrivateProfileStringW(L"Settings", L"TransparencyColor", buffer, g_iniPath.c_str());
 
     _snwprintf_s(buffer, _TRUNCATE, L"%d", static_cast<int>(g_windowPositionMode));
-    WritePrivateProfileStringW(L"Window", L"PositionMode", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"PositionMode", buffer);
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_customWindowPos.x);
-    WritePrivateProfileStringW(L"Window", L"CustomX", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"CustomX", buffer);
     _snwprintf_s(buffer, _TRUNCATE, L"%d", g_customWindowPos.y);
-    WritePrivateProfileStringW(L"Window", L"CustomY", buffer, g_iniPath.c_str());
+    SaveUtf8IniValue(g_iniPath, L"Window", L"CustomY", buffer);
 
     std::wstring fontNameToSave = GetFontFamilyNameForSave(g_textFontName);
     WritePrivateProfileStringW(L"Text", L"FontName", fontNameToSave.c_str(), g_iniPath.c_str());
