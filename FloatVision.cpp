@@ -452,174 +452,100 @@ void ApplyImmersiveDarkMode(HWND target, bool enabled);
 static void ApplyExplorerTheme(HWND target);
 void StopAnimationPlayback(bool clearDecoder = true);
 bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics);
-UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension);
-void RestartAnimationTimer();
-#endif
-
-constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
-
-void ShowAboutDialog(HWND hwnd)
+UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension)
 {
-    constexpr int kIdAboutOpenLink = 2201;
-    auto alignDword = [](std::vector<BYTE>& buffer)
+    if (!frame)
     {
-        while (buffer.size() % 4 != 0)
+        return 0;
+    }
+
+    IWICMetadataQueryReader* reader = nullptr;
+    HRESULT hr = frame->GetMetadataQueryReader(&reader);
+    if (FAILED(hr) || !reader)
+    {
+        return 0;
+    }
+
+    PROPVARIANT value{};
+    PropVariantInit(&value);
+
+    auto queryDelay = [&](const wchar_t* query, bool gifUnit10ms) -> UINT
+    {
+        PropVariantClear(&value);
+        PropVariantInit(&value);
+        if (FAILED(reader->GetMetadataByName(query, &value)))
         {
-            buffer.push_back(0);
+            return 0;
         }
-    };
 
-    auto appendWord = [](std::vector<BYTE>& buffer, WORD value)
-    {
-        buffer.push_back(static_cast<BYTE>(value & 0xFF));
-        buffer.push_back(static_cast<BYTE>((value >> 8) & 0xFF));
-    };
-
-    auto appendDword = [&](std::vector<BYTE>& buffer, DWORD value)
-    {
-        appendWord(buffer, static_cast<WORD>(value & 0xFFFF));
-        appendWord(buffer, static_cast<WORD>((value >> 16) & 0xFFFF));
-    };
-
-    auto appendString = [&](std::vector<BYTE>& buffer, const wchar_t* text)
-    {
-        while (*text)
+        ULONGLONG delayRaw = 0;
+        switch (value.vt)
         {
-            appendWord(buffer, static_cast<WORD>(*text));
-            ++text;
+        case VT_UI1: delayRaw = value.bVal; break;
+        case VT_UI2: delayRaw = value.uiVal; break;
+        case VT_UI4: delayRaw = value.ulVal; break;
+        case VT_UI8: delayRaw = value.uhVal.QuadPart; break;
+        case VT_I1: delayRaw = value.cVal > 0 ? static_cast<ULONGLONG>(value.cVal) : 0; break;
+        case VT_I2: delayRaw = value.iVal > 0 ? static_cast<ULONGLONG>(value.iVal) : 0; break;
+        case VT_I4: delayRaw = value.lVal > 0 ? static_cast<ULONGLONG>(value.lVal) : 0; break;
+        case VT_I8: delayRaw = value.hVal.QuadPart > 0 ? static_cast<ULONGLONG>(value.hVal.QuadPart) : 0; break;
+        default: break;
         }
-        appendWord(buffer, 0);
+
+        if (delayRaw == 0)
+        {
+            return 0;
+        }
+
+        if (gifUnit10ms)
+        {
+            delayRaw *= 10;
+        }
+
+        return delayRaw > static_cast<ULONGLONG>(UINT_MAX)
+            ? UINT_MAX
+            : static_cast<UINT>(delayRaw);
     };
 
-    auto addControl = [&](std::vector<BYTE>& buffer, DWORD style, short x, short y, short cx, short cy, WORD id, WORD classAtom, const wchar_t* text)
+    UINT delayMs = 0;
+    if (extension == L".gif")
     {
-        alignDword(buffer);
-        appendDword(buffer, style);
-        appendDword(buffer, 0);
-        appendWord(buffer, static_cast<WORD>(x));
-        appendWord(buffer, static_cast<WORD>(y));
-        appendWord(buffer, static_cast<WORD>(cx));
-        appendWord(buffer, static_cast<WORD>(cy));
-        appendWord(buffer, id);
-        appendWord(buffer, 0xFFFF);
-        appendWord(buffer, classAtom);
-        appendString(buffer, text);
-        appendWord(buffer, 0);
-    };
-
-    std::vector<BYTE> tmpl;
-    tmpl.reserve(512);
-
-    constexpr float kDialogScale = 0.9f;
-    auto scale = [=](short value)
+        delayMs = queryDelay(L"/grctlext/Delay", true);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/Delay", true);
+        }
+    }
+    else if (extension == L".webp")
     {
-        return static_cast<short>(std::lround(value * kDialogScale));
-    };
+        delayMs = queryDelay(L"/ANMF/FrameDuration", false);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/FrameDuration", false);
+        }
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/anim/FrameDuration", false);
+        }
+    }
 
-    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
-    appendDword(tmpl, dialogStyle);
-    appendDword(tmpl, 0);
-    appendWord(tmpl, 5);
-    appendWord(tmpl, scale(10));
-    appendWord(tmpl, scale(10));
-    appendWord(tmpl, scale(280));
-    appendWord(tmpl, scale(92));
-    appendWord(tmpl, 0);
-    appendWord(tmpl, 0);
-    appendString(tmpl, L"About FloatVision");
-    appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
-    appendString(tmpl, L"Segoe UI");
+    PropVariantClear(&value);
+    reader->Release();
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision ver 1.1.0");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(28), scale(250), scale(12), 0xFFFF, 0x0082, L"Author: f4rux");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(44), scale(250), scale(12), 0xFFFF, 0x0082, L"https://github.com/f4rux/FloatVision");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, scale(12), scale(62), scale(98), scale(18), kIdAboutOpenLink, 0x0080, L"Open project page");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, scale(214), scale(62), scale(54), scale(18), IDOK, 0x0080, L"OK");
-
-    struct AboutDialogState
+    if (delayMs == 0)
     {
-        HBRUSH dialogBrush;
-        COLORREF dialogBackgroundColor;
-        COLORREF dialogTextColor;
-    } state{ nullptr, RGB(255, 255, 255), RGB(0, 0, 0) };
+        return 0;
+    }
 
-    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    if (extension == L".gif")
     {
-        auto* dialogState = reinterpret_cast<AboutDialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
-        switch (msg)
-        {
-        case WM_INITDIALOG:
-        {
-            dialogState = reinterpret_cast<AboutDialogState*>(lParam);
-            SetWindowLongPtr(dlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialogState));
+        return std::max(10u, delayMs);
+    }
 
-            bool darkMode = IsDarkModeEnabled();
-            dialogState->dialogBackgroundColor = darkMode ? RGB(32, 32, 32) : RGB(255, 255, 255);
-            dialogState->dialogTextColor = darkMode ? RGB(240, 240, 240) : RGB(0, 0, 0);
-            dialogState->dialogBrush = CreateSolidBrush(dialogState->dialogBackgroundColor);
-
-            const wchar_t* themeName = darkMode ? L"DarkMode_Explorer" : L"Explorer";
-            ApplyImmersiveDarkMode(dlg, darkMode);
-            SetWindowTheme(dlg, themeName, nullptr);
-            EnumChildWindows(
-                dlg,
-                [](HWND child, LPARAM param) -> BOOL
-                {
-                    const auto* themeName = reinterpret_cast<const wchar_t*>(param);
-                    SetWindowTheme(child, themeName, nullptr);
-                    return TRUE;
-                },
-                reinterpret_cast<LPARAM>(themeName)
-            );
-            return TRUE;
-        }
-        case WM_COMMAND:
-        {
-            switch (LOWORD(wParam))
-            {
-            case kIdAboutOpenLink:
-                ShellExecuteW(dlg, L"open", kAboutProjectUrl, nullptr, nullptr, SW_SHOWNORMAL);
-                return TRUE;
-            case IDOK:
-            case IDCANCEL:
-                EndDialog(dlg, IDOK);
-                return TRUE;
-            }
-            break;
-        }
-        case WM_CTLCOLORDLG:
-        case WM_CTLCOLORSTATIC:
-        case WM_CTLCOLORBTN:
-        {
-            if (!dialogState)
-            {
-                break;
-            }
-            HDC hdc = reinterpret_cast<HDC>(wParam);
-            SetTextColor(hdc, dialogState->dialogTextColor);
-            SetBkColor(hdc, dialogState->dialogBackgroundColor);
-            SetBkMode(hdc, TRANSPARENT);
-            return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
-        }
-        case WM_DESTROY:
-            if (dialogState && dialogState->dialogBrush)
-            {
-                DeleteObject(dialogState->dialogBrush);
-                dialogState->dialogBrush = nullptr;
-            }
-            break;
-        }
-        return FALSE;
-    };
-
-    DialogBoxIndirectParamW(
-        GetModuleHandle(nullptr),
-        reinterpret_cast<DLGTEMPLATE*>(tmpl.data()),
-        hwnd,
-        dialogProc,
-        reinterpret_cast<LPARAM>(&state)
-    );
+    return std::max(5u, delayMs);
 }
+
+
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -1312,8 +1238,16 @@ LRESULT CALLBACK WndProc(
                     IWICBitmapFrameDecode* frame = nullptr;
                     if (SUCCEEDED(g_animationDecoder->GetFrame(g_animationFrameIndex, &frame)) && frame)
                     {
-                        g_animationFrameDelayMs = GetFrameDelayFromMetadata(frame, extension);
+                        UINT frameDelay = GetFrameDelayFromMetadata(frame, extension);
+                        if (frameDelay > 0)
+                        {
+                            g_animationFrameDelayMs = frameDelay;
+                        }
                         frame->Release();
+                    }
+                    if (g_animationFrameDelayMs == 0)
+                    {
+                        g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
                     }
                     RestartAnimationTimer();
                     InvalidateRect(hwnd, nullptr, TRUE);
@@ -1571,14 +1505,14 @@ UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring&
 {
     if (!frame)
     {
-        return kDefaultAnimationDelayMs;
+        return 0;
     }
 
     IWICMetadataQueryReader* reader = nullptr;
     HRESULT hr = frame->GetMetadataQueryReader(&reader);
     if (FAILED(hr) || !reader)
     {
-        return kDefaultAnimationDelayMs;
+        return 0;
     }
 
     PROPVARIANT value{};
@@ -1593,32 +1527,43 @@ UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring&
             return 0;
         }
 
-        UINT delay = 0;
+        ULONGLONG delayRaw = 0;
         switch (value.vt)
         {
-        case VT_UI1: delay = value.bVal; break;
-        case VT_UI2: delay = value.uiVal; break;
-        case VT_UI4: delay = value.ulVal; break;
-        case VT_I2: delay = value.iVal > 0 ? static_cast<UINT>(value.iVal) : 0; break;
-        case VT_I4: delay = value.lVal > 0 ? static_cast<UINT>(value.lVal) : 0; break;
+        case VT_UI1: delayRaw = value.bVal; break;
+        case VT_UI2: delayRaw = value.uiVal; break;
+        case VT_UI4: delayRaw = value.ulVal; break;
+        case VT_UI8: delayRaw = value.uhVal.QuadPart; break;
+        case VT_I1: delayRaw = value.cVal > 0 ? static_cast<ULONGLONG>(value.cVal) : 0; break;
+        case VT_I2: delayRaw = value.iVal > 0 ? static_cast<ULONGLONG>(value.iVal) : 0; break;
+        case VT_I4: delayRaw = value.lVal > 0 ? static_cast<ULONGLONG>(value.lVal) : 0; break;
+        case VT_I8: delayRaw = value.hVal.QuadPart > 0 ? static_cast<ULONGLONG>(value.hVal.QuadPart) : 0; break;
         default: break;
         }
 
-        if (delay == 0)
+        if (delayRaw == 0)
         {
             return 0;
         }
+
         if (gifUnit10ms)
         {
-            delay *= 10;
+            delayRaw *= 10;
         }
-        return delay;
+
+        return delayRaw > static_cast<ULONGLONG>(UINT_MAX)
+            ? UINT_MAX
+            : static_cast<UINT>(delayRaw);
     };
 
     UINT delayMs = 0;
     if (extension == L".gif")
     {
         delayMs = queryDelay(L"/grctlext/Delay", true);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/Delay", true);
+        }
     }
     else if (extension == L".webp")
     {
@@ -1638,9 +1583,15 @@ UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring&
 
     if (delayMs == 0)
     {
-        delayMs = kDefaultAnimationDelayMs;
+        return 0;
     }
-    return std::max(20u, delayMs);
+
+    if (extension == L".gif")
+    {
+        return std::max(10u, delayMs);
+    }
+
+    return std::max(5u, delayMs);
 }
 
 bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics)
@@ -1806,12 +1757,20 @@ bool LoadImageFromFile(const wchar_t* path)
         IWICBitmapFrameDecode* frame = nullptr;
         if (SUCCEEDED(g_animationDecoder->GetFrame(0, &frame)) && frame)
         {
-            g_animationFrameDelayMs = GetFrameDelayFromMetadata(frame, extension);
+            UINT frameDelay = GetFrameDelayFromMetadata(frame, extension);
+            if (frameDelay > 0)
+            {
+                g_animationFrameDelayMs = frameDelay;
+            }
             frame->Release();
         }
         else
         {
-            g_animationFrameDelayMs = kDefaultAnimationDelayMs;
+            g_animationFrameDelayMs = 10;
+        }
+        if (g_animationFrameDelayMs == 0)
+        {
+            g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
         }
         RestartAnimationTimer();
     }
