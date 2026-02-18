@@ -106,6 +106,10 @@ size_t g_animationFrameIndex = 0;
 std::vector<IWICBitmapSource*> g_animationFramesStraight;
 std::vector<IWICBitmapSource*> g_animationFramesPremultiplied;
 std::vector<UINT> g_animationFrameDelaysMs;
+std::vector<UINT> g_animationFrameWidths;
+std::vector<UINT> g_animationFrameHeights;
+UINT g_currentFrameWidth = 0;
+UINT g_currentFrameHeight = 0;
 enum class HtmlInputKey
 {
     Shift = 0,
@@ -375,7 +379,7 @@ constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
 constexpr UINT_PTR kAnimationTimerId = 2002;
-constexpr UINT kDefaultAnimationFrameDelayMs = 100;
+constexpr UINT kDefaultAnimationFrameDelayMs = 33;
 
 // =====================
 // 前方宣言
@@ -1448,6 +1452,8 @@ void DiscardRenderTarget()
     }
     g_imageWidth = 0;
     g_imageHeight = 0;
+    g_currentFrameWidth = 0;
+    g_currentFrameHeight = 0;
     g_imageHasAlpha = false;
 }
 
@@ -1555,7 +1561,11 @@ void ClearAnimationFrames()
     }
     g_animationFramesPremultiplied.clear();
     g_animationFrameDelaysMs.clear();
+    g_animationFrameWidths.clear();
+    g_animationFrameHeights.clear();
     g_animationFrameIndex = 0;
+    g_currentFrameWidth = 0;
+    g_currentFrameHeight = 0;
 }
 
 void StopAnimationPlayback()
@@ -1583,7 +1593,8 @@ UINT GetAnimationFrameDelayMs(size_t frameIndex)
 
 bool SetCurrentAnimationFrame(size_t frameIndex)
 {
-    if (frameIndex >= g_animationFramesStraight.size() || frameIndex >= g_animationFramesPremultiplied.size())
+    if (frameIndex >= g_animationFramesStraight.size() || frameIndex >= g_animationFramesPremultiplied.size()
+        || frameIndex >= g_animationFrameWidths.size() || frameIndex >= g_animationFrameHeights.size())
     {
         return false;
     }
@@ -1632,6 +1643,8 @@ bool SetCurrentAnimationFrame(size_t frameIndex)
     }
 
     g_animationFrameIndex = frameIndex;
+    g_currentFrameWidth = g_animationFrameWidths[frameIndex];
+    g_currentFrameHeight = g_animationFrameHeights[frameIndex];
     return true;
 }
 
@@ -1729,9 +1742,6 @@ bool LoadImageFromFile(const wchar_t* path)
     StopAnimationPlayback();
     ClearAnimationFrames();
 
-    StopAnimationPlayback();
-    ClearAnimationFrames();
-
     if (g_bitmap)
     {
         g_bitmap->Release();
@@ -1786,14 +1796,21 @@ bool LoadImageFromFile(const wchar_t* path)
             goto cleanup;
         }
 
+        UINT frameWidth = 0;
+        UINT frameHeight = 0;
+        hr = currentFrame->GetSize(&frameWidth, &frameHeight);
+        if (FAILED(hr) || frameWidth == 0 || frameHeight == 0)
+        {
+            currentFrame->Release();
+            goto cleanup;
+        }
+
         if (i == 0)
         {
-            hr = currentFrame->GetSize(&g_imageWidth, &g_imageHeight);
-            if (FAILED(hr))
-            {
-                currentFrame->Release();
-                goto cleanup;
-            }
+            g_imageWidth = frameWidth;
+            g_imageHeight = frameHeight;
+            g_currentFrameWidth = frameWidth;
+            g_currentFrameHeight = frameHeight;
 
             hr = currentFrame->GetPixelFormat(&pixelFormat);
             if (SUCCEEDED(hr))
@@ -1856,6 +1873,8 @@ bool LoadImageFromFile(const wchar_t* path)
         g_animationFramesStraight.push_back(currentStraight);
         g_animationFramesPremultiplied.push_back(currentPremultiplied);
         g_animationFrameDelaysMs.push_back(ExtractFrameDelayMs(currentFrame));
+        g_animationFrameWidths.push_back(frameWidth);
+        g_animationFrameHeights.push_back(frameHeight);
 
         currentFrame->Release();
     }
@@ -1886,6 +1905,8 @@ bool LoadImageFromFile(const wchar_t* path)
     g_wicSourcePremultiplied->AddRef();
 
     g_animationFrameIndex = 0;
+    g_currentFrameWidth = g_imageWidth;
+    g_currentFrameHeight = g_imageHeight;
     g_animationPlaying = g_animationFramesPremultiplied.size() > 1;
     if (g_animationPlaying && g_hwnd)
     {
@@ -5570,8 +5591,10 @@ void Render(HWND hwnd)
     else if (g_bitmap)
     {
         float scale = g_zoom;
-        float drawWidth = g_imageWidth * scale;
-        float drawHeight = g_imageHeight * scale;
+        UINT sourceWidth = g_currentFrameWidth > 0 ? g_currentFrameWidth : g_imageWidth;
+        UINT sourceHeight = g_currentFrameHeight > 0 ? g_currentFrameHeight : g_imageHeight;
+        float drawWidth = sourceWidth * scale;
+        float drawHeight = sourceHeight * scale;
 
         UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
 
