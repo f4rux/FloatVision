@@ -99,6 +99,12 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
+Microsoft::WRL::ComPtr<IWICBitmapDecoder> g_animationDecoder;
+UINT g_animationFrameCount = 0;
+UINT g_animationFrameIndex = 0;
+UINT g_animationFrameDelayMs = 100;
+bool g_animationTimerActive = false;
+bool g_isAnimatedImage = false;
 enum class HtmlInputKey
 {
     Shift = 0,
@@ -367,6 +373,8 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kAnimationTimerId = 2002;
+constexpr UINT kDefaultAnimationDelayMs = 100;
 
 // =====================
 // 前方宣言
@@ -442,172 +450,102 @@ void ShowAboutDialog(HWND hwnd);
 bool IsDarkModeEnabled();
 void ApplyImmersiveDarkMode(HWND target, bool enabled);
 static void ApplyExplorerTheme(HWND target);
-#endif
-
-constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
-
-void ShowAboutDialog(HWND hwnd)
+void StopAnimationPlayback(bool clearDecoder = true);
+bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics);
+UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension)
 {
-    constexpr int kIdAboutOpenLink = 2201;
-    auto alignDword = [](std::vector<BYTE>& buffer)
+    if (!frame)
     {
-        while (buffer.size() % 4 != 0)
+        return 0;
+    }
+
+    IWICMetadataQueryReader* reader = nullptr;
+    HRESULT hr = frame->GetMetadataQueryReader(&reader);
+    if (FAILED(hr) || !reader)
+    {
+        return 0;
+    }
+
+    PROPVARIANT value{};
+    PropVariantInit(&value);
+
+    auto queryDelay = [&](const wchar_t* query, bool gifUnit10ms) -> UINT
+    {
+        PropVariantClear(&value);
+        PropVariantInit(&value);
+        if (FAILED(reader->GetMetadataByName(query, &value)))
         {
-            buffer.push_back(0);
+            return 0;
         }
-    };
 
-    auto appendWord = [](std::vector<BYTE>& buffer, WORD value)
-    {
-        buffer.push_back(static_cast<BYTE>(value & 0xFF));
-        buffer.push_back(static_cast<BYTE>((value >> 8) & 0xFF));
-    };
-
-    auto appendDword = [&](std::vector<BYTE>& buffer, DWORD value)
-    {
-        appendWord(buffer, static_cast<WORD>(value & 0xFFFF));
-        appendWord(buffer, static_cast<WORD>((value >> 16) & 0xFFFF));
-    };
-
-    auto appendString = [&](std::vector<BYTE>& buffer, const wchar_t* text)
-    {
-        while (*text)
+        ULONGLONG delayRaw = 0;
+        switch (value.vt)
         {
-            appendWord(buffer, static_cast<WORD>(*text));
-            ++text;
+        case VT_UI1: delayRaw = value.bVal; break;
+        case VT_UI2: delayRaw = value.uiVal; break;
+        case VT_UI4: delayRaw = value.ulVal; break;
+        case VT_UI8: delayRaw = value.uhVal.QuadPart; break;
+        case VT_I1: delayRaw = value.cVal > 0 ? static_cast<ULONGLONG>(value.cVal) : 0; break;
+        case VT_I2: delayRaw = value.iVal > 0 ? static_cast<ULONGLONG>(value.iVal) : 0; break;
+        case VT_I4: delayRaw = value.lVal > 0 ? static_cast<ULONGLONG>(value.lVal) : 0; break;
+        case VT_I8: delayRaw = value.hVal.QuadPart > 0 ? static_cast<ULONGLONG>(value.hVal.QuadPart) : 0; break;
+        default: break;
         }
-        appendWord(buffer, 0);
+
+        if (delayRaw == 0)
+        {
+            return 0;
+        }
+
+        if (gifUnit10ms)
+        {
+            delayRaw *= 10;
+        }
+
+        return delayRaw > static_cast<ULONGLONG>(UINT_MAX)
+            ? UINT_MAX
+            : static_cast<UINT>(delayRaw);
     };
 
-    auto addControl = [&](std::vector<BYTE>& buffer, DWORD style, short x, short y, short cx, short cy, WORD id, WORD classAtom, const wchar_t* text)
+    UINT delayMs = 0;
+    if (extension == L".gif")
     {
-        alignDword(buffer);
-        appendDword(buffer, style);
-        appendDword(buffer, 0);
-        appendWord(buffer, static_cast<WORD>(x));
-        appendWord(buffer, static_cast<WORD>(y));
-        appendWord(buffer, static_cast<WORD>(cx));
-        appendWord(buffer, static_cast<WORD>(cy));
-        appendWord(buffer, id);
-        appendWord(buffer, 0xFFFF);
-        appendWord(buffer, classAtom);
-        appendString(buffer, text);
-        appendWord(buffer, 0);
-    };
-
-    std::vector<BYTE> tmpl;
-    tmpl.reserve(512);
-
-    constexpr float kDialogScale = 0.9f;
-    auto scale = [=](short value)
+        delayMs = queryDelay(L"/grctlext/Delay", true);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/Delay", true);
+        }
+    }
+    else if (extension == L".webp")
     {
-        return static_cast<short>(std::lround(value * kDialogScale));
-    };
+        delayMs = queryDelay(L"/ANMF/FrameDuration", false);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/FrameDuration", false);
+        }
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/anim/FrameDuration", false);
+        }
+    }
 
-    DWORD dialogStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME | DS_SETFONT | DS_SHELLFONT;
-    appendDword(tmpl, dialogStyle);
-    appendDword(tmpl, 0);
-    appendWord(tmpl, 5);
-    appendWord(tmpl, scale(10));
-    appendWord(tmpl, scale(10));
-    appendWord(tmpl, scale(280));
-    appendWord(tmpl, scale(92));
-    appendWord(tmpl, 0);
-    appendWord(tmpl, 0);
-    appendString(tmpl, L"About FloatVision");
-    appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
-    appendString(tmpl, L"Segoe UI");
+    PropVariantClear(&value);
+    reader->Release();
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision ver 1.1.0");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(28), scale(250), scale(12), 0xFFFF, 0x0082, L"Author: f4rux");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(44), scale(250), scale(12), 0xFFFF, 0x0082, L"https://github.com/f4rux/FloatVision");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, scale(12), scale(62), scale(98), scale(18), kIdAboutOpenLink, 0x0080, L"Open project page");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, scale(214), scale(62), scale(54), scale(18), IDOK, 0x0080, L"OK");
-
-    struct AboutDialogState
+    if (delayMs == 0)
     {
-        HBRUSH dialogBrush;
-        COLORREF dialogBackgroundColor;
-        COLORREF dialogTextColor;
-    } state{ nullptr, RGB(255, 255, 255), RGB(0, 0, 0) };
+        return 0;
+    }
 
-    auto dialogProc = [](HWND dlg, UINT msg, WPARAM wParam, LPARAM lParam) -> INT_PTR
+    if (extension == L".gif")
     {
-        auto* dialogState = reinterpret_cast<AboutDialogState*>(GetWindowLongPtr(dlg, GWLP_USERDATA));
-        switch (msg)
-        {
-        case WM_INITDIALOG:
-        {
-            dialogState = reinterpret_cast<AboutDialogState*>(lParam);
-            SetWindowLongPtr(dlg, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(dialogState));
+        return std::max(10u, delayMs);
+    }
 
-            bool darkMode = IsDarkModeEnabled();
-            dialogState->dialogBackgroundColor = darkMode ? RGB(32, 32, 32) : RGB(255, 255, 255);
-            dialogState->dialogTextColor = darkMode ? RGB(240, 240, 240) : RGB(0, 0, 0);
-            dialogState->dialogBrush = CreateSolidBrush(dialogState->dialogBackgroundColor);
-
-            const wchar_t* themeName = darkMode ? L"DarkMode_Explorer" : L"Explorer";
-            ApplyImmersiveDarkMode(dlg, darkMode);
-            SetWindowTheme(dlg, themeName, nullptr);
-            EnumChildWindows(
-                dlg,
-                [](HWND child, LPARAM param) -> BOOL
-                {
-                    const auto* themeName = reinterpret_cast<const wchar_t*>(param);
-                    SetWindowTheme(child, themeName, nullptr);
-                    return TRUE;
-                },
-                reinterpret_cast<LPARAM>(themeName)
-            );
-            return TRUE;
-        }
-        case WM_COMMAND:
-        {
-            switch (LOWORD(wParam))
-            {
-            case kIdAboutOpenLink:
-                ShellExecuteW(dlg, L"open", kAboutProjectUrl, nullptr, nullptr, SW_SHOWNORMAL);
-                return TRUE;
-            case IDOK:
-            case IDCANCEL:
-                EndDialog(dlg, IDOK);
-                return TRUE;
-            }
-            break;
-        }
-        case WM_CTLCOLORDLG:
-        case WM_CTLCOLORSTATIC:
-        case WM_CTLCOLORBTN:
-        {
-            if (!dialogState)
-            {
-                break;
-            }
-            HDC hdc = reinterpret_cast<HDC>(wParam);
-            SetTextColor(hdc, dialogState->dialogTextColor);
-            SetBkColor(hdc, dialogState->dialogBackgroundColor);
-            SetBkMode(hdc, TRANSPARENT);
-            return reinterpret_cast<INT_PTR>(dialogState->dialogBrush);
-        }
-        case WM_DESTROY:
-            if (dialogState && dialogState->dialogBrush)
-            {
-                DeleteObject(dialogState->dialogBrush);
-                dialogState->dialogBrush = nullptr;
-            }
-            break;
-        }
-        return FALSE;
-    };
-
-    DialogBoxIndirectParamW(
-        GetModuleHandle(nullptr),
-        reinterpret_cast<DLGTEMPLATE*>(tmpl.data()),
-        hwnd,
-        dialogProc,
-        reinterpret_cast<LPARAM>(&state)
-    );
+    return std::max(5u, delayMs);
 }
+
+
 
 bool IsImageFile(const std::filesystem::path& path)
 {
@@ -1285,6 +1223,38 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         }
+        if (wParam == kAnimationTimerId)
+        {
+            if (g_isAnimatedImage && g_animationDecoder && g_animationFrameCount > 1)
+            {
+                g_animationFrameIndex = (g_animationFrameIndex + 1) % g_animationFrameCount;
+                if (DecodeAnimationFrame(g_animationFrameIndex, false))
+                {
+                    std::wstring extension = g_currentImagePath.extension().wstring();
+                    std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t ch)
+                    {
+                        return static_cast<wchar_t>(std::towlower(ch));
+                    });
+                    IWICBitmapFrameDecode* frame = nullptr;
+                    if (SUCCEEDED(g_animationDecoder->GetFrame(g_animationFrameIndex, &frame)) && frame)
+                    {
+                        UINT frameDelay = GetFrameDelayFromMetadata(frame, extension);
+                        if (frameDelay > 0)
+                        {
+                            g_animationFrameDelayMs = frameDelay;
+                        }
+                        frame->Release();
+                    }
+                    if (g_animationFrameDelayMs == 0)
+                    {
+                        g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
+                    }
+                    RestartAnimationTimer();
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
+            }
+            return 0;
+        }
         break;
     }
 
@@ -1363,6 +1333,7 @@ bool InitDirect2D(HWND hwnd)
 
 void DiscardRenderTarget()
 {
+    StopAnimationPlayback();
     if (g_placeholderBrush)
     {
         g_placeholderBrush->Release();
@@ -1497,63 +1468,158 @@ bool InitDirectWrite()
     return true;
 }
 
-// =====================
-// 画像ロード
-// =====================
-bool LoadImageFromFile(const wchar_t* path)
+void StopAnimationPlayback(bool clearDecoder)
 {
-    IWICBitmapDecoder* decoder = nullptr;
+    if (g_animationTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kAnimationTimerId);
+        g_animationTimerActive = false;
+    }
+
+    g_isAnimatedImage = false;
+    g_animationFrameCount = 0;
+    g_animationFrameIndex = 0;
+    g_animationFrameDelayMs = kDefaultAnimationDelayMs;
+
+    if (clearDecoder)
+    {
+        g_animationDecoder.Reset();
+    }
+}
+
+void RestartAnimationTimer()
+{
+    if (!g_hwnd || !g_isAnimatedImage || g_animationFrameCount <= 1)
+    {
+        return;
+    }
+    if (g_animationTimerActive)
+    {
+        KillTimer(g_hwnd, kAnimationTimerId);
+    }
+    SetTimer(g_hwnd, kAnimationTimerId, std::max(1u, g_animationFrameDelayMs), nullptr);
+    g_animationTimerActive = true;
+}
+
+UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension)
+{
+    if (!frame)
+    {
+        return 0;
+    }
+
+    IWICMetadataQueryReader* reader = nullptr;
+    HRESULT hr = frame->GetMetadataQueryReader(&reader);
+    if (FAILED(hr) || !reader)
+    {
+        return 0;
+    }
+
+    PROPVARIANT value{};
+    PropVariantInit(&value);
+
+    auto queryDelay = [&](const wchar_t* query, bool gifUnit10ms) -> UINT
+    {
+        PropVariantClear(&value);
+        PropVariantInit(&value);
+        if (FAILED(reader->GetMetadataByName(query, &value)))
+        {
+            return 0;
+        }
+
+        ULONGLONG delayRaw = 0;
+        switch (value.vt)
+        {
+        case VT_UI1: delayRaw = value.bVal; break;
+        case VT_UI2: delayRaw = value.uiVal; break;
+        case VT_UI4: delayRaw = value.ulVal; break;
+        case VT_UI8: delayRaw = value.uhVal.QuadPart; break;
+        case VT_I1: delayRaw = value.cVal > 0 ? static_cast<ULONGLONG>(value.cVal) : 0; break;
+        case VT_I2: delayRaw = value.iVal > 0 ? static_cast<ULONGLONG>(value.iVal) : 0; break;
+        case VT_I4: delayRaw = value.lVal > 0 ? static_cast<ULONGLONG>(value.lVal) : 0; break;
+        case VT_I8: delayRaw = value.hVal.QuadPart > 0 ? static_cast<ULONGLONG>(value.hVal.QuadPart) : 0; break;
+        default: break;
+        }
+
+        if (delayRaw == 0)
+        {
+            return 0;
+        }
+
+        if (gifUnit10ms)
+        {
+            delayRaw *= 10;
+        }
+
+        return delayRaw > static_cast<ULONGLONG>(UINT_MAX)
+            ? UINT_MAX
+            : static_cast<UINT>(delayRaw);
+    };
+
+    UINT delayMs = 0;
+    if (extension == L".gif")
+    {
+        delayMs = queryDelay(L"/grctlext/Delay", true);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/Delay", true);
+        }
+    }
+    else if (extension == L".webp")
+    {
+        delayMs = queryDelay(L"/ANMF/FrameDuration", false);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/FrameDuration", false);
+        }
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/anim/FrameDuration", false);
+        }
+    }
+
+    PropVariantClear(&value);
+    reader->Release();
+
+    if (delayMs == 0)
+    {
+        return 0;
+    }
+
+    if (extension == L".gif")
+    {
+        return std::max(10u, delayMs);
+    }
+
+    return std::max(5u, delayMs);
+}
+
+bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics)
+{
+    if (!g_animationDecoder)
+    {
+        return false;
+    }
+
     IWICBitmapFrameDecode* frame = nullptr;
     IWICFormatConverter* converterStraight = nullptr;
     IWICFormatConverter* converterPremultiplied = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
     D2D1_BITMAP_PROPERTIES bitmapProperties{};
 
-    if (g_bitmap)
-    {
-        g_bitmap->Release();
-        g_bitmap = nullptr;
-    }
-    if (g_wicSourceStraight)
-    {
-        g_wicSourceStraight->Release();
-        g_wicSourceStraight = nullptr;
-    }
-    if (g_wicSourcePremultiplied)
-    {
-        g_wicSourcePremultiplied->Release();
-        g_wicSourcePremultiplied = nullptr;
-    }
-    g_imageWidth = 0;
-    g_imageHeight = 0;
-    g_imageHasAlpha = false;
-    g_hasText = false;
-    g_textContent.clear();
-    g_hasHtml = false;
-    g_pendingHtmlContent.clear();
-    g_webviewPendingShow = false;
-    g_keepLayeredWhileHtmlPending = false;
-    HideWebView();
-
-    HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
-        path,
-        nullptr,
-        GENERIC_READ,
-        WICDecodeMetadataCacheOnDemand,
-        &decoder
-    );
+    HRESULT hr = g_animationDecoder->GetFrame(frameIndex, &frame);
     if (FAILED(hr)) goto cleanup;
 
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetPixelFormat(&pixelFormat);
-    if (SUCCEEDED(hr))
+    if (updateImageMetrics)
     {
-        g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+        hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = frame->GetPixelFormat(&pixelFormat);
+        if (SUCCEEDED(hr))
+        {
+            g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+        }
     }
 
     hr = g_wicFactory->CreateFormatConverter(&converterStraight);
@@ -1587,6 +1653,22 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+
     bitmapProperties = D2D1::BitmapProperties(
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
     );
@@ -1596,17 +1678,7 @@ bool LoadImageFromFile(const wchar_t* path)
         &bitmapProperties,
         &g_bitmap
     );
-    if (FAILED(hr))
-    {
-        bitmapProperties = D2D1::BitmapProperties(
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
-        );
-        hr = g_renderTarget->CreateBitmapFromWicBitmap(
-            converterPremultiplied,
-            &bitmapProperties,
-            &g_bitmap
-        );
-    }
+
     if (SUCCEEDED(hr))
     {
         g_wicSourceStraight = converterStraight;
@@ -1616,10 +1688,99 @@ bool LoadImageFromFile(const wchar_t* path)
     }
 
 cleanup:
-    if (decoder) decoder->Release();
     if (frame) frame->Release();
     if (converterStraight) converterStraight->Release();
     if (converterPremultiplied) converterPremultiplied->Release();
+    return SUCCEEDED(hr);
+}
+
+// =====================
+// 画像ロード
+// =====================
+bool LoadImageFromFile(const wchar_t* path)
+{
+    IWICBitmapDecoder* decoder = nullptr;
+    std::wstring extension = std::filesystem::path(path).extension().wstring();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t ch)
+    {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+    StopAnimationPlayback();
+    g_imageWidth = 0;
+    g_imageHeight = 0;
+    g_imageHasAlpha = false;
+    g_hasText = false;
+    g_textContent.clear();
+    g_hasHtml = false;
+    g_pendingHtmlContent.clear();
+    g_webviewPendingShow = false;
+    g_keepLayeredWhileHtmlPending = false;
+    HideWebView();
+
+    HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
+        path,
+        nullptr,
+        GENERIC_READ,
+        WICDecodeMetadataCacheOnDemand,
+        &decoder
+    );
+    if (FAILED(hr)) goto cleanup;
+
+    hr = decoder->GetFrameCount(&g_animationFrameCount);
+    if (FAILED(hr)) goto cleanup;
+
+    g_animationDecoder = decoder;
+    g_animationFrameIndex = 0;
+    g_isAnimatedImage = g_animationFrameCount > 1 && (extension == L".gif" || extension == L".webp");
+
+    hr = DecodeAnimationFrame(0, true) ? S_OK : E_FAIL;
+    if (FAILED(hr)) goto cleanup;
+
+    if (g_isAnimatedImage)
+    {
+        IWICBitmapFrameDecode* frame = nullptr;
+        if (SUCCEEDED(g_animationDecoder->GetFrame(0, &frame)) && frame)
+        {
+            UINT frameDelay = GetFrameDelayFromMetadata(frame, extension);
+            if (frameDelay > 0)
+            {
+                g_animationFrameDelayMs = frameDelay;
+            }
+            frame->Release();
+        }
+        else
+        {
+            g_animationFrameDelayMs = 10;
+        }
+        if (g_animationFrameDelayMs == 0)
+        {
+            g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
+        }
+        RestartAnimationTimer();
+    }
+
+cleanup:
+    if (decoder) decoder->Release();
+    if (FAILED(hr))
+    {
+        StopAnimationPlayback();
+    }
 
     ApplyTransparencyMode();
     return SUCCEEDED(hr);
