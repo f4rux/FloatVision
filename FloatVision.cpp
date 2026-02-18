@@ -460,95 +460,22 @@ constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
 
 void ShowAboutDialog(HWND hwnd)
 {
-    if (!frame)
+    const wchar_t* aboutText =
+        L"FloatVision\n"
+        L"A lightweight floating image viewer.\n\n"
+        L"Open the project page?";
+
+    int result = MessageBoxW(
+        hwnd,
+        aboutText,
+        L"About FloatVision",
+        MB_ICONINFORMATION | MB_YESNO
+    );
+
+    if (result == IDYES)
     {
-        return 0;
+        ShellExecuteW(hwnd, L"open", kAboutProjectUrl, nullptr, nullptr, SW_SHOWNORMAL);
     }
-
-    IWICMetadataQueryReader* reader = nullptr;
-    HRESULT hr = frame->GetMetadataQueryReader(&reader);
-    if (FAILED(hr) || !reader)
-    {
-        return 0;
-    }
-
-    PROPVARIANT value{};
-    PropVariantInit(&value);
-
-    auto queryDelay = [&](const wchar_t* query, bool gifUnit10ms) -> UINT
-    {
-        PropVariantClear(&value);
-        PropVariantInit(&value);
-        if (FAILED(reader->GetMetadataByName(query, &value)))
-        {
-            return 0;
-        }
-
-        ULONGLONG delayRaw = 0;
-        switch (value.vt)
-        {
-        case VT_UI1: delayRaw = value.bVal; break;
-        case VT_UI2: delayRaw = value.uiVal; break;
-        case VT_UI4: delayRaw = value.ulVal; break;
-        case VT_UI8: delayRaw = value.uhVal.QuadPart; break;
-        case VT_I1: delayRaw = value.cVal > 0 ? static_cast<ULONGLONG>(value.cVal) : 0; break;
-        case VT_I2: delayRaw = value.iVal > 0 ? static_cast<ULONGLONG>(value.iVal) : 0; break;
-        case VT_I4: delayRaw = value.lVal > 0 ? static_cast<ULONGLONG>(value.lVal) : 0; break;
-        case VT_I8: delayRaw = value.hVal.QuadPart > 0 ? static_cast<ULONGLONG>(value.hVal.QuadPart) : 0; break;
-        default: break;
-        }
-
-        if (delayRaw == 0)
-        {
-            return 0;
-        }
-
-        if (gifUnit10ms)
-        {
-            delayRaw *= 10;
-        }
-
-        return delayRaw > static_cast<ULONGLONG>(UINT_MAX)
-            ? UINT_MAX
-            : static_cast<UINT>(delayRaw);
-    };
-
-    UINT delayMs = 0;
-    if (extension == L".gif")
-    {
-        delayMs = queryDelay(L"/grctlext/Delay", true);
-        if (delayMs == 0)
-        {
-            delayMs = queryDelay(L"/imgdesc/Delay", true);
-        }
-    }
-    else if (extension == L".webp")
-    {
-        delayMs = queryDelay(L"/ANMF/FrameDuration", false);
-        if (delayMs == 0)
-        {
-            delayMs = queryDelay(L"/imgdesc/FrameDuration", false);
-        }
-        if (delayMs == 0)
-        {
-            delayMs = queryDelay(L"/anim/FrameDuration", false);
-        }
-    }
-
-    PropVariantClear(&value);
-    reader->Release();
-
-    if (delayMs == 0)
-    {
-        return 0;
-    }
-
-    if (extension == L".gif")
-    {
-        return std::max(10u, delayMs);
-    }
-
-    return std::max(5u, delayMs);
 }
 
 
