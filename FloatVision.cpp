@@ -10,6 +10,7 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <shlwapi.h>
+#include <propvarutil.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -35,6 +36,7 @@
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Propsys.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #ifndef FLOATVISION_GLOBALS_DEFINED
@@ -99,6 +101,15 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
+bool g_animationPlaying = false;
+size_t g_animationFrameIndex = 0;
+std::vector<IWICBitmapSource*> g_animationFramesStraight;
+std::vector<IWICBitmapSource*> g_animationFramesPremultiplied;
+std::vector<UINT> g_animationFrameDelaysMs;
+std::vector<UINT> g_animationFrameWidths;
+std::vector<UINT> g_animationFrameHeights;
+UINT g_currentFrameWidth = 0;
+UINT g_currentFrameHeight = 0;
 enum class HtmlInputKey
 {
     Shift = 0,
@@ -367,6 +378,8 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kAnimationTimerId = 2002;
+constexpr UINT kDefaultAnimationFrameDelayMs = 33;
 
 // =====================
 // 前方宣言
@@ -401,6 +414,12 @@ void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
 bool ImageHasTransparency(IWICBitmapSource* source);
+void StopAnimationPlayback();
+void ClearAnimationFrames();
+bool SetCurrentAnimationFrame(size_t frameIndex);
+UINT GetAnimationFrameDelayMs(size_t frameIndex);
+bool TryGetMetadataUInt32(IWICMetadataQueryReader* reader, const wchar_t* key, UINT32& value);
+UINT ExtractFrameDelayMs(IWICBitmapFrameDecode* frame);
 void ApplyTransparencyMode();
 void UpdateCustomColorBrush();
 void ShowSettingsDialog(HWND hwnd);
@@ -1285,6 +1304,26 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         }
+        if (wParam == kAnimationTimerId)
+        {
+            if (!g_animationPlaying || g_animationFramesPremultiplied.size() < 2 || !g_bitmap)
+            {
+                StopAnimationPlayback();
+                return 0;
+            }
+
+            size_t nextFrame = (g_animationFrameIndex + 1) % g_animationFramesPremultiplied.size();
+            if (!SetCurrentAnimationFrame(nextFrame))
+            {
+                StopAnimationPlayback();
+                return 0;
+            }
+
+            UINT nextDelay = GetAnimationFrameDelayMs(nextFrame);
+            SetTimer(hwnd, kAnimationTimerId, nextDelay, nullptr);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
         break;
     }
 
@@ -1363,6 +1402,9 @@ bool InitDirect2D(HWND hwnd)
 
 void DiscardRenderTarget()
 {
+    StopAnimationPlayback();
+    ClearAnimationFrames();
+
     if (g_placeholderBrush)
     {
         g_placeholderBrush->Release();
@@ -1410,6 +1452,8 @@ void DiscardRenderTarget()
     }
     g_imageWidth = 0;
     g_imageHeight = 0;
+    g_currentFrameWidth = 0;
+    g_currentFrameHeight = 0;
     g_imageHasAlpha = false;
 }
 
@@ -1497,17 +1541,210 @@ bool InitDirectWrite()
     return true;
 }
 
+void ClearAnimationFrames()
+{
+    for (IWICBitmapSource* source : g_animationFramesStraight)
+    {
+        if (source)
+        {
+            source->Release();
+        }
+    }
+    g_animationFramesStraight.clear();
+
+    for (IWICBitmapSource* source : g_animationFramesPremultiplied)
+    {
+        if (source)
+        {
+            source->Release();
+        }
+    }
+    g_animationFramesPremultiplied.clear();
+    g_animationFrameDelaysMs.clear();
+    g_animationFrameWidths.clear();
+    g_animationFrameHeights.clear();
+    g_animationFrameIndex = 0;
+    g_currentFrameWidth = 0;
+    g_currentFrameHeight = 0;
+}
+
+void StopAnimationPlayback()
+{
+    if (g_animationPlaying && g_hwnd)
+    {
+        KillTimer(g_hwnd, kAnimationTimerId);
+    }
+    g_animationPlaying = false;
+}
+
+UINT GetAnimationFrameDelayMs(size_t frameIndex)
+{
+    if (frameIndex >= g_animationFrameDelaysMs.size())
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+    UINT delay = g_animationFrameDelaysMs[frameIndex];
+    if (delay == 0)
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+    return delay;
+}
+
+bool SetCurrentAnimationFrame(size_t frameIndex)
+{
+    if (frameIndex >= g_animationFramesStraight.size() || frameIndex >= g_animationFramesPremultiplied.size()
+        || frameIndex >= g_animationFrameWidths.size() || frameIndex >= g_animationFrameHeights.size())
+    {
+        return false;
+    }
+
+    IWICBitmapSource* straight = g_animationFramesStraight[frameIndex];
+    IWICBitmapSource* premultiplied = g_animationFramesPremultiplied[frameIndex];
+    if (!straight || !premultiplied)
+    {
+        return false;
+    }
+
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+
+    g_wicSourceStraight = straight;
+    g_wicSourceStraight->AddRef();
+    g_wicSourcePremultiplied = premultiplied;
+    g_wicSourcePremultiplied->AddRef();
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+
+    D2D1_BITMAP_PROPERTIES bitmapProperties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+    );
+
+    HRESULT hr = g_renderTarget->CreateBitmapFromWicBitmap(
+        g_wicSourcePremultiplied,
+        &bitmapProperties,
+        &g_bitmap
+    );
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    g_animationFrameIndex = frameIndex;
+    g_currentFrameWidth = g_animationFrameWidths[frameIndex];
+    g_currentFrameHeight = g_animationFrameHeights[frameIndex];
+    return true;
+}
+
+bool TryGetMetadataUInt32(IWICMetadataQueryReader* reader, const wchar_t* key, UINT32& value)
+{
+    if (!reader)
+    {
+        return false;
+    }
+
+    PROPVARIANT variant;
+    PropVariantInit(&variant);
+    HRESULT hr = reader->GetMetadataByName(key, &variant);
+    if (FAILED(hr))
+    {
+        PropVariantClear(&variant);
+        return false;
+    }
+
+    bool converted = false;
+    UINT32 temp = 0;
+    if (SUCCEEDED(PropVariantToUInt32(variant, &temp)))
+    {
+        converted = true;
+    }
+    else if (variant.vt == VT_UI2)
+    {
+        temp = variant.uiVal;
+        converted = true;
+    }
+    else if (variant.vt == VT_UI1)
+    {
+        temp = variant.bVal;
+        converted = true;
+    }
+
+    PropVariantClear(&variant);
+    if (!converted)
+    {
+        return false;
+    }
+
+    value = temp;
+    return true;
+}
+
+UINT ExtractFrameDelayMs(IWICBitmapFrameDecode* frame)
+{
+    if (!frame)
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+
+    IWICMetadataQueryReader* frameMetadata = nullptr;
+    HRESULT hr = frame->GetMetadataQueryReader(&frameMetadata);
+    if (FAILED(hr) || !frameMetadata)
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+
+    UINT32 value = 0;
+    UINT delayMs = kDefaultAnimationFrameDelayMs;
+
+    if (TryGetMetadataUInt32(frameMetadata, L"/grctlext/Delay", value)
+        || TryGetMetadataUInt32(frameMetadata, L"/grctlext/DelayTime", value))
+    {
+        if (value > 0 && value <= (UINT_MAX / 10))
+        {
+            delayMs = static_cast<UINT>(value * 10);
+        }
+    }
+    else if (TryGetMetadataUInt32(frameMetadata, L"/ANMF/FrameDuration", value)
+        || TryGetMetadataUInt32(frameMetadata, L"/ANIM/FrameDuration", value))
+    {
+        if (value > 0)
+        {
+            delayMs = static_cast<UINT>(value);
+        }
+    }
+
+    frameMetadata->Release();
+    return delayMs == 0 ? kDefaultAnimationFrameDelayMs : delayMs;
+}
+
 // =====================
 // 画像ロード
 // =====================
 bool LoadImageFromFile(const wchar_t* path)
 {
     IWICBitmapDecoder* decoder = nullptr;
-    IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* converterStraight = nullptr;
-    IWICFormatConverter* converterPremultiplied = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
     D2D1_BITMAP_PROPERTIES bitmapProperties{};
+    UINT frameCount = 0;
+    UINT canvasWidth = 0;
+    UINT canvasHeight = 0;
+    std::vector<BYTE> previousCanvas;
+    std::vector<BYTE> workingCanvas;
+
+    StopAnimationPlayback();
+    ClearAnimationFrames();
 
     if (g_bitmap)
     {
@@ -1544,82 +1781,304 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetPixelFormat(&pixelFormat);
-    if (SUCCEEDED(hr))
+    hr = decoder->GetFrameCount(&frameCount);
+    if (FAILED(hr) || frameCount == 0)
     {
-        g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+        goto cleanup;
     }
 
-    hr = g_wicFactory->CreateFormatConverter(&converterStraight);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = converterStraight->Initialize(
-        frame,
-        GUID_WICPixelFormat32bppBGRA,
-        WICBitmapDitherTypeNone,
-        nullptr,
-        0.0,
-        WICBitmapPaletteTypeCustom
-    );
-    if (FAILED(hr)) goto cleanup;
-
-    if (!g_imageHasAlpha)
+    IWICMetadataQueryReader* decoderMetadata = nullptr;
+    if (SUCCEEDED(decoder->GetMetadataQueryReader(&decoderMetadata)) && decoderMetadata)
     {
-        g_imageHasAlpha = ImageHasTransparency(converterStraight);
+        UINT32 metadataWidth = 0;
+        UINT32 metadataHeight = 0;
+        if (TryGetMetadataUInt32(decoderMetadata, L"/logscrdesc/Width", metadataWidth)
+            && TryGetMetadataUInt32(decoderMetadata, L"/logscrdesc/Height", metadataHeight)
+            && metadataWidth > 0 && metadataHeight > 0)
+        {
+            canvasWidth = metadataWidth;
+            canvasHeight = metadataHeight;
+        }
+        else if (TryGetMetadataUInt32(decoderMetadata, L"/ANIM/CanvasWidth", metadataWidth)
+            && TryGetMetadataUInt32(decoderMetadata, L"/ANIM/CanvasHeight", metadataHeight)
+            && metadataWidth > 0 && metadataHeight > 0)
+        {
+            canvasWidth = metadataWidth;
+            canvasHeight = metadataHeight;
+        }
+        decoderMetadata->Release();
     }
 
-    hr = g_wicFactory->CreateFormatConverter(&converterPremultiplied);
-    if (FAILED(hr)) goto cleanup;
+    for (UINT i = 0; i < frameCount; ++i)
+    {
+        IWICBitmapFrameDecode* currentFrame = nullptr;
+        IWICFormatConverter* decodedFrameStraight = nullptr;
+        IWICBitmap* composedFrameBitmap = nullptr;
+        IWICFormatConverter* currentPremultiplied = nullptr;
 
-    hr = converterPremultiplied->Initialize(
-        converterStraight,
-        GUID_WICPixelFormat32bppPBGRA,
-        WICBitmapDitherTypeNone,
-        nullptr,
-        0.0,
-        WICBitmapPaletteTypeCustom
-    );
-    if (FAILED(hr)) goto cleanup;
+        hr = decoder->GetFrame(i, &currentFrame);
+        if (FAILED(hr) || !currentFrame)
+        {
+            if (currentFrame) currentFrame->Release();
+            goto cleanup;
+        }
+
+        UINT frameWidth = 0;
+        UINT frameHeight = 0;
+        hr = currentFrame->GetSize(&frameWidth, &frameHeight);
+        if (FAILED(hr) || frameWidth == 0 || frameHeight == 0)
+        {
+            currentFrame->Release();
+            goto cleanup;
+        }
+
+        if (i == 0)
+        {
+            if (canvasWidth == 0 || canvasHeight == 0)
+            {
+                canvasWidth = frameWidth;
+                canvasHeight = frameHeight;
+            }
+            g_imageWidth = canvasWidth;
+            g_imageHeight = canvasHeight;
+            g_currentFrameWidth = canvasWidth;
+            g_currentFrameHeight = canvasHeight;
+
+            hr = currentFrame->GetPixelFormat(&pixelFormat);
+            if (SUCCEEDED(hr))
+            {
+                g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+            }
+
+            size_t canvasBufferSize = static_cast<size_t>(canvasWidth) * static_cast<size_t>(canvasHeight) * 4;
+            previousCanvas.assign(canvasBufferSize, 0);
+            workingCanvas.assign(canvasBufferSize, 0);
+        }
+
+        hr = g_wicFactory->CreateFormatConverter(&decodedFrameStraight);
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            goto cleanup;
+        }
+
+        hr = decodedFrameStraight->Initialize(
+            currentFrame,
+            GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom
+        );
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
+            goto cleanup;
+        }
+
+        UINT32 frameLeft = 0;
+        UINT32 frameTop = 0;
+        UINT32 disposal = 0;
+        IWICMetadataQueryReader* frameMetadata = nullptr;
+        if (SUCCEEDED(currentFrame->GetMetadataQueryReader(&frameMetadata)) && frameMetadata)
+        {
+            TryGetMetadataUInt32(frameMetadata, L"/imgdesc/Left", frameLeft);
+            TryGetMetadataUInt32(frameMetadata, L"/imgdesc/Top", frameTop);
+            if (!TryGetMetadataUInt32(frameMetadata, L"/grctlext/Disposal", disposal))
+            {
+                TryGetMetadataUInt32(frameMetadata, L"/grctlext/DisposalMethod", disposal);
+            }
+            frameMetadata->Release();
+        }
+
+        UINT srcStride = frameWidth * 4;
+        std::vector<BYTE> framePixels(static_cast<size_t>(srcStride) * frameHeight, 0);
+        WICRect frameRect{ 0, 0, static_cast<INT>(frameWidth), static_cast<INT>(frameHeight) };
+        hr = decodedFrameStraight->CopyPixels(&frameRect, srcStride, static_cast<UINT>(framePixels.size()), framePixels.data());
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
+            goto cleanup;
+        }
+
+        std::vector<BYTE> beforeFrame = previousCanvas;
+        workingCanvas = previousCanvas;
+
+        auto blendPixel = [](BYTE* dst, const BYTE* src)
+        {
+            UINT srcA = src[3];
+            if (srcA == 0)
+            {
+                return;
+            }
+            UINT dstA = dst[3];
+            UINT outA = srcA + ((dstA * (255 - srcA) + 127) / 255);
+            for (int c = 0; c < 3; ++c)
+            {
+                UINT srcC = src[c];
+                UINT dstC = dst[c];
+                UINT outC = srcC + ((dstC * (255 - srcA) + 127) / 255);
+                dst[c] = static_cast<BYTE>(std::min(outC, 255u));
+            }
+            dst[3] = static_cast<BYTE>(std::min(outA, 255u));
+        };
+
+        for (UINT y = 0; y < frameHeight; ++y)
+        {
+            UINT dstY = frameTop + y;
+            if (dstY >= canvasHeight)
+            {
+                continue;
+            }
+            for (UINT x = 0; x < frameWidth; ++x)
+            {
+                UINT dstX = frameLeft + x;
+                if (dstX >= canvasWidth)
+                {
+                    continue;
+                }
+                size_t srcIndex = (static_cast<size_t>(y) * frameWidth + x) * 4;
+                size_t dstIndex = (static_cast<size_t>(dstY) * canvasWidth + dstX) * 4;
+                blendPixel(&workingCanvas[dstIndex], &framePixels[srcIndex]);
+            }
+        }
+
+        UINT canvasStride = canvasWidth * 4;
+        hr = g_wicFactory->CreateBitmapFromMemory(
+            canvasWidth,
+            canvasHeight,
+            GUID_WICPixelFormat32bppBGRA,
+            canvasStride,
+            static_cast<UINT>(workingCanvas.size()),
+            workingCanvas.data(),
+            &composedFrameBitmap
+        );
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
+            goto cleanup;
+        }
+
+        hr = g_wicFactory->CreateFormatConverter(&currentPremultiplied);
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
+            composedFrameBitmap->Release();
+            goto cleanup;
+        }
+
+        hr = currentPremultiplied->Initialize(
+            composedFrameBitmap,
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom
+        );
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
+            composedFrameBitmap->Release();
+            currentPremultiplied->Release();
+            goto cleanup;
+        }
+
+        if (!g_imageHasAlpha && ImageHasTransparency(composedFrameBitmap))
+        {
+            g_imageHasAlpha = true;
+        }
+
+        g_animationFramesStraight.push_back(composedFrameBitmap);
+        g_animationFramesPremultiplied.push_back(currentPremultiplied);
+        g_animationFrameDelaysMs.push_back(ExtractFrameDelayMs(currentFrame));
+        g_animationFrameWidths.push_back(canvasWidth);
+        g_animationFrameHeights.push_back(canvasHeight);
+
+        if (disposal == 2)
+        {
+            previousCanvas = workingCanvas;
+            for (UINT y = 0; y < frameHeight; ++y)
+            {
+                UINT dstY = frameTop + y;
+                if (dstY >= canvasHeight)
+                {
+                    continue;
+                }
+                for (UINT x = 0; x < frameWidth; ++x)
+                {
+                    UINT dstX = frameLeft + x;
+                    if (dstX >= canvasWidth)
+                    {
+                        continue;
+                    }
+                    size_t dstIndex = (static_cast<size_t>(dstY) * canvasWidth + dstX) * 4;
+                    previousCanvas[dstIndex + 0] = 0;
+                    previousCanvas[dstIndex + 1] = 0;
+                    previousCanvas[dstIndex + 2] = 0;
+                    previousCanvas[dstIndex + 3] = 0;
+                }
+            }
+        }
+        else if (disposal == 3)
+        {
+            previousCanvas = beforeFrame;
+        }
+        else
+        {
+            previousCanvas = workingCanvas;
+        }
+
+        currentFrame->Release();
+        decodedFrameStraight->Release();
+    }
+
+    if (g_animationFramesPremultiplied.empty())
+    {
+        hr = E_FAIL;
+        goto cleanup;
+    }
 
     bitmapProperties = D2D1::BitmapProperties(
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
     );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
-        converterPremultiplied,
+        g_animationFramesPremultiplied[0],
         &bitmapProperties,
         &g_bitmap
     );
     if (FAILED(hr))
     {
-        bitmapProperties = D2D1::BitmapProperties(
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
-        );
-        hr = g_renderTarget->CreateBitmapFromWicBitmap(
-            converterPremultiplied,
-            &bitmapProperties,
-            &g_bitmap
-        );
+        goto cleanup;
     }
-    if (SUCCEEDED(hr))
+
+    g_wicSourceStraight = g_animationFramesStraight[0];
+    g_wicSourceStraight->AddRef();
+    g_wicSourcePremultiplied = g_animationFramesPremultiplied[0];
+    g_wicSourcePremultiplied->AddRef();
+
+    g_animationFrameIndex = 0;
+    g_currentFrameWidth = g_imageWidth;
+    g_currentFrameHeight = g_imageHeight;
+    g_animationPlaying = g_animationFramesPremultiplied.size() > 1;
+    if (g_animationPlaying && g_hwnd)
     {
-        g_wicSourceStraight = converterStraight;
-        g_wicSourceStraight->AddRef();
-        g_wicSourcePremultiplied = converterPremultiplied;
-        g_wicSourcePremultiplied->AddRef();
+        UINT delay = GetAnimationFrameDelayMs(0);
+        SetTimer(g_hwnd, kAnimationTimerId, delay, nullptr);
     }
 
 cleanup:
     if (decoder) decoder->Release();
-    if (frame) frame->Release();
-    if (converterStraight) converterStraight->Release();
-    if (converterPremultiplied) converterPremultiplied->Release();
+    if (FAILED(hr))
+    {
+        StopAnimationPlayback();
+        ClearAnimationFrames();
+    }
 
     ApplyTransparencyMode();
     return SUCCEEDED(hr);
@@ -2504,6 +2963,9 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
 
 bool ApplyHtmlContent(std::wstring html)
 {
+    StopAnimationPlayback();
+    ClearAnimationFrames();
+
     bool keepLayered = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
     if (g_bitmap)
     {
@@ -5287,23 +5749,30 @@ void Render(HWND hwnd)
     else if (g_bitmap)
     {
         float scale = g_zoom;
-        float drawWidth = g_imageWidth * scale;
-        float drawHeight = g_imageHeight * scale;
+        UINT canvasWidth = g_imageWidth;
+        UINT canvasHeight = g_imageHeight;
+        UINT frameWidth = g_currentFrameWidth > 0 ? g_currentFrameWidth : canvasWidth;
+        UINT frameHeight = g_currentFrameHeight > 0 ? g_currentFrameHeight : canvasHeight;
 
-        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
+        float canvasDrawWidth = canvasWidth * scale;
+        float canvasDrawHeight = canvasHeight * scale;
+        float frameDrawWidth = frameWidth * scale;
+        float frameDrawHeight = frameHeight * scale;
 
-        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        UpdateWindowSizeToImage(hwnd, canvasDrawWidth, canvasDrawHeight);
+
+        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent && !g_animationPlaying)
         {
-            UpdateLayeredWindowFromWic(hwnd, drawWidth, drawHeight);
+            UpdateLayeredWindowFromWic(hwnd, canvasDrawWidth, canvasDrawHeight);
             return;
         }
 
         g_renderTarget->BeginDraw();
-        if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
+        if (g_renderTarget && canvasDrawWidth > 0.0f && canvasDrawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-            float roundedWidth = static_cast<float>(std::lround(drawWidth));
-            float roundedHeight = static_cast<float>(std::lround(drawHeight));
+            float roundedWidth = static_cast<float>(std::lround(canvasDrawWidth));
+            float roundedHeight = static_cast<float>(std::lround(canvasDrawHeight));
             UINT targetWidth = static_cast<UINT>(std::max(1.0f, roundedWidth));
             UINT targetHeight = static_cast<UINT>(std::max(1.0f, roundedHeight));
             if (rtSize.width != targetWidth || rtSize.height != targetHeight)
@@ -5317,9 +5786,9 @@ void Render(HWND hwnd)
             && g_checkerBrushA && g_checkerBrushB)
         {
             const float cellSize = 16.0f;
-            for (float y = 0.0f; y < drawHeight; y += cellSize)
+            for (float y = 0.0f; y < canvasDrawHeight; y += cellSize)
             {
-                for (float x = 0.0f; x < drawWidth; x += cellSize)
+                for (float x = 0.0f; x < canvasDrawWidth; x += cellSize)
                 {
                     bool evenCell = (static_cast<int>(x / cellSize) + static_cast<int>(y / cellSize)) % 2 == 0;
                     ID2D1SolidColorBrush* brush = evenCell ? g_checkerBrushA : g_checkerBrushB;
@@ -5338,8 +5807,8 @@ void Render(HWND hwnd)
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
             0.0f,
-            drawWidth,
-            drawHeight
+            frameDrawWidth,
+            frameDrawHeight
         );
 
         g_renderTarget->DrawBitmap(
