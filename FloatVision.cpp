@@ -1738,6 +1738,10 @@ bool LoadImageFromFile(const wchar_t* path)
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
     D2D1_BITMAP_PROPERTIES bitmapProperties{};
     UINT frameCount = 0;
+    UINT canvasWidth = 0;
+    UINT canvasHeight = 0;
+    std::vector<BYTE> previousCanvas;
+    std::vector<BYTE> workingCanvas;
 
     StopAnimationPlayback();
     ClearAnimationFrames();
@@ -1783,10 +1787,33 @@ bool LoadImageFromFile(const wchar_t* path)
         goto cleanup;
     }
 
+    IWICMetadataQueryReader* decoderMetadata = nullptr;
+    if (SUCCEEDED(decoder->GetMetadataQueryReader(&decoderMetadata)) && decoderMetadata)
+    {
+        UINT32 metadataWidth = 0;
+        UINT32 metadataHeight = 0;
+        if (TryGetMetadataUInt32(decoderMetadata, L"/logscrdesc/Width", metadataWidth)
+            && TryGetMetadataUInt32(decoderMetadata, L"/logscrdesc/Height", metadataHeight)
+            && metadataWidth > 0 && metadataHeight > 0)
+        {
+            canvasWidth = metadataWidth;
+            canvasHeight = metadataHeight;
+        }
+        else if (TryGetMetadataUInt32(decoderMetadata, L"/ANIM/CanvasWidth", metadataWidth)
+            && TryGetMetadataUInt32(decoderMetadata, L"/ANIM/CanvasHeight", metadataHeight)
+            && metadataWidth > 0 && metadataHeight > 0)
+        {
+            canvasWidth = metadataWidth;
+            canvasHeight = metadataHeight;
+        }
+        decoderMetadata->Release();
+    }
+
     for (UINT i = 0; i < frameCount; ++i)
     {
         IWICBitmapFrameDecode* currentFrame = nullptr;
-        IWICFormatConverter* currentStraight = nullptr;
+        IWICFormatConverter* decodedFrameStraight = nullptr;
+        IWICBitmap* composedFrameBitmap = nullptr;
         IWICFormatConverter* currentPremultiplied = nullptr;
 
         hr = decoder->GetFrame(i, &currentFrame);
@@ -1807,26 +1834,35 @@ bool LoadImageFromFile(const wchar_t* path)
 
         if (i == 0)
         {
-            g_imageWidth = frameWidth;
-            g_imageHeight = frameHeight;
-            g_currentFrameWidth = frameWidth;
-            g_currentFrameHeight = frameHeight;
+            if (canvasWidth == 0 || canvasHeight == 0)
+            {
+                canvasWidth = frameWidth;
+                canvasHeight = frameHeight;
+            }
+            g_imageWidth = canvasWidth;
+            g_imageHeight = canvasHeight;
+            g_currentFrameWidth = canvasWidth;
+            g_currentFrameHeight = canvasHeight;
 
             hr = currentFrame->GetPixelFormat(&pixelFormat);
             if (SUCCEEDED(hr))
             {
                 g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
             }
+
+            size_t canvasBufferSize = static_cast<size_t>(canvasWidth) * static_cast<size_t>(canvasHeight) * 4;
+            previousCanvas.assign(canvasBufferSize, 0);
+            workingCanvas.assign(canvasBufferSize, 0);
         }
 
-        hr = g_wicFactory->CreateFormatConverter(&currentStraight);
+        hr = g_wicFactory->CreateFormatConverter(&decodedFrameStraight);
         if (FAILED(hr))
         {
             currentFrame->Release();
             goto cleanup;
         }
 
-        hr = currentStraight->Initialize(
+        hr = decodedFrameStraight->Initialize(
             currentFrame,
             GUID_WICPixelFormat32bppBGRA,
             WICBitmapDitherTypeNone,
@@ -1837,7 +1873,92 @@ bool LoadImageFromFile(const wchar_t* path)
         if (FAILED(hr))
         {
             currentFrame->Release();
-            currentStraight->Release();
+            decodedFrameStraight->Release();
+            goto cleanup;
+        }
+
+        UINT32 frameLeft = 0;
+        UINT32 frameTop = 0;
+        UINT32 disposal = 0;
+        IWICMetadataQueryReader* frameMetadata = nullptr;
+        if (SUCCEEDED(currentFrame->GetMetadataQueryReader(&frameMetadata)) && frameMetadata)
+        {
+            TryGetMetadataUInt32(frameMetadata, L"/imgdesc/Left", frameLeft);
+            TryGetMetadataUInt32(frameMetadata, L"/imgdesc/Top", frameTop);
+            if (!TryGetMetadataUInt32(frameMetadata, L"/grctlext/Disposal", disposal))
+            {
+                TryGetMetadataUInt32(frameMetadata, L"/grctlext/DisposalMethod", disposal);
+            }
+            frameMetadata->Release();
+        }
+
+        UINT srcStride = frameWidth * 4;
+        std::vector<BYTE> framePixels(static_cast<size_t>(srcStride) * frameHeight, 0);
+        WICRect frameRect{ 0, 0, static_cast<INT>(frameWidth), static_cast<INT>(frameHeight) };
+        hr = decodedFrameStraight->CopyPixels(&frameRect, srcStride, static_cast<UINT>(framePixels.size()), framePixels.data());
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
+            goto cleanup;
+        }
+
+        std::vector<BYTE> beforeFrame = previousCanvas;
+        workingCanvas = previousCanvas;
+
+        auto blendPixel = [](BYTE* dst, const BYTE* src)
+        {
+            UINT srcA = src[3];
+            if (srcA == 0)
+            {
+                return;
+            }
+            UINT dstA = dst[3];
+            UINT outA = srcA + ((dstA * (255 - srcA) + 127) / 255);
+            for (int c = 0; c < 3; ++c)
+            {
+                UINT srcC = src[c];
+                UINT dstC = dst[c];
+                UINT outC = srcC + ((dstC * (255 - srcA) + 127) / 255);
+                dst[c] = static_cast<BYTE>(std::min(outC, 255u));
+            }
+            dst[3] = static_cast<BYTE>(std::min(outA, 255u));
+        };
+
+        for (UINT y = 0; y < frameHeight; ++y)
+        {
+            UINT dstY = frameTop + y;
+            if (dstY >= canvasHeight)
+            {
+                continue;
+            }
+            for (UINT x = 0; x < frameWidth; ++x)
+            {
+                UINT dstX = frameLeft + x;
+                if (dstX >= canvasWidth)
+                {
+                    continue;
+                }
+                size_t srcIndex = (static_cast<size_t>(y) * frameWidth + x) * 4;
+                size_t dstIndex = (static_cast<size_t>(dstY) * canvasWidth + dstX) * 4;
+                blendPixel(&workingCanvas[dstIndex], &framePixels[srcIndex]);
+            }
+        }
+
+        UINT canvasStride = canvasWidth * 4;
+        hr = g_wicFactory->CreateBitmapFromMemory(
+            canvasWidth,
+            canvasHeight,
+            GUID_WICPixelFormat32bppBGRA,
+            canvasStride,
+            static_cast<UINT>(workingCanvas.size()),
+            workingCanvas.data(),
+            &composedFrameBitmap
+        );
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            decodedFrameStraight->Release();
             goto cleanup;
         }
 
@@ -1845,12 +1966,13 @@ bool LoadImageFromFile(const wchar_t* path)
         if (FAILED(hr))
         {
             currentFrame->Release();
-            currentStraight->Release();
+            decodedFrameStraight->Release();
+            composedFrameBitmap->Release();
             goto cleanup;
         }
 
         hr = currentPremultiplied->Initialize(
-            currentStraight,
+            composedFrameBitmap,
             GUID_WICPixelFormat32bppPBGRA,
             WICBitmapDitherTypeNone,
             nullptr,
@@ -1860,23 +1982,59 @@ bool LoadImageFromFile(const wchar_t* path)
         if (FAILED(hr))
         {
             currentFrame->Release();
-            currentStraight->Release();
+            decodedFrameStraight->Release();
+            composedFrameBitmap->Release();
             currentPremultiplied->Release();
             goto cleanup;
         }
 
-        if (!g_imageHasAlpha && ImageHasTransparency(currentStraight))
+        if (!g_imageHasAlpha && ImageHasTransparency(composedFrameBitmap))
         {
             g_imageHasAlpha = true;
         }
 
-        g_animationFramesStraight.push_back(currentStraight);
+        g_animationFramesStraight.push_back(composedFrameBitmap);
         g_animationFramesPremultiplied.push_back(currentPremultiplied);
         g_animationFrameDelaysMs.push_back(ExtractFrameDelayMs(currentFrame));
-        g_animationFrameWidths.push_back(frameWidth);
-        g_animationFrameHeights.push_back(frameHeight);
+        g_animationFrameWidths.push_back(canvasWidth);
+        g_animationFrameHeights.push_back(canvasHeight);
+
+        if (disposal == 2)
+        {
+            previousCanvas = workingCanvas;
+            for (UINT y = 0; y < frameHeight; ++y)
+            {
+                UINT dstY = frameTop + y;
+                if (dstY >= canvasHeight)
+                {
+                    continue;
+                }
+                for (UINT x = 0; x < frameWidth; ++x)
+                {
+                    UINT dstX = frameLeft + x;
+                    if (dstX >= canvasWidth)
+                    {
+                        continue;
+                    }
+                    size_t dstIndex = (static_cast<size_t>(dstY) * canvasWidth + dstX) * 4;
+                    previousCanvas[dstIndex + 0] = 0;
+                    previousCanvas[dstIndex + 1] = 0;
+                    previousCanvas[dstIndex + 2] = 0;
+                    previousCanvas[dstIndex + 3] = 0;
+                }
+            }
+        }
+        else if (disposal == 3)
+        {
+            previousCanvas = beforeFrame;
+        }
+        else
+        {
+            previousCanvas = workingCanvas;
+        }
 
         currentFrame->Release();
+        decodedFrameStraight->Release();
     }
 
     if (g_animationFramesPremultiplied.empty())
