@@ -452,7 +452,13 @@ void ApplyImmersiveDarkMode(HWND target, bool enabled);
 static void ApplyExplorerTheme(HWND target);
 void StopAnimationPlayback(bool clearDecoder = true);
 bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics);
-UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension)
+UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension);
+void RestartAnimationTimer();
+#endif
+
+constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
+
+void ShowAboutDialog(HWND hwnd)
 {
     if (!frame)
     {
@@ -1545,7 +1551,6 @@ UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring&
         {
             return 0;
         }
-
         if (gifUnit10ms)
         {
             delayRaw *= 10;
@@ -1766,7 +1771,7 @@ bool LoadImageFromFile(const wchar_t* path)
         }
         else
         {
-            g_animationFrameDelayMs = 10;
+            g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
         }
         if (g_animationFrameDelayMs == 0)
         {
