@@ -1724,6 +1724,10 @@ bool LoadImageFromFile(const wchar_t* path)
     IWICBitmapDecoder* decoder = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
     D2D1_BITMAP_PROPERTIES bitmapProperties{};
+    UINT frameCount = 0;
+
+    StopAnimationPlayback();
+    ClearAnimationFrames();
 
     StopAnimationPlayback();
     ClearAnimationFrames();
@@ -1763,7 +1767,6 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
-    UINT frameCount = 0;
     hr = decoder->GetFrameCount(&frameCount);
     if (FAILED(hr) || frameCount == 0)
     {
