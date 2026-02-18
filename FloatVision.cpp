@@ -1729,6 +1729,9 @@ bool LoadImageFromFile(const wchar_t* path)
     StopAnimationPlayback();
     ClearAnimationFrames();
 
+    StopAnimationPlayback();
+    ClearAnimationFrames();
+
     if (g_bitmap)
     {
         g_bitmap->Release();
