@@ -5591,25 +5591,30 @@ void Render(HWND hwnd)
     else if (g_bitmap)
     {
         float scale = g_zoom;
-        UINT sourceWidth = g_currentFrameWidth > 0 ? g_currentFrameWidth : g_imageWidth;
-        UINT sourceHeight = g_currentFrameHeight > 0 ? g_currentFrameHeight : g_imageHeight;
-        float drawWidth = sourceWidth * scale;
-        float drawHeight = sourceHeight * scale;
+        UINT canvasWidth = g_imageWidth;
+        UINT canvasHeight = g_imageHeight;
+        UINT frameWidth = g_currentFrameWidth > 0 ? g_currentFrameWidth : canvasWidth;
+        UINT frameHeight = g_currentFrameHeight > 0 ? g_currentFrameHeight : canvasHeight;
 
-        UpdateWindowSizeToImage(hwnd, drawWidth, drawHeight);
+        float canvasDrawWidth = canvasWidth * scale;
+        float canvasDrawHeight = canvasHeight * scale;
+        float frameDrawWidth = frameWidth * scale;
+        float frameDrawHeight = frameHeight * scale;
 
-        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent)
+        UpdateWindowSizeToImage(hwnd, canvasDrawWidth, canvasDrawHeight);
+
+        if (g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent && !g_animationPlaying)
         {
-            UpdateLayeredWindowFromWic(hwnd, drawWidth, drawHeight);
+            UpdateLayeredWindowFromWic(hwnd, canvasDrawWidth, canvasDrawHeight);
             return;
         }
 
         g_renderTarget->BeginDraw();
-        if (g_renderTarget && drawWidth > 0.0f && drawHeight > 0.0f)
+        if (g_renderTarget && canvasDrawWidth > 0.0f && canvasDrawHeight > 0.0f)
         {
             D2D1_SIZE_F rtSize = g_renderTarget->GetSize();
-            float roundedWidth = static_cast<float>(std::lround(drawWidth));
-            float roundedHeight = static_cast<float>(std::lround(drawHeight));
+            float roundedWidth = static_cast<float>(std::lround(canvasDrawWidth));
+            float roundedHeight = static_cast<float>(std::lround(canvasDrawHeight));
             UINT targetWidth = static_cast<UINT>(std::max(1.0f, roundedWidth));
             UINT targetHeight = static_cast<UINT>(std::max(1.0f, roundedHeight));
             if (rtSize.width != targetWidth || rtSize.height != targetHeight)
@@ -5623,9 +5628,9 @@ void Render(HWND hwnd)
             && g_checkerBrushA && g_checkerBrushB)
         {
             const float cellSize = 16.0f;
-            for (float y = 0.0f; y < drawHeight; y += cellSize)
+            for (float y = 0.0f; y < canvasDrawHeight; y += cellSize)
             {
-                for (float x = 0.0f; x < drawWidth; x += cellSize)
+                for (float x = 0.0f; x < canvasDrawWidth; x += cellSize)
                 {
                     bool evenCell = (static_cast<int>(x / cellSize) + static_cast<int>(y / cellSize)) % 2 == 0;
                     ID2D1SolidColorBrush* brush = evenCell ? g_checkerBrushA : g_checkerBrushB;
@@ -5644,8 +5649,8 @@ void Render(HWND hwnd)
         D2D1_RECT_F dest = D2D1::RectF(
             0.0f,
             0.0f,
-            drawWidth,
-            drawHeight
+            frameDrawWidth,
+            frameDrawHeight
         );
 
         g_renderTarget->DrawBitmap(
