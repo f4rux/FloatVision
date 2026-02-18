@@ -10,6 +10,7 @@
 #include <uxtheme.h>
 #include <dwmapi.h>
 #include <shlwapi.h>
+#include <propvarutil.h>
 #include <filesystem>
 #include <vector>
 #include <array>
@@ -35,6 +36,7 @@
 #pragma comment(lib, "Dwmapi.lib")
 #pragma comment(lib, "Shlwapi.lib")
 #pragma comment(lib, "Advapi32.lib")
+#pragma comment(lib, "Propsys.lib")
 #pragma comment(linker, "/manifestdependency:\"type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #ifndef FLOATVISION_GLOBALS_DEFINED
@@ -99,6 +101,11 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
+bool g_animationPlaying = false;
+size_t g_animationFrameIndex = 0;
+std::vector<IWICBitmapSource*> g_animationFramesStraight;
+std::vector<IWICBitmapSource*> g_animationFramesPremultiplied;
+std::vector<UINT> g_animationFrameDelaysMs;
 enum class HtmlInputKey
 {
     Shift = 0,
@@ -367,6 +374,8 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kAnimationTimerId = 2002;
+constexpr UINT kDefaultAnimationFrameDelayMs = 100;
 
 // =====================
 // 前方宣言
@@ -401,6 +410,12 @@ void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
 bool QueryPixelFormatHasAlpha(const WICPixelFormatGUID& format);
 bool ImageHasTransparency(IWICBitmapSource* source);
+void StopAnimationPlayback();
+void ClearAnimationFrames();
+bool SetCurrentAnimationFrame(size_t frameIndex);
+UINT GetAnimationFrameDelayMs(size_t frameIndex);
+bool TryGetMetadataUInt32(IWICMetadataQueryReader* reader, const wchar_t* key, UINT32& value);
+UINT ExtractFrameDelayMs(IWICBitmapFrameDecode* frame);
 void ApplyTransparencyMode();
 void UpdateCustomColorBrush();
 void ShowSettingsDialog(HWND hwnd);
@@ -1285,6 +1300,26 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         }
+        if (wParam == kAnimationTimerId)
+        {
+            if (!g_animationPlaying || g_animationFramesPremultiplied.size() < 2 || !g_bitmap)
+            {
+                StopAnimationPlayback();
+                return 0;
+            }
+
+            size_t nextFrame = (g_animationFrameIndex + 1) % g_animationFramesPremultiplied.size();
+            if (!SetCurrentAnimationFrame(nextFrame))
+            {
+                StopAnimationPlayback();
+                return 0;
+            }
+
+            UINT nextDelay = GetAnimationFrameDelayMs(nextFrame);
+            SetTimer(hwnd, kAnimationTimerId, nextDelay, nullptr);
+            InvalidateRect(hwnd, nullptr, TRUE);
+            return 0;
+        }
         break;
     }
 
@@ -1363,6 +1398,9 @@ bool InitDirect2D(HWND hwnd)
 
 void DiscardRenderTarget()
 {
+    StopAnimationPlayback();
+    ClearAnimationFrames();
+
     if (g_placeholderBrush)
     {
         g_placeholderBrush->Release();
@@ -1497,17 +1535,198 @@ bool InitDirectWrite()
     return true;
 }
 
+void ClearAnimationFrames()
+{
+    for (IWICBitmapSource* source : g_animationFramesStraight)
+    {
+        if (source)
+        {
+            source->Release();
+        }
+    }
+    g_animationFramesStraight.clear();
+
+    for (IWICBitmapSource* source : g_animationFramesPremultiplied)
+    {
+        if (source)
+        {
+            source->Release();
+        }
+    }
+    g_animationFramesPremultiplied.clear();
+    g_animationFrameDelaysMs.clear();
+    g_animationFrameIndex = 0;
+}
+
+void StopAnimationPlayback()
+{
+    if (g_animationPlaying && g_hwnd)
+    {
+        KillTimer(g_hwnd, kAnimationTimerId);
+    }
+    g_animationPlaying = false;
+}
+
+UINT GetAnimationFrameDelayMs(size_t frameIndex)
+{
+    if (frameIndex >= g_animationFrameDelaysMs.size())
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+    UINT delay = g_animationFrameDelaysMs[frameIndex];
+    if (delay == 0)
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+    return delay;
+}
+
+bool SetCurrentAnimationFrame(size_t frameIndex)
+{
+    if (frameIndex >= g_animationFramesStraight.size() || frameIndex >= g_animationFramesPremultiplied.size())
+    {
+        return false;
+    }
+
+    IWICBitmapSource* straight = g_animationFramesStraight[frameIndex];
+    IWICBitmapSource* premultiplied = g_animationFramesPremultiplied[frameIndex];
+    if (!straight || !premultiplied)
+    {
+        return false;
+    }
+
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+
+    g_wicSourceStraight = straight;
+    g_wicSourceStraight->AddRef();
+    g_wicSourcePremultiplied = premultiplied;
+    g_wicSourcePremultiplied->AddRef();
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+
+    D2D1_BITMAP_PROPERTIES bitmapProperties = D2D1::BitmapProperties(
+        D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
+    );
+
+    HRESULT hr = g_renderTarget->CreateBitmapFromWicBitmap(
+        g_wicSourcePremultiplied,
+        &bitmapProperties,
+        &g_bitmap
+    );
+    if (FAILED(hr))
+    {
+        return false;
+    }
+
+    g_animationFrameIndex = frameIndex;
+    return true;
+}
+
+bool TryGetMetadataUInt32(IWICMetadataQueryReader* reader, const wchar_t* key, UINT32& value)
+{
+    if (!reader)
+    {
+        return false;
+    }
+
+    PROPVARIANT variant;
+    PropVariantInit(&variant);
+    HRESULT hr = reader->GetMetadataByName(key, &variant);
+    if (FAILED(hr))
+    {
+        PropVariantClear(&variant);
+        return false;
+    }
+
+    bool converted = false;
+    UINT32 temp = 0;
+    if (SUCCEEDED(PropVariantToUInt32(variant, &temp)))
+    {
+        converted = true;
+    }
+    else if (variant.vt == VT_UI2)
+    {
+        temp = variant.uiVal;
+        converted = true;
+    }
+    else if (variant.vt == VT_UI1)
+    {
+        temp = variant.bVal;
+        converted = true;
+    }
+
+    PropVariantClear(&variant);
+    if (!converted)
+    {
+        return false;
+    }
+
+    value = temp;
+    return true;
+}
+
+UINT ExtractFrameDelayMs(IWICBitmapFrameDecode* frame)
+{
+    if (!frame)
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+
+    IWICMetadataQueryReader* frameMetadata = nullptr;
+    HRESULT hr = frame->GetMetadataQueryReader(&frameMetadata);
+    if (FAILED(hr) || !frameMetadata)
+    {
+        return kDefaultAnimationFrameDelayMs;
+    }
+
+    UINT32 value = 0;
+    UINT delayMs = kDefaultAnimationFrameDelayMs;
+
+    if (TryGetMetadataUInt32(frameMetadata, L"/grctlext/Delay", value)
+        || TryGetMetadataUInt32(frameMetadata, L"/grctlext/DelayTime", value))
+    {
+        if (value > 0 && value <= (UINT_MAX / 10))
+        {
+            delayMs = static_cast<UINT>(value * 10);
+        }
+    }
+    else if (TryGetMetadataUInt32(frameMetadata, L"/ANMF/FrameDuration", value)
+        || TryGetMetadataUInt32(frameMetadata, L"/ANIM/FrameDuration", value))
+    {
+        if (value > 0)
+        {
+            delayMs = static_cast<UINT>(value);
+        }
+    }
+
+    frameMetadata->Release();
+    return delayMs == 0 ? kDefaultAnimationFrameDelayMs : delayMs;
+}
+
 // =====================
 // 画像ロード
 // =====================
 bool LoadImageFromFile(const wchar_t* path)
 {
     IWICBitmapDecoder* decoder = nullptr;
-    IWICBitmapFrameDecode* frame = nullptr;
-    IWICFormatConverter* converterStraight = nullptr;
-    IWICFormatConverter* converterPremultiplied = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
     D2D1_BITMAP_PROPERTIES bitmapProperties{};
+
+    StopAnimationPlayback();
+    ClearAnimationFrames();
 
     if (g_bitmap)
     {
@@ -1544,82 +1763,140 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetPixelFormat(&pixelFormat);
-    if (SUCCEEDED(hr))
+    UINT frameCount = 0;
+    hr = decoder->GetFrameCount(&frameCount);
+    if (FAILED(hr) || frameCount == 0)
     {
-        g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+        goto cleanup;
     }
 
-    hr = g_wicFactory->CreateFormatConverter(&converterStraight);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = converterStraight->Initialize(
-        frame,
-        GUID_WICPixelFormat32bppBGRA,
-        WICBitmapDitherTypeNone,
-        nullptr,
-        0.0,
-        WICBitmapPaletteTypeCustom
-    );
-    if (FAILED(hr)) goto cleanup;
-
-    if (!g_imageHasAlpha)
+    for (UINT i = 0; i < frameCount; ++i)
     {
-        g_imageHasAlpha = ImageHasTransparency(converterStraight);
+        IWICBitmapFrameDecode* currentFrame = nullptr;
+        IWICFormatConverter* currentStraight = nullptr;
+        IWICFormatConverter* currentPremultiplied = nullptr;
+
+        hr = decoder->GetFrame(i, &currentFrame);
+        if (FAILED(hr) || !currentFrame)
+        {
+            if (currentFrame) currentFrame->Release();
+            goto cleanup;
+        }
+
+        if (i == 0)
+        {
+            hr = currentFrame->GetSize(&g_imageWidth, &g_imageHeight);
+            if (FAILED(hr))
+            {
+                currentFrame->Release();
+                goto cleanup;
+            }
+
+            hr = currentFrame->GetPixelFormat(&pixelFormat);
+            if (SUCCEEDED(hr))
+            {
+                g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+            }
+        }
+
+        hr = g_wicFactory->CreateFormatConverter(&currentStraight);
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            goto cleanup;
+        }
+
+        hr = currentStraight->Initialize(
+            currentFrame,
+            GUID_WICPixelFormat32bppBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom
+        );
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            currentStraight->Release();
+            goto cleanup;
+        }
+
+        hr = g_wicFactory->CreateFormatConverter(&currentPremultiplied);
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            currentStraight->Release();
+            goto cleanup;
+        }
+
+        hr = currentPremultiplied->Initialize(
+            currentStraight,
+            GUID_WICPixelFormat32bppPBGRA,
+            WICBitmapDitherTypeNone,
+            nullptr,
+            0.0,
+            WICBitmapPaletteTypeCustom
+        );
+        if (FAILED(hr))
+        {
+            currentFrame->Release();
+            currentStraight->Release();
+            currentPremultiplied->Release();
+            goto cleanup;
+        }
+
+        if (!g_imageHasAlpha && ImageHasTransparency(currentStraight))
+        {
+            g_imageHasAlpha = true;
+        }
+
+        g_animationFramesStraight.push_back(currentStraight);
+        g_animationFramesPremultiplied.push_back(currentPremultiplied);
+        g_animationFrameDelaysMs.push_back(ExtractFrameDelayMs(currentFrame));
+
+        currentFrame->Release();
     }
 
-    hr = g_wicFactory->CreateFormatConverter(&converterPremultiplied);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = converterPremultiplied->Initialize(
-        converterStraight,
-        GUID_WICPixelFormat32bppPBGRA,
-        WICBitmapDitherTypeNone,
-        nullptr,
-        0.0,
-        WICBitmapPaletteTypeCustom
-    );
-    if (FAILED(hr)) goto cleanup;
+    if (g_animationFramesPremultiplied.empty())
+    {
+        hr = E_FAIL;
+        goto cleanup;
+    }
 
     bitmapProperties = D2D1::BitmapProperties(
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
     );
 
     hr = g_renderTarget->CreateBitmapFromWicBitmap(
-        converterPremultiplied,
+        g_animationFramesPremultiplied[0],
         &bitmapProperties,
         &g_bitmap
     );
     if (FAILED(hr))
     {
-        bitmapProperties = D2D1::BitmapProperties(
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
-        );
-        hr = g_renderTarget->CreateBitmapFromWicBitmap(
-            converterPremultiplied,
-            &bitmapProperties,
-            &g_bitmap
-        );
+        goto cleanup;
     }
-    if (SUCCEEDED(hr))
+
+    g_wicSourceStraight = g_animationFramesStraight[0];
+    g_wicSourceStraight->AddRef();
+    g_wicSourcePremultiplied = g_animationFramesPremultiplied[0];
+    g_wicSourcePremultiplied->AddRef();
+
+    g_animationFrameIndex = 0;
+    g_animationPlaying = g_animationFramesPremultiplied.size() > 1;
+    if (g_animationPlaying && g_hwnd)
     {
-        g_wicSourceStraight = converterStraight;
-        g_wicSourceStraight->AddRef();
-        g_wicSourcePremultiplied = converterPremultiplied;
-        g_wicSourcePremultiplied->AddRef();
+        UINT delay = GetAnimationFrameDelayMs(0);
+        SetTimer(g_hwnd, kAnimationTimerId, delay, nullptr);
     }
 
 cleanup:
     if (decoder) decoder->Release();
-    if (frame) frame->Release();
-    if (converterStraight) converterStraight->Release();
-    if (converterPremultiplied) converterPremultiplied->Release();
+    if (FAILED(hr))
+    {
+        StopAnimationPlayback();
+        ClearAnimationFrames();
+    }
 
     ApplyTransparencyMode();
     return SUCCEEDED(hr);
@@ -2504,6 +2781,9 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
 
 bool ApplyHtmlContent(std::wstring html)
 {
+    StopAnimationPlayback();
+    ClearAnimationFrames();
+
     bool keepLayered = g_imageHasAlpha && g_transparencyMode == TransparencyMode::Transparent;
     if (g_bitmap)
     {
