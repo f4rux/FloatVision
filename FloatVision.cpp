@@ -99,6 +99,12 @@ double g_htmlBaseZoomFactor = 1.0;
 bool g_keepLayeredWhileHtmlPending = false;
 EventRegistrationToken g_webviewNavigationToken{};
 bool g_webviewInputTimerActive = false;
+Microsoft::WRL::ComPtr<IWICBitmapDecoder> g_animationDecoder;
+UINT g_animationFrameCount = 0;
+UINT g_animationFrameIndex = 0;
+UINT g_animationFrameDelayMs = 100;
+bool g_animationTimerActive = false;
+bool g_isAnimatedImage = false;
 enum class HtmlInputKey
 {
     Shift = 0,
@@ -367,6 +373,8 @@ constexpr int kMenuSortTimeDesc = 1104;
 constexpr int kMenuSortImageOnly = 1105;
 constexpr UINT_PTR kWebViewInputTimerId = 2001;
 constexpr UINT kWebViewInputTimerIntervalMs = 50;
+constexpr UINT_PTR kAnimationTimerId = 2002;
+constexpr UINT kDefaultAnimationDelayMs = 100;
 
 // =====================
 // 前方宣言
@@ -442,6 +450,10 @@ void ShowAboutDialog(HWND hwnd);
 bool IsDarkModeEnabled();
 void ApplyImmersiveDarkMode(HWND target, bool enabled);
 static void ApplyExplorerTheme(HWND target);
+void StopAnimationPlayback(bool clearDecoder = true);
+bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics);
+UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension);
+void RestartAnimationTimer();
 #endif
 
 constexpr wchar_t kAboutProjectUrl[] = L"https://github.com/f4rux/FloatVision";
@@ -1285,6 +1297,38 @@ LRESULT CALLBACK WndProc(
             }
             return 0;
         }
+        if (wParam == kAnimationTimerId)
+        {
+            if (g_isAnimatedImage && g_animationDecoder && g_animationFrameCount > 1)
+            {
+                g_animationFrameIndex = (g_animationFrameIndex + 1) % g_animationFrameCount;
+                if (DecodeAnimationFrame(g_animationFrameIndex, false))
+                {
+                    std::wstring extension = g_currentImagePath.extension().wstring();
+                    std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t ch)
+                    {
+                        return static_cast<wchar_t>(std::towlower(ch));
+                    });
+                    IWICBitmapFrameDecode* frame = nullptr;
+                    if (SUCCEEDED(g_animationDecoder->GetFrame(g_animationFrameIndex, &frame)) && frame)
+                    {
+                        UINT frameDelay = GetFrameDelayFromMetadata(frame, extension);
+                        if (frameDelay > 0)
+                        {
+                            g_animationFrameDelayMs = frameDelay;
+                        }
+                        frame->Release();
+                    }
+                    if (g_animationFrameDelayMs == 0)
+                    {
+                        g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
+                    }
+                    RestartAnimationTimer();
+                    InvalidateRect(hwnd, nullptr, TRUE);
+                }
+            }
+            return 0;
+        }
         break;
     }
 
@@ -1363,6 +1407,7 @@ bool InitDirect2D(HWND hwnd)
 
 void DiscardRenderTarget()
 {
+    StopAnimationPlayback();
     if (g_placeholderBrush)
     {
         g_placeholderBrush->Release();
@@ -1497,63 +1542,157 @@ bool InitDirectWrite()
     return true;
 }
 
-// =====================
-// 画像ロード
-// =====================
-bool LoadImageFromFile(const wchar_t* path)
+void StopAnimationPlayback(bool clearDecoder)
 {
-    IWICBitmapDecoder* decoder = nullptr;
+    if (g_animationTimerActive && g_hwnd)
+    {
+        KillTimer(g_hwnd, kAnimationTimerId);
+        g_animationTimerActive = false;
+    }
+
+    g_isAnimatedImage = false;
+    g_animationFrameCount = 0;
+    g_animationFrameIndex = 0;
+    g_animationFrameDelayMs = kDefaultAnimationDelayMs;
+
+    if (clearDecoder)
+    {
+        g_animationDecoder.Reset();
+    }
+}
+
+void RestartAnimationTimer()
+{
+    if (!g_hwnd || !g_isAnimatedImage || g_animationFrameCount <= 1)
+    {
+        return;
+    }
+    if (g_animationTimerActive)
+    {
+        KillTimer(g_hwnd, kAnimationTimerId);
+    }
+    SetTimer(g_hwnd, kAnimationTimerId, std::max(1u, g_animationFrameDelayMs), nullptr);
+    g_animationTimerActive = true;
+}
+
+UINT GetFrameDelayFromMetadata(IWICBitmapFrameDecode* frame, const std::wstring& extension)
+{
+    if (!frame)
+    {
+        return 0;
+    }
+
+    IWICMetadataQueryReader* reader = nullptr;
+    HRESULT hr = frame->GetMetadataQueryReader(&reader);
+    if (FAILED(hr) || !reader)
+    {
+        return 0;
+    }
+
+    PROPVARIANT value{};
+    PropVariantInit(&value);
+
+    auto queryDelay = [&](const wchar_t* query, bool gifUnit10ms) -> UINT
+    {
+        PropVariantClear(&value);
+        PropVariantInit(&value);
+        if (FAILED(reader->GetMetadataByName(query, &value)))
+        {
+            return 0;
+        }
+
+        ULONGLONG delayRaw = 0;
+        switch (value.vt)
+        {
+        case VT_UI1: delayRaw = value.bVal; break;
+        case VT_UI2: delayRaw = value.uiVal; break;
+        case VT_UI4: delayRaw = value.ulVal; break;
+        case VT_UI8: delayRaw = value.uhVal.QuadPart; break;
+        case VT_I1: delayRaw = value.cVal > 0 ? static_cast<ULONGLONG>(value.cVal) : 0; break;
+        case VT_I2: delayRaw = value.iVal > 0 ? static_cast<ULONGLONG>(value.iVal) : 0; break;
+        case VT_I4: delayRaw = value.lVal > 0 ? static_cast<ULONGLONG>(value.lVal) : 0; break;
+        case VT_I8: delayRaw = value.hVal.QuadPart > 0 ? static_cast<ULONGLONG>(value.hVal.QuadPart) : 0; break;
+        default: break;
+        }
+
+        if (delayRaw == 0)
+        {
+            return 0;
+        }
+        if (gifUnit10ms)
+        {
+            delayRaw *= 10;
+        }
+
+        return delayRaw > static_cast<ULONGLONG>(UINT_MAX)
+            ? UINT_MAX
+            : static_cast<UINT>(delayRaw);
+    };
+
+    UINT delayMs = 0;
+    if (extension == L".gif")
+    {
+        delayMs = queryDelay(L"/grctlext/Delay", true);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/Delay", true);
+        }
+    }
+    else if (extension == L".webp")
+    {
+        delayMs = queryDelay(L"/ANMF/FrameDuration", false);
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/imgdesc/FrameDuration", false);
+        }
+        if (delayMs == 0)
+        {
+            delayMs = queryDelay(L"/anim/FrameDuration", false);
+        }
+    }
+
+    PropVariantClear(&value);
+    reader->Release();
+
+    if (delayMs == 0)
+    {
+        return 0;
+    }
+
+    if (extension == L".gif")
+    {
+        return std::max(10u, delayMs);
+    }
+
+    return std::max(5u, delayMs);
+}
+
+bool DecodeAnimationFrame(UINT frameIndex, bool updateImageMetrics)
+{
+    if (!g_animationDecoder)
+    {
+        return false;
+    }
+
     IWICBitmapFrameDecode* frame = nullptr;
     IWICFormatConverter* converterStraight = nullptr;
     IWICFormatConverter* converterPremultiplied = nullptr;
     WICPixelFormatGUID pixelFormat = GUID_WICPixelFormatDontCare;
     D2D1_BITMAP_PROPERTIES bitmapProperties{};
 
-    if (g_bitmap)
-    {
-        g_bitmap->Release();
-        g_bitmap = nullptr;
-    }
-    if (g_wicSourceStraight)
-    {
-        g_wicSourceStraight->Release();
-        g_wicSourceStraight = nullptr;
-    }
-    if (g_wicSourcePremultiplied)
-    {
-        g_wicSourcePremultiplied->Release();
-        g_wicSourcePremultiplied = nullptr;
-    }
-    g_imageWidth = 0;
-    g_imageHeight = 0;
-    g_imageHasAlpha = false;
-    g_hasText = false;
-    g_textContent.clear();
-    g_hasHtml = false;
-    g_pendingHtmlContent.clear();
-    g_webviewPendingShow = false;
-    g_keepLayeredWhileHtmlPending = false;
-    HideWebView();
-
-    HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
-        path,
-        nullptr,
-        GENERIC_READ,
-        WICDecodeMetadataCacheOnDemand,
-        &decoder
-    );
+    HRESULT hr = g_animationDecoder->GetFrame(frameIndex, &frame);
     if (FAILED(hr)) goto cleanup;
 
-    hr = decoder->GetFrame(0, &frame);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
-    if (FAILED(hr)) goto cleanup;
-
-    hr = frame->GetPixelFormat(&pixelFormat);
-    if (SUCCEEDED(hr))
+    if (updateImageMetrics)
     {
-        g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+        hr = frame->GetSize(&g_imageWidth, &g_imageHeight);
+        if (FAILED(hr)) goto cleanup;
+
+        hr = frame->GetPixelFormat(&pixelFormat);
+        if (SUCCEEDED(hr))
+        {
+            g_imageHasAlpha = QueryPixelFormatHasAlpha(pixelFormat);
+        }
     }
 
     hr = g_wicFactory->CreateFormatConverter(&converterStraight);
@@ -1587,6 +1726,22 @@ bool LoadImageFromFile(const wchar_t* path)
     );
     if (FAILED(hr)) goto cleanup;
 
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+
     bitmapProperties = D2D1::BitmapProperties(
         D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
     );
@@ -1596,17 +1751,7 @@ bool LoadImageFromFile(const wchar_t* path)
         &bitmapProperties,
         &g_bitmap
     );
-    if (FAILED(hr))
-    {
-        bitmapProperties = D2D1::BitmapProperties(
-            D2D1::PixelFormat(DXGI_FORMAT_B8G8R8A8_UNORM, D2D1_ALPHA_MODE_PREMULTIPLIED)
-        );
-        hr = g_renderTarget->CreateBitmapFromWicBitmap(
-            converterPremultiplied,
-            &bitmapProperties,
-            &g_bitmap
-        );
-    }
+
     if (SUCCEEDED(hr))
     {
         g_wicSourceStraight = converterStraight;
@@ -1616,10 +1761,99 @@ bool LoadImageFromFile(const wchar_t* path)
     }
 
 cleanup:
-    if (decoder) decoder->Release();
     if (frame) frame->Release();
     if (converterStraight) converterStraight->Release();
     if (converterPremultiplied) converterPremultiplied->Release();
+    return SUCCEEDED(hr);
+}
+
+// =====================
+// 画像ロード
+// =====================
+bool LoadImageFromFile(const wchar_t* path)
+{
+    IWICBitmapDecoder* decoder = nullptr;
+    std::wstring extension = std::filesystem::path(path).extension().wstring();
+    std::transform(extension.begin(), extension.end(), extension.begin(), [](wchar_t ch)
+    {
+        return static_cast<wchar_t>(std::towlower(ch));
+    });
+
+    if (g_bitmap)
+    {
+        g_bitmap->Release();
+        g_bitmap = nullptr;
+    }
+    if (g_wicSourceStraight)
+    {
+        g_wicSourceStraight->Release();
+        g_wicSourceStraight = nullptr;
+    }
+    if (g_wicSourcePremultiplied)
+    {
+        g_wicSourcePremultiplied->Release();
+        g_wicSourcePremultiplied = nullptr;
+    }
+    StopAnimationPlayback();
+    g_imageWidth = 0;
+    g_imageHeight = 0;
+    g_imageHasAlpha = false;
+    g_hasText = false;
+    g_textContent.clear();
+    g_hasHtml = false;
+    g_pendingHtmlContent.clear();
+    g_webviewPendingShow = false;
+    g_keepLayeredWhileHtmlPending = false;
+    HideWebView();
+
+    HRESULT hr = g_wicFactory->CreateDecoderFromFilename(
+        path,
+        nullptr,
+        GENERIC_READ,
+        WICDecodeMetadataCacheOnDemand,
+        &decoder
+    );
+    if (FAILED(hr)) goto cleanup;
+
+    hr = decoder->GetFrameCount(&g_animationFrameCount);
+    if (FAILED(hr)) goto cleanup;
+
+    g_animationDecoder = decoder;
+    g_animationFrameIndex = 0;
+    g_isAnimatedImage = g_animationFrameCount > 1 && (extension == L".gif" || extension == L".webp");
+
+    hr = DecodeAnimationFrame(0, true) ? S_OK : E_FAIL;
+    if (FAILED(hr)) goto cleanup;
+
+    if (g_isAnimatedImage)
+    {
+        IWICBitmapFrameDecode* frame = nullptr;
+        if (SUCCEEDED(g_animationDecoder->GetFrame(0, &frame)) && frame)
+        {
+            UINT frameDelay = GetFrameDelayFromMetadata(frame, extension);
+            if (frameDelay > 0)
+            {
+                g_animationFrameDelayMs = frameDelay;
+            }
+            frame->Release();
+        }
+        else
+        {
+            g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
+        }
+        if (g_animationFrameDelayMs == 0)
+        {
+            g_animationFrameDelayMs = (extension == L".gif") ? 10u : kDefaultAnimationDelayMs;
+        }
+        RestartAnimationTimer();
+    }
+
+cleanup:
+    if (decoder) decoder->Release();
+    if (FAILED(hr))
+    {
+        StopAnimationPlayback();
+    }
 
     ApplyTransparencyMode();
     return SUCCEEDED(hr);
