@@ -1742,6 +1742,7 @@ bool LoadImageFromFile(const wchar_t* path)
     UINT canvasHeight = 0;
     std::vector<BYTE> previousCanvas;
     std::vector<BYTE> workingCanvas;
+    IWICMetadataQueryReader* decoderMetadata = nullptr;
 
     StopAnimationPlayback();
     ClearAnimationFrames();
@@ -1787,7 +1788,6 @@ bool LoadImageFromFile(const wchar_t* path)
         goto cleanup;
     }
 
-    IWICMetadataQueryReader* decoderMetadata = nullptr;
     if (SUCCEEDED(decoder->GetMetadataQueryReader(&decoderMetadata)) && decoderMetadata)
     {
         UINT32 metadataWidth = 0;
