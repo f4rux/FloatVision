@@ -21,7 +21,7 @@ In addition to images, it also supports viewing **text, Markdown, and HTML docum
 
 - **Broad Format Support**:
   
-  - **Images**: `.png`, `.jpg`, `.jpeg`, `.bmp`, `.gif`, `.tif`, `.tiff`, `.webp`
+  - **Images**: `.png`, `.jpg`, `.jpeg`, `.gif (incl. animated GIF)`, `.webp (incl. animated WebP)`, `.bmp`, `.tif`, `.tiff`
   
   - **Documents**: `.md`, `.markdown`, `.txt`, `.html`, `.htm`
 
