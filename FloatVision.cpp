@@ -124,6 +124,7 @@ WORD g_keyZoomOut = VK_OEM_MINUS;
 WORD g_keyOriginalSize = '0';
 WORD g_keyOpenFile = 'O';
 WORD g_keyExit = VK_ESCAPE;
+WORD g_keyMinimize = 'M';
 WORD g_keyAlwaysOnTop = 'P';
 WORD g_keyReload = 'R';
 WORD g_keyScrollUp = VK_UP;
@@ -371,6 +372,7 @@ constexpr int kMenuExit = 1009;
 constexpr int kMenuSettings = 1010;
 constexpr int kMenuReload = 1011;
 constexpr int kMenuAbout = 1012;
+constexpr int kMenuMinimize = 1013;
 constexpr int kMenuSortNameAsc = 1101;
 constexpr int kMenuSortNameDesc = 1102;
 constexpr int kMenuSortTimeAsc = 1103;
@@ -825,6 +827,7 @@ LRESULT CALLBACK WndProc(
         AppendMenu(menu, MF_STRING, kMenuZoomOut, L"Zoom Out");
         AppendMenu(menu, MF_STRING, kMenuOriginalSize, L"Original Size");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenu(menu, MF_STRING, kMenuMinimize, L"Minimize");
         AppendMenu(menu, MF_STRING, kMenuAlwaysOnTop, L"Always on Top");
         AppendMenu(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenu(menu, MF_STRING, kMenuSortNameAsc, L"Sort: Name (A-Z)");
@@ -919,6 +922,9 @@ LRESULT CALLBACK WndProc(
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
+            return 0;
+        case kMenuMinimize:
+            ShowWindow(hwnd, SW_MINIMIZE);
             return 0;
         case kMenuSettings:
             ShowSettingsDialog(hwnd);
@@ -1148,6 +1154,11 @@ LRESULT CALLBACK WndProc(
             g_alwaysOnTop = !g_alwaysOnTop;
             ApplyAlwaysOnTop();
             SaveSettings();
+            handled = true;
+        }
+        else if (key == g_keyMinimize)
+        {
+            ShowWindow(hwnd, SW_MINIMIZE);
             handled = true;
         }
         else if (key == g_keyReload)
@@ -3812,6 +3823,7 @@ namespace
     constexpr int kIdKeyScrollDown = 2111;
     constexpr int kIdKeyScrollLeft = 2112;
     constexpr int kIdKeyScrollRight = 2113;
+    constexpr int kIdKeyMinimize = 2114;
 }
 
 enum class PreferredAppMode
@@ -4105,7 +4117,7 @@ void ShowSettingsDialog(HWND hwnd)
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(10));
     appendWord(tmpl, scale(460));
-    appendWord(tmpl, scale(234));
+    appendWord(tmpl, scale(252));
     appendWord(tmpl, 0);
     appendWord(tmpl, 0);
     appendString(tmpl, L"Settings");
@@ -4138,7 +4150,7 @@ void ShowSettingsDialog(HWND hwnd)
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
         scale(324), scale(172), scale(60), scale(12), kIdWindowPosY, 0x0081, L"0");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(202), scale(223), 0xFFFF, 0x0080, L"Key Config");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_GROUPBOX, scale(8), scale(6), scale(202), scale(241), 0xFFFF, 0x0080, L"Key Config");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(22), scale(110), scale(12), 0xFFFF, 0x0082, L"Next file");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(20), scale(88), scale(12), kIdKeyNext, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(38), scale(110), scale(12), 0xFFFF, 0x0082, L"Previous file");
@@ -4155,19 +4167,21 @@ void ShowSettingsDialog(HWND hwnd)
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(116), scale(88), scale(12), kIdKeyExit, L"msctls_hotkey32", L"");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(134), scale(110), scale(12), 0xFFFF, 0x0082, L"Always on Top");
     addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(132), scale(88), scale(12), kIdKeyAlwaysOnTop, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(150), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(148), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(166), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll up");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(164), scale(88), scale(12), kIdKeyScrollUp, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(182), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll down");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(180), scale(88), scale(12), kIdKeyScrollDown, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(198), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll left");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(196), scale(88), scale(12), kIdKeyScrollLeft, L"msctls_hotkey32", L"");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll right");
-    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(212), scale(88), scale(12), kIdKeyScrollRight, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(150), scale(110), scale(12), 0xFFFF, 0x0082, L"Minimize");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(148), scale(88), scale(12), kIdKeyMinimize, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(166), scale(110), scale(12), 0xFFFF, 0x0082, L"Reload");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(164), scale(88), scale(12), kIdKeyReload, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(182), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll up");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(180), scale(88), scale(12), kIdKeyScrollUp, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(198), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll down");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(196), scale(88), scale(12), kIdKeyScrollDown, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(214), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll left");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(212), scale(88), scale(12), kIdKeyScrollLeft, L"msctls_hotkey32", L"");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(16), scale(230), scale(110), scale(12), 0xFFFF, 0x0082, L"Scroll right");
+    addControlWithClassName(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP, scale(110), scale(228), scale(88), scale(12), kIdKeyScrollRight, L"msctls_hotkey32", L"");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(206), scale(54), scale(18), IDOK, 0x0080, L"Save");
-    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(206), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(334), scale(224), scale(54), scale(18), IDOK, 0x0080, L"Save");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, scale(394), scale(224), scale(54), scale(18), IDCANCEL, 0x0080, L"Cancel");
 
     struct DialogState
     {
@@ -4191,6 +4205,7 @@ void ShowSettingsDialog(HWND hwnd)
         WORD keyOpen;
         WORD keyExit;
         WORD keyAlwaysOnTop;
+        WORD keyMinimize;
         WORD keyReload;
         WORD keyScrollUp;
         WORD keyScrollDown;
@@ -4203,7 +4218,7 @@ void ShowSettingsDialog(HWND hwnd)
         COLORREF dialogTextColor;
     } state{ g_transparencyMode, g_customColor, g_textFontName, g_textFontFaceName, g_textFontSize, g_textColor, g_textBackground, g_textWrap,
         g_textWindowWidth, g_textWindowHeight, g_windowPositionMode, g_customWindowPos,
-        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOriginalSize, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyReload,
+        g_keyNextFile, g_keyPrevFile, g_keyZoomIn, g_keyZoomOut, g_keyOriginalSize, g_keyOpenFile, g_keyExit, g_keyAlwaysOnTop, g_keyMinimize, g_keyReload,
         g_keyScrollUp, g_keyScrollDown, g_keyScrollLeft, g_keyScrollRight,
         nullptr, nullptr, RGB(255, 255, 255), RGB(255, 255, 255), RGB(0, 0, 0) };
 
@@ -4308,6 +4323,7 @@ void ShowSettingsDialog(HWND hwnd)
                 clearHotkeyTheme(kIdKeyOpen);
                 clearHotkeyTheme(kIdKeyExit);
                 clearHotkeyTheme(kIdKeyAlwaysOnTop);
+                clearHotkeyTheme(kIdKeyMinimize);
                 clearHotkeyTheme(kIdKeyReload);
                 clearHotkeyTheme(kIdKeyScrollUp);
                 clearHotkeyTheme(kIdKeyScrollDown);
@@ -4324,6 +4340,7 @@ void ShowSettingsDialog(HWND hwnd)
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyOpen), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyExit), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyAlwaysOnTop), themeName, nullptr);
+                SetWindowTheme(GetDlgItem(dlg, kIdKeyMinimize), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyReload), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyScrollUp), themeName, nullptr);
                 SetWindowTheme(GetDlgItem(dlg, kIdKeyScrollDown), themeName, nullptr);
@@ -4338,6 +4355,7 @@ void ShowSettingsDialog(HWND hwnd)
             subclassHotkey(GetDlgItem(dlg, kIdKeyOpen));
             subclassHotkey(GetDlgItem(dlg, kIdKeyExit));
             subclassHotkey(GetDlgItem(dlg, kIdKeyAlwaysOnTop));
+            subclassHotkey(GetDlgItem(dlg, kIdKeyMinimize));
             subclassHotkey(GetDlgItem(dlg, kIdKeyReload));
             subclassHotkey(GetDlgItem(dlg, kIdKeyScrollUp));
             subclassHotkey(GetDlgItem(dlg, kIdKeyScrollDown));
@@ -4431,6 +4449,7 @@ void ShowSettingsDialog(HWND hwnd)
             SendDlgItemMessage(dlg, kIdKeyOpen, HKM_SETHOTKEY, MAKEWORD(dialogState->keyOpen, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyExit, HKM_SETHOTKEY, MAKEWORD(dialogState->keyExit, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyAlwaysOnTop, HKM_SETHOTKEY, MAKEWORD(dialogState->keyAlwaysOnTop, 0), 0);
+            SendDlgItemMessage(dlg, kIdKeyMinimize, HKM_SETHOTKEY, MAKEWORD(dialogState->keyMinimize, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyReload, HKM_SETHOTKEY, MAKEWORD(dialogState->keyReload, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyScrollUp, HKM_SETHOTKEY, MAKEWORD(dialogState->keyScrollUp, 0), 0);
             SendDlgItemMessage(dlg, kIdKeyScrollDown, HKM_SETHOTKEY, MAKEWORD(dialogState->keyScrollDown, 0), 0);
@@ -4750,6 +4769,7 @@ void ShowSettingsDialog(HWND hwnd)
                 dialogState->keyOpen = readHotKey(kIdKeyOpen, dialogState->keyOpen);
                 dialogState->keyExit = readHotKey(kIdKeyExit, dialogState->keyExit);
                 dialogState->keyAlwaysOnTop = readHotKey(kIdKeyAlwaysOnTop, dialogState->keyAlwaysOnTop);
+                dialogState->keyMinimize = readHotKey(kIdKeyMinimize, dialogState->keyMinimize);
                 dialogState->keyReload = readHotKey(kIdKeyReload, dialogState->keyReload);
                 dialogState->keyScrollUp = readHotKey(kIdKeyScrollUp, dialogState->keyScrollUp);
                 dialogState->keyScrollDown = readHotKey(kIdKeyScrollDown, dialogState->keyScrollDown);
@@ -4803,6 +4823,7 @@ void ShowSettingsDialog(HWND hwnd)
         g_keyOpenFile = state.keyOpen;
         g_keyExit = state.keyExit;
         g_keyAlwaysOnTop = state.keyAlwaysOnTop;
+        g_keyMinimize = state.keyMinimize;
         g_keyReload = state.keyReload;
         g_keyScrollUp = state.keyScrollUp;
         g_keyScrollDown = state.keyScrollDown;
@@ -5329,6 +5350,7 @@ void LoadSettings()
     g_keyOpenFile = readKeySetting(L"OpenFile", 'O');
     g_keyExit = readKeySetting(L"Exit", VK_ESCAPE);
     g_keyAlwaysOnTop = readKeySetting(L"AlwaysOnTop", 'P');
+    g_keyMinimize = readKeySetting(L"Minimize", 'M');
     g_keyReload = readKeySetting(L"Reload", 'R');
     g_keyScrollUp = readKeySetting(L"ScrollUp", VK_UP);
     g_keyScrollDown = readKeySetting(L"ScrollDown", VK_DOWN);
@@ -5398,6 +5420,8 @@ void SaveSettings()
     WritePrivateProfileStringW(L"KeyConfig", L"Exit", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyAlwaysOnTop));
     WritePrivateProfileStringW(L"KeyConfig", L"AlwaysOnTop", buffer, g_iniPath.c_str());
+    _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyMinimize));
+    WritePrivateProfileStringW(L"KeyConfig", L"Minimize", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyReload));
     WritePrivateProfileStringW(L"KeyConfig", L"Reload", buffer, g_iniPath.c_str());
     _snwprintf_s(buffer, _TRUNCATE, L"%u", static_cast<unsigned int>(g_keyScrollUp));
@@ -5898,7 +5922,7 @@ int WINAPI wWinMain(
         0,
         CLASS_NAME,
         L"FloatVision",
-        WS_POPUP,
+        WS_POPUP | WS_SYSMENU | WS_MINIMIZEBOX,
         CW_USEDEFAULT, CW_USEDEFAULT,
         800, 600,
         nullptr,
