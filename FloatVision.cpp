@@ -432,6 +432,7 @@ void ScrollTextBy(float delta);
 void ApplyDocumentWindowSize(HWND hwnd);
 bool LoadHtmlFromFile(const wchar_t* path);
 bool LoadMarkdownFromFile(const wchar_t* path);
+bool RenderPlainTextToHtml(const std::wstring& text, std::wstring& html);
 std::wstring InjectHtmlBaseStyles(const std::wstring& html);
 bool ReadFileBytes(const wchar_t* path, std::string& bytes);
 bool ReadFileBytesRaw(const wchar_t* path, std::string& bytes);
@@ -2368,7 +2369,25 @@ bool SaveUtf8IniValue(const std::filesystem::path& path, const std::wstring& sec
 
 bool LoadTextFromFile(const wchar_t* path)
 {
-    return LoadMarkdownFromFile(path);
+    std::string bytes;
+    if (!ReadFileBytes(path, bytes))
+    {
+        return false;
+    }
+
+    std::wstring text;
+    if (!Utf8ToWide(bytes, text) && !AnsiToWide(bytes, text))
+    {
+        return false;
+    }
+
+    std::wstring html;
+    if (!RenderPlainTextToHtml(text, html))
+    {
+        return false;
+    }
+
+    return ApplyHtmlContent(std::move(html));
 }
 
 std::wstring TrimString(const std::wstring& value)
@@ -2969,6 +2988,95 @@ bool RenderMarkdownToHtml(const std::string& markdown, std::string& html)
     html += "</style></head><body><article class=\"markdown-body\">";
     html += body;
     html += "</article></body></html>";
+    return true;
+}
+
+bool RenderPlainTextToHtml(const std::wstring& text, std::wstring& html)
+{
+    auto toHex = [](COLORREF color)
+    {
+        std::wostringstream stream;
+        stream << L'#'
+               << std::hex << std::setw(2) << std::setfill(L'0') << std::nouppercase
+               << static_cast<int>(GetRValue(color))
+               << std::setw(2) << static_cast<int>(GetGValue(color))
+               << std::setw(2) << static_cast<int>(GetBValue(color));
+        return stream.str();
+    };
+
+    auto escapeHtml = [](const std::wstring& value)
+    {
+        std::wstring escaped;
+        escaped.reserve(value.size());
+        for (wchar_t ch : value)
+        {
+            switch (ch)
+            {
+            case L'&':
+                escaped += L"&amp;";
+                break;
+            case L'<':
+                escaped += L"&lt;";
+                break;
+            case L'>':
+                escaped += L"&gt;";
+                break;
+            case L'"':
+                escaped += L"&quot;";
+                break;
+            default:
+                escaped += ch;
+                break;
+            }
+        }
+        return escaped;
+    };
+
+    std::wstring fontName = g_textFontName.empty() ? L"Segoe UI" : g_textFontName;
+    std::wstring bodyBackground = toHex(g_textBackground);
+    std::wstring bodyColor = toHex(g_textColor);
+    const wchar_t* wrapValue = g_textWrap ? L"pre-wrap" : L"pre";
+
+    std::wostringstream style;
+    style << LR"(
+        :root {
+            color-scheme: light dark;
+        }
+        html {
+            scrollbar-gutter: stable;
+            overflow: auto;
+        }
+        body {
+            margin: 0;
+            padding: 24px;
+            font-family: ")"
+          << fontName
+          << LR"(", "Segoe UI", "Meiryo", sans-serif;
+            background: )"
+          << bodyBackground
+          << LR"(;
+            color: )"
+          << bodyColor
+          << LR"(;
+            overflow: visible;
+        }
+        .plain-text-body {
+            max-width: 960px;
+            margin: 0 auto;
+            white-space: )"
+          << wrapValue
+          << LR"(;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+            tab-size: 4;
+        }
+    )";
+
+    html = L"<!DOCTYPE html><html><head><meta charset=\"utf-8\"><style>";
+    html += style.str();
+    html += L"</style></head><body><div class=\"plain-text-body\">";
+    html += escapeHtml(text);
+    html += L"</div></body></html>";
     return true;
 }
 
