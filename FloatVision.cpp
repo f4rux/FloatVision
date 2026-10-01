@@ -411,6 +411,7 @@ void LoadWindowPlacement();
 
 void SaveWindowPlacement();
 POINT CalculateCenteredWindowPosition(HWND hwnd);
+POINT GetVisibleWindowPosition(HWND hwnd, POINT requestedPos);
 void ApplyWindowPositionModeAfterContentLoad(HWND hwnd);
 void UpdateLayeredStyle(bool enable);
 bool UpdateLayeredWindowFromWic(HWND hwnd, float drawWidth, float drawHeight);
@@ -540,7 +541,7 @@ void ShowAboutDialog(HWND hwnd)
     appendWord(tmpl, static_cast<WORD>(std::lround(10.0f * kDialogScale)));
     appendString(tmpl, L"Segoe UI");
 
-    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision v1.3.2");
+    addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(12), scale(250), scale(12), 0xFFFF, 0x0082, L"FloatVision v1.3.3");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(28), scale(250), scale(12), 0xFFFF, 0x0082, L"Author: f4rux");
     addControl(tmpl, WS_CHILD | WS_VISIBLE, scale(12), scale(44), scale(250), scale(12), 0xFFFF, 0x0082, L"https://github.com/f4rux/FloatVision");
     addControl(tmpl, WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, scale(12), scale(62), scale(98), scale(18), kIdAboutOpenLink, 0x0080, L"Open project page");
@@ -5600,6 +5601,46 @@ POINT CalculateCenteredWindowPosition(HWND hwnd)
     return POINT{ x, y };
 }
 
+POINT GetVisibleWindowPosition(HWND hwnd, POINT requestedPos)
+{
+    RECT windowRect{};
+    if (!hwnd || !GetWindowRect(hwnd, &windowRect))
+    {
+        return requestedPos;
+    }
+
+    int windowWidth = windowRect.right - windowRect.left;
+    int windowHeight = windowRect.bottom - windowRect.top;
+    RECT requestedRect{
+        requestedPos.x,
+        requestedPos.y,
+        requestedPos.x + windowWidth,
+        requestedPos.y + windowHeight
+    };
+    if (MonitorFromRect(&requestedRect, MONITOR_DEFAULTTONULL))
+    {
+        return requestedPos;
+    }
+
+    HMONITOR monitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO info{};
+    info.cbSize = sizeof(info);
+    if (monitor && GetMonitorInfo(monitor, &info))
+    {
+        int workWidth = info.rcWork.right - info.rcWork.left;
+        int workHeight = info.rcWork.bottom - info.rcWork.top;
+        return POINT{
+            info.rcWork.left + ((workWidth - windowWidth) / 2),
+            info.rcWork.top + ((workHeight - windowHeight) / 2)
+        };
+    }
+
+    return POINT{
+        (GetSystemMetrics(SM_CXSCREEN) - windowWidth) / 2,
+        (GetSystemMetrics(SM_CYSCREEN) - windowHeight) / 2
+    };
+}
+
 void ApplyWindowPositionModeAfterContentLoad(HWND hwnd)
 {
     if (!hwnd || g_windowPositionMode != WindowPositionMode::Center)
@@ -5666,14 +5707,16 @@ void SaveWindowPlacement()
         return;
     }
 
-    RECT rect{};
-    if (!GetWindowRect(g_hwnd, &rect))
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    if (!GetWindowPlacement(g_hwnd, &placement))
     {
         return;
     }
 
-    int saveX = static_cast<int>(rect.left);
-    int saveY = static_cast<int>(rect.top);
+    // rcNormalPosition retains the restored location while the window is minimized.
+    int saveX = placement.rcNormalPosition.left;
+    int saveY = placement.rcNormalPosition.top;
 
     wchar_t buffer[32]{};
     _snwprintf_s(buffer, _TRUNCATE, L"%d", saveX);
@@ -6104,6 +6147,11 @@ int WINAPI wWinMain(
 
     if (shouldApplyWindowPos)
     {
+        if (g_windowPositionMode == WindowPositionMode::Previous)
+        {
+            startupPos = GetVisibleWindowPosition(hwnd, startupPos);
+        }
+
         SetWindowPos(
             hwnd,
             nullptr,
